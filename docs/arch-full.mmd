@@ -1,0 +1,93 @@
+flowchart TB
+  classDef feishu fill:#E8F1FF,stroke:#3370FF,color:#1F2329
+  classDef guard fill:#FFF1E8,stroke:#F77234,color:#1F2329
+  classDef ctx fill:#F0FBEF,stroke:#34C724,color:#1F2329
+  classDef model fill:#F5EEFF,stroke:#7F3BF5,color:#1F2329
+  classDef store fill:#FFFBE6,stroke:#D4A017,color:#1F2329
+  classDef ops fill:#F2F3F5,stroke:#8F959E,color:#1F2329
+
+  subgraph L1["① 飞书接入层：消息怎么进来"]
+    direction LR
+    U["群成员 @机器人 / 私聊<br/>文字·图片·文件"]:::feishu --> LC["lark-cli 长连接<br/>收 im.message.receive_v1"]:::feishu
+  end
+
+  subgraph L2["② 门卫与路由层：该不该答、怎么答"]
+    direction LR
+    DEDUP["去重 · 只认 @我/私聊<br/>群白名单"]:::guard --> RL["限流 · 单实例锁<br/>并发≤2 + 排队"]:::guard --> RED1["入口策略<br/>客户名脱敏 · 可配红线（默认空）"]:::guard --> ROUTE{"路由"}:::guard
+    ROUTE -- 命令/简单题 --> FAST["捷径直答<br/>/help · 能力 · /记忆 /忘记"]:::guard
+  end
+
+  subgraph L3["③ 会话与进度层：记住是哪段对话、让人看到在干活"]
+    direction LR
+    SESS["会话键<br/>群=话题 root_id · 私聊=open_id"]:::ctx --> PROG["进度展示<br/>贴表情 → 流式卡片 → 定稿"]:::feishu
+  end
+
+  subgraph L4["④ 上下文拼装层：每题现拼一份「小抄」，按预算裁剪"]
+    direction LR
+    P1["人设+规则<br/>persona.md · policy 规则（有才写）"]:::ctx
+    P2["记忆包<br/>群档案·本人档案<br/>话题摘要·最近 N 轮<br/>命中的 3-5 条事实"]:::ctx
+    P3["技能目录<br/>每个 skill 一行"]:::ctx
+    P4["知识库目录<br/>_INDEX.md 每文件一行"]:::ctx
+    P5["工具说明<br/>只列已开权限的"]:::ctx
+    ASM["拼装器<br/>记忆≤1.5k字 · 目录≤1k字"]:::ctx
+    P1 --> ASM
+    P2 --> ASM
+    P3 --> ASM
+    P4 --> ASM
+    P5 --> ASM
+  end
+
+  subgraph L5["⑤ 模型运行层：思考与查资料"]
+    direction LR
+    ACP["cursor-agent 常驻进程<br/>配置里的模型 · ask 只读"]:::model --> STREAM["流式事件<br/>思考·工具·文字片段"]:::model
+    ACP -. 按需读全文 .-> SKD["skills/某技能/SKILL.md"]:::store
+    ACP -. 按需读原文 .-> KBF["kb/某文件.md"]:::store
+  end
+
+  subgraph L6["⑥ 工具与写操作层：动飞书前先确认"]
+    direction LR
+    TL["工具调用<br/>TOOL 行 → 以后 MCP"]:::model --> RD["只读：群历史·文档<br/>日程·多维表格"]:::feishu
+    TL --> WR["写提案：建文档<br/>加日程·加记录"]:::guard --> CF["三重白名单<br/>+ 6 位确认码"]:::guard --> AUD[("审计日志")]:::store
+  end
+
+  subgraph L7["⑦ 出口与记忆写入层：说出去之前再查一遍，说完再记"]
+    direction LR
+    RED2["出口检查<br/>脱敏·去路径密钥·可配红线"]:::guard --> OUT["卡片定稿/回复"]:::feishu
+    RED2 --> MW["记忆写入器（后台）<br/>抽取→去重/冲突→落盘"]:::ctx
+  end
+
+  subgraph ST["⑧ 存储：运行电脑上的纯文本文件"]
+    direction LR
+    MEMF[("memory/<br/>groups/群/GROUP.md+facts.jsonl<br/>users/人/USER.md+facts.jsonl<br/>topics/话题.md · daily/日期.md")]:::store
+    DB[("state.db<br/>最近对话原文")]:::store
+    KB[("kb/ + _INDEX.md")]:::store
+    SK[("skills/")]:::store
+  end
+
+  subgraph L9["⑨ 后台流水线：知识库同步 + 记忆整理"]
+    direction LR
+    SRC["资料目录 research / news<br/>飞书群文档"]:::ops --> INB["inbox → staging<br/>客户名脱敏 + 可配红线"]:::ops --> APL["人工审 → apply<br/>重建 _INDEX"]:::ops
+    NIGHT["每日整理<br/>过期·合并·重写档案"]:::ops
+  end
+
+  subgraph L10["⑩ 运维：一个机器人 = 一份配置"]
+    direction LR
+    CFG["agents/你的机器人.json<br/>群·白名单·资源·开关"]:::ops
+    PER["persona.md · redact.txt<br/>policy.redlines（默认空）· skills 选装"]:::ops
+    WD["计划任务+看门狗<br/>心跳·单实例"]:::ops
+    TST["离线测试·dry-run<br/>bot.log 分阶段耗时"]:::ops
+  end
+
+  L1 ==>|"新消息"| L2
+  L2 ==>|"需要思考"| L3
+  L2 -.->|"命令/简单题直接回"| L7
+  L3 ==>|"会话键"| L4
+  L4 ==>|"一份小抄 prompt"| L5
+  L5 ==>|"想调工具"| L6
+  L6 ==>|"工具结果回填"| L5
+  L5 ==>|"最终文字"| L7
+  L5 -.->|"进度事件"| L3
+  ST -.->|"档案/目录/最近对话"| L4
+  L7 -.->|"新记忆·对话落盘"| ST
+  L9 -.->|"新 kb·整理后的档案"| ST
+  L10 -.->|"配置驱动每一层"| L2

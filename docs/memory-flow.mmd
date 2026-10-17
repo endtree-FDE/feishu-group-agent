@@ -1,0 +1,23 @@
+flowchart LR
+  classDef a fill:#E8F1FF,stroke:#3370FF,color:#1F2329
+  classDef b fill:#F0FBEF,stroke:#34C724,color:#1F2329
+  classDef c fill:#FFF1E8,stroke:#F77234,color:#1F2329
+  classDef d fill:#FFFBE6,stroke:#D4A017,color:#1F2329
+
+  Q["一问一答结束"]:::a --> T{"触发方式"}:::c
+  T -- "用户说「记一下/记住」" --> EX1["立即抽取<br/>标记 explicit"]:::b
+  T -- "自动（后台）" --> EX2["规则先筛：含日期/决定/负责人/偏好？<br/>命中才调一次轻量抽取"]:::b
+  EX1 & EX2 --> SAN["隐私与策略清洗<br/>客户名→某客户 · 证件/手机号丢弃<br/>命中可配红线则不记（默认无）"]:::c
+  SAN --> CAND["候选事实<br/>{类型, 主体, 内容, 来源消息, 时间, 作用域}"]:::b
+  CAND --> DUP{"与已有事实比对<br/>同主体+同类型"}:::c
+  DUP -- 相同 --> TOUCH["只更新 last_seen"]:::d
+  DUP -- 冲突 --> SUP["旧条目标 superseded<br/>新条目生效（保留历史）"]:::d
+  DUP -- 新的 --> ADD["追加 active 条目"]:::d
+  TOUCH & SUP & ADD --> FACTS[("facts.jsonl<br/>群 / 个人 分开存")]:::d
+  FACTS --> COMP["每日整理（夜间）<br/>过期失效 · 合并 · 重写 GROUP.md / USER.md"]:::b
+  Q --> DAILY[("daily/日期.md<br/>当日要点流水")]:::d
+  DAILY --> COMP
+  COMP --> PROF[("GROUP.md · USER.md<br/>精简档案 ≤1.5k 字")]:::d
+  PROF --> INJ["下次提问：档案常驻注入<br/>+ 关键词命中的 3-5 条事实"]:::a
+  FACTS --> INJ
+  U["用户命令<br/>/记忆 · /忘记 N · /忘记全部"]:::a --> FACTS
