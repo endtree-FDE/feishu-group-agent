@@ -157,6 +157,7 @@
 |---|---|
 | `cursor` | 用这台电脑上的 Cursor。默认。 |
 | `openai_compat` | 用你自己的 OpenAI 兼容账号。密钥不写在这里。见 [docs/模型接口.md](../docs/模型接口.md)。 |
+| `deepseek`、`dashscope`、`zhipu`、`pangu` | 同上，并在 `base_url`、`model`、`api_key_env` 空着时填上该家的公开地址和变量名。已经写了的值优先。 |
 | `fake` | 只给离线测试用。正常不要写。 |
 
 ## 模型 agent
@@ -164,7 +165,8 @@
 | 键 | 填什么 |
 |---|---|
 | `mode` | `oneshot`（默认）：每题新开一个进程，和以前一样。旧配置里的 `ask`、`plan` 也还是每题一个进程，并把这个值传给 `--mode`。只有写成 `acp` 才改成常驻进程，见 [docs/常驻模式.md](../docs/常驻模式.md)。常驻只在 `model_provider` 为 `cursor` 时有用。常驻时程序固定加 `--mode ask`，模型不能改电脑上的文件。 |
-| `model` | 模型名字。Cursor 默认 `grok-4.7-high-fast`。不写这一项时，Cursor 也用这个默认值。一次性模式下，如果这个模型暂时不能用，程序会自动去掉模型名字再试一次。`openai_compat` 时写成那一家控制台里的名字，必填。 |
+| `preset` | 可选。`model_provider` 为 `openai_compat` 时写成 `deepseek`、`dashscope`、`zhipu` 或 `pangu`，用来补空着的地址和变量名。不写则不补。`cursor` 下忽略这一项。 |
+| `model` | 模型名字。Cursor 默认 `grok-4.7-high-fast`。不写这一项时，Cursor 也用这个默认值。一次性模式下，如果这个模型暂时不能用，程序会自动去掉模型名字再试一次。`openai_compat` 或预设下，空着才用预设里的名字；写了就用写的。 |
 | `base_url` | 只给 `openai_compat` 用。OpenAI 兼容地址，不要带密钥。例子见 [docs/模型接口.md](../docs/模型接口.md)。 |
 | `api_key_env` | 只给 `openai_compat` 用。环境变量的**名字**，例如 `DEEPSEEK_API_KEY`。不要把密钥写在这里。 |
 | `network_retries` | 失败后再试几次。默认 `2`。Cursor 的常驻模式不用这项。`openai_compat` 只在网络中断或 408/429/5xx 时重试，401 不重试。 |

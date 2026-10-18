@@ -25,6 +25,10 @@ jobs:
         env:
           PYTHONUTF8: "1"
         run: python checks/lint.py
+      - name: Unit checks
+        env:
+          PYTHONUTF8: "1"
+        run: python checks/test_batch.py
       - name: Tests
         env:
           PYTHONUTF8: "1"
