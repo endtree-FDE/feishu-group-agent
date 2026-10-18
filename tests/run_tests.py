@@ -1790,6 +1790,33 @@ o = _bot_py(_catch_src, {"EMPTY": _empty, "AGENTBOT_FAKE_LARK": _late_fp, "AGENT
 check("停机补答：只补窗口内 @ 了机器人且没答过的消息，并去重",
       o.count("[dry-run] reply late_ok") == 1 and "（延迟回复）" in o and "停机期间的问题" in o
       and "reply late_skip" not in o and "reply late_old" not in o, o)
+_stage_file("late_file", "note.txt", data="补答附件正文戊".encode("utf-8"))
+_late_file = dict(_saved_fake)
+_late_msg = {"message_id": "late_file", "msg_type": "file", "create_time": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+             "content": json.dumps({"file_key": "file_latekey1", "file_name": "补答.txt"}, ensure_ascii=False),
+             "sender": {"id": "user_sender", "sender_type": "user"}, "mentions": M, "reply_to": "late_src"}
+_late_file["im +chat-messages-list"] = {"ok": True, "data": {"messages": [_late_msg]}}
+_late_file["im +messages-mget"] = {"ok": True, "data": {"messages": [{
+    "message_id": "late_file", "chat_id": CH, "msg_type": "file",
+    "content": json.dumps({"file_key": "file_latekey1", "file_name": "补答.txt"}, ensure_ascii=False)}]}}
+_late_file_fp = os.path.join(T, "late_file_fake.json"); json.dump(_late_file, open(_late_file_fp, "w", encoding="utf-8"), ensure_ascii=False)
+_catch_file_src = r'''
+import json, os, sys
+sys.argv = ["agentbot.py", os.environ["CFG"], "--dry-run", os.environ["EMPTY"]]
+os.environ["AGENTBOT_CATCHUP"] = "1"
+import agentbot
+msg = json.loads(os.environ["MSG"])
+print("LISTED", json.dumps(agentbot.event_from_listed(os.environ["CHAT"], msg), ensure_ascii=False))
+agentbot.catch_up_mentions()
+'''
+o = _bot_py(_catch_file_src, {"EMPTY": _empty, "AGENTBOT_FAKE_LARK": _late_file_fp, "AGENTBOT_CATCHUP": "1",
+                              "AGENTBOT_FAKE_DUMP_PROMPT": "1", "CHAT": CH, "MSG": json.dumps(_late_msg, ensure_ascii=False)})
+_listed = json.loads(o.split("LISTED ", 1)[1].splitlines()[0]) if "LISTED " in o else {}
+_ps = prompts(o)
+check("停机补答文件：提问里不出现 file_key，仍下载正文，并保留引用",
+      _listed.get("content") == "补答.txt" and _listed.get("reply_to") == "late_src" and _listed.get("message_type") == "file"
+      and "file_latekey1" not in o and _ps and "补答附件正文戊" in "\n".join(_ps)
+      and "[dry-run] reply late_file" in o, o[-1500:])
 _pw = ev("pw1", '<<FAKE_TOOL>>{"tool":"docs_create","args":{"title":"续写","markdown":"正文"}}<<END>> 建文档', sender_id="user_admin")
 o = run([_pw], name="pw_prop")
 _pw_code = (_re.search(r"确认 (\d{6})", o) or [None, None])[1]

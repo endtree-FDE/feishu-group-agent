@@ -1168,26 +1168,40 @@ def _catchup_settings():
         except (TypeError, ValueError): return default
     return {"enabled": bool(c.get("enabled", True)), "overlap_sec": max(0, num("overlap_sec", 300)), "max_messages": max(1, num("max_messages", 20))}
 
+_LISTED_FILE = {"file", "image", "media", "audio", "post", "sticker"}
+def _listed_content(m):
+    """补答时不要把 file_key 的 JSON 当成提问。有 text 用 text；文件类只用文件名。"""
+    mtype = str(m.get("message_type") or m.get("msg_type") or "text").lower()
+    content = m.get("content") if m.get("content") is not None else ""
+    parsed = content if isinstance(content, dict) else None
+    if isinstance(content, str) and content[:1] in "{[":
+        try:
+            got = json.loads(content)
+        except Exception:
+            got = None
+        if isinstance(got, dict): parsed = got
+    if isinstance(parsed, dict):
+        text = parsed.get("text")
+        if isinstance(text, str): return text
+        if mtype in _LISTED_FILE:
+            name = parsed.get("file_name") if isinstance(parsed.get("file_name"), str) else ""
+            if not name and isinstance(parsed.get("filename"), str): name = parsed["filename"]
+            return name
+        return json.dumps(parsed, ensure_ascii=False)
+    if isinstance(content, str): return content
+    return "" if content is None else str(content)
 def event_from_listed(chat_id, m):
     """把 chat-messages-list 的一条收成 handle 能吃的事件。没有消息编号的跳过。"""
     if not isinstance(m, dict): return None
     mid = m.get("message_id") or m.get("id")
     if not mid: return None
     sender = m.get("sender") if isinstance(m.get("sender"), dict) else {}
-    content = m.get("content") if m.get("content") is not None else ""
-    if isinstance(content, dict):
-        content = content.get("text") or json.dumps(content, ensure_ascii=False)
-    elif isinstance(content, str) and content[:1] == "{":
-        try:
-            parsed = json.loads(content)
-            if isinstance(parsed, dict) and isinstance(parsed.get("text"), str): content = parsed["text"]
-        except Exception: pass
-    if not isinstance(content, str): content = str(content)
     return {"message_id": str(mid), "chat_id": m.get("chat_id") or chat_id, "chat_type": m.get("chat_type") or "group",
             "message_type": m.get("message_type") or m.get("msg_type") or "text",
             "sender_id": m.get("sender_id") or sender.get("id") or sender.get("open_id") or "?",
             "sender_type": m.get("sender_type") or sender.get("sender_type") or "user",
-            "content": content, "mentions": m.get("mentions") or [],
+            "content": _listed_content(m), "mentions": m.get("mentions") or [],
+            "reply_to": m.get("reply_to") or m.get("upper_message_id") or "",
             "root_id": m.get("root_id") or "", "parent_id": m.get("parent_id") or "", "thread_id": m.get("thread_id") or ""}
 
 def catch_up_mentions():
