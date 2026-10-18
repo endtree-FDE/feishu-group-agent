@@ -1485,6 +1485,8 @@ _parsed = _tools.parse_cli_json("", _stderr_only)
 check("stderr 里的错误 JSON 能解析出来", isinstance(_parsed, dict) and _parsed.get("ok") is False and _tools._err_code(_parsed) == 3380002, str(_parsed))
 check("3380002 说成文档不存在或不是云文档", "不是云文档" in _tools.explain_lark_error("docs_read", _parsed, "小助手"))
 check("权限不足仍是单独的提示", "没有访问这份资源的权限" in _tools.explain_lark_error("docs_read", {"ok": False, "error": {"code": 91403, "message": "forbidden"}}, "小助手"))
+check("限流说成稍后再试，不说成接口调用失败",
+      _tools.explain_lark_error("history", {"ok": False, "error": {"code": 99991400, "message": "frequency limit"}}) == "飞书限流了，请稍后再试")
 _err_cli = os.path.join(T, "err_cli.py")
 open(_err_cli, "w", encoding="utf-8").write(
     "import sys\nsys.stderr.write(%r)\nsys.exit(1)\n" % (_stderr_only + "\n"))

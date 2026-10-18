@@ -894,6 +894,8 @@ def explain_lark_error(tool, j, bot_name="机器人"):
         return "没有找到这份资源（不存在或已被删除）"
     if code in _PERM_CODES or "permission" in low or "forbidden" in low or "no access" in low or "无权限" in msg or "没有权限" in msg:
         return "机器人没有访问这份资源的权限（需要把它分享给应用「%s」）" % (bot_name or "机器人")
+    if code == 99991400 or re.search(r"rate limit|too many requests|frequency limit", low):
+        return "飞书限流了，请稍后再试"
     short = re.sub(r"\s+", " ", msg).strip()
     if short and short.lower() not in ("null", "none"):
         return "飞书接口调用失败：" + short[:120]

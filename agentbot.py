@@ -451,9 +451,24 @@ def _event_id(obj):
     if isinstance(h, dict) and h.get("event_id"): return str(h["event_id"])
     if obj.get("event_id"): return str(obj["event_id"])
     return ""
+_RECALL_TYPES = {"im.message.recalled_v1", "im.message.message_recalled_v1"}
+def _is_recall(obj):
+    if not isinstance(obj, dict): return False
+    if _member_type(obj) in _RECALL_TYPES: return True
+    inner = obj.get("event")
+    return isinstance(inner, dict) and _member_type(inner) in _RECALL_TYPES
+# 这些类型没有可交给模型的正文。直接说明，避免把 file_key、open_id 或别的群号送进提示词。
+_QUIET_TYPES = {
+    "audio": "这是一条语音，目前不能听里面的内容。请用文字说明要点。",
+    "sticker": "这是一个表情，没有可读取的文字。",
+    "share_chat": "这是一条群名片。我不会打开别的群，也不会主动发消息。",
+    "share_user": "这是一张联系人名片。我不会展开这个人的资料。",
+}
 def ingest(obj):
-    """一条 stdout JSON。消息事件交给 handle；进群/出群只记群，不回复。"""
+    """一条 stdout JSON。消息事件交给 handle；进群/出群只记群，不回复。撤回不回复。"""
     if not isinstance(obj, dict): return
+    if _is_recall(obj):
+        log.info("recall ignored"); return
     et = _member_type(obj)
     if et not in (_MEMBER_ADDED, _MEMBER_DELETED):
         inner = obj.get("event") if isinstance(obj.get("event"), dict) else None
@@ -996,7 +1011,14 @@ def handle(ev):
     how = claim_message(mid, ev, replay=bool(ev.get("_replay")))
     if how == "skip": return
     if ev.get("_late") or how == "replay": LATE.note = "（延迟回复）"
-    try: _handle_claimed(ev, mid, ctype, uid)
+    try:
+        mtype = str(ev.get("message_type") or "text").lower()
+        if mtype == "system":
+            log.info("skip system message %s", mid); return
+        note = _QUIET_TYPES.get(mtype)
+        if note:
+            reply(mid, note); return
+        _handle_claimed(ev, mid, ctype, uid)
     finally:
         mark_answered(mid); LATE.note = ""
 
