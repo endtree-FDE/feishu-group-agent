@@ -287,10 +287,10 @@ write_skill("long-alpha", "甲" * 80 + "MARKER_ALPHA_END", "# 长技能甲\n\n�
 write_skill("long-beta", "乙" * 80 + "MARKER_BETA_END", "# 长技能乙\n\n步骤。\n", directory="skills_long")
 _budget = len(_sk.CATALOG_HEADER) + 1 + 30 + 1 + len(_sk.TRUNC_NOTE)
 o = run([ev("sk5", "看目录")], name="sk_budget", cfg_path=skcfg("sk_budget", budget=_budget, directory="skills_long"))
-ps = prompts(o); block = _sk.SkillSet({"skills": {"enabled": True, "dir": "skills_long", "index_budget_chars": _budget}, "redact_file": "redact.txt"}, T).prompt_block()
+ps = prompts(o); skblock = _sk.SkillSet({"skills": {"enabled": True, "dir": "skills_long", "index_budget_chars": _budget}, "redact_file": "redact.txt"}, T).prompt_block()
 check("预算截断：目录不超过预算，排不下的技能不出现",
-      ps and block and len(block) <= _budget and block in ps[0] and _sk.TRUNC_NOTE in block
-      and "long-alpha" in block and "MARKER_ALPHA_END" not in block and "MARKER_BETA_END" not in block and "long-beta" not in ps[0], block + "\n" + (ps[0] if ps else o))
+      ps and skblock and len(skblock) <= _budget and skblock in ps[0] and _sk.TRUNC_NOTE in skblock
+      and "long-alpha" in skblock and "MARKER_ALPHA_END" not in skblock and "MARKER_BETA_END" not in skblock and "long-beta" not in ps[0], skblock + "\n" + (ps[0] if ps else o))
 write_skill("redact-demo", "测试脱敏。用户提到这份演练技能时使用。", "# 脱敏演练\n\n这里提到杭州某某科技有限公司，电话 13812345678。\n正文标记SKILLBODY。\n")
 o = run([ev("sk6", '<<FAKE_TOOL>>{"tool":"skill_read","name":"redact-demo"}<<END>> 按技能说')], name="sk_read", cfg_path=ON)
 ps = prompts(o)
@@ -329,5 +329,175 @@ check("仓库示例技能格式合法：查进度表、整理会议纪要",
       and "base_read" in _rb and "表里没有" in _rb and "name: progress-table" not in _rb
       and "未提及" in _mb and "不写入" in _mb and "name: meeting-minutes" not in _mb, _repo.status() + _rb[:200] + _mb[:200])
 os.environ.pop("AGENTBOT_FAKE_DUMP_PROMPT", None)
+
+# ---------- 常驻 ACP（假服务端；默认 oneshot 不走这条路径）----------
+import acp_client as _acp
+_snap = "规则\n\n以下是本群的长期档案（说明）：\nSNAP_OLD\n\n提问：后来"
+_kept = _acp.apply_snapshot(_snap.replace("SNAP_OLD", "SNAP_NEW"), "以下是本群的长期档案（说明）：\nSNAP_OLD")
+_wiped = _acp.apply_snapshot("规则\n\n以下是本群的长期档案：\nNEW\n\n提问：x", "")
+check("档案快照：换回会话开始时的正文，开始时没有档案就不再插入",
+      "SNAP_OLD" in _kept and "SNAP_NEW" not in _kept and "提问：后来" in _kept and "长期档案" not in _wiped and _wiped.endswith("提问：x"), _kept + "\n" + _wiped)
+FAKE_ACP = os.path.join(FW, "tests", "fake_acp_agent.py")
+def acfg(name, progress=False, memory_on=False, **agent):
+    c = json.loads(json.dumps(cfg))
+    c["agent"].update({"mode": "acp", "stall_sec": 30, "max_runtime_sec": 60, "network_retries": 0, "acp_max_sessions": 8, "acp_idle_sec": 1800})
+    c["agent"].update(agent)
+    if memory_on:
+        c.setdefault("memory", {})["enabled"] = True
+    if progress:
+        c["progress"] = {"enabled": True, "mode": "card", "card_interval_sec": 1, "reaction": "OnIt", "done_reaction": "DONE", "status_message": True,
+                         "fast_interval_sec": 1, "fast_phase_sec": 120, "slow_interval_sec": 60, "min_gap_sec": 0, "max_edits": 17, "thinking_panel": True, "thinking_chars": 1200}
+    pth = os.path.join(T, name + ".json"); json.dump(c, open(pth, "w", encoding="utf-8"), ensure_ascii=False); return pth
+def load_trace(path):
+    if not os.path.exists(path): return []
+    return [json.loads(l) for l in open(path, encoding="utf-8") if l.strip()]
+def run_acp(events, name, cfg_path, extra_env=None, args=()):
+    trace = os.path.join(T, name + ".trace")
+    if os.path.exists(trace): os.remove(trace)
+    p = os.path.join(T, name + ".jsonl")
+    open(p, "w", encoding="utf-8").write("\n".join(json.dumps({"event": e}, ensure_ascii=False) for e in events) + "\n")
+    env = dict(os.environ, AGENTBOT_FAKE_LARK=FP, AGENTBOT_ACP_TRACE=trace, AGENTBOT_AGENT_CMD=json.dumps([sys.executable, FAKE_ACP]))
+    env.pop("AGENTBOT_FAKE_AGENT", None); env.pop("AGENTBOT_FAKE_DUMP_PROMPT", None)
+    if extra_env: env.update(extra_env)
+    r = subprocess.run([sys.executable, os.path.join(FW, "agentbot.py"), cfg_path, "--dry-run", p, *args], capture_output=True, text=True, encoding="utf-8", env=env, timeout=90)
+    return (r.stdout or "") + (r.stderr or ""), load_trace(trace), r.returncode
+def prompts_of(tr):
+    return [e for e in tr if e.get("event") == "prompt"]
+def new_ids(tr):
+    ids = []
+    for e in tr:
+        if e.get("event") == "rpc" and e.get("method") == "session/new":
+            pass
+        if e.get("event") == "prompt":
+            ids.append(e.get("sessionId"))
+    # sessionId 在 prompt 上；新建次数看 rpc
+    return ids, [e for e in tr if e.get("method") == "session/new"]
+ACP_CFG = acfg("acp_base")
+o, tr, rc = run_acp([ev("ac1", "<<ACP_PROGRESS>> 看进度")], "acp_ok", acfg("acp_prog", progress=True))
+check("常驻：正常问答走 ACP，思考和读文件进进度卡片",
+      rc == 0 and "常驻答案" in block(o, "ac1") and "acp fallback" not in o and "acp ready" in o
+      and any("正在读《周报》" in l for l in o.splitlines()) and any("整理答案结构" in l for l in o.splitlines()), o)
+argv0 = next((e.get("argv") or [] for e in tr if e.get("event") == "argv"), [])
+check("常驻启动参数：--mode ask、--model、子命令 acp",
+      argv0[argv0.index("--mode") + 1] == "ask" and "acp" in argv0 and "--model" in argv0 and "grok-4.7-high-fast" in argv0, str(argv0))
+check("常驻握手：initialize、authenticate、session/set_mode=ask、set_config_option",
+      any(e.get("method") == "initialize" for e in tr) and any(e.get("method") == "authenticate" for e in tr)
+      and any(e.get("method") == "session/set_mode" and (e.get("params") or {}).get("modeId") == "ask" for e in tr)
+      and any(e.get("method") == "session/set_config_option" and (e.get("params") or {}).get("configId") == "model" for e in tr), str(tr)[:1500])
+o, tr, rc = run_acp([ev("ac2", "第一题"), ev("ac3", "第二题", root_id="ac2"), ev("ac4", "另一题")], "acp_reuse", ACP_CFG)
+ids, news = new_ids(tr)
+check("同话题复用会话，不同话题分开",
+      rc == 0 and len(news) == 2 and len(ids) == 3 and ids[0] == ids[1] and ids[0] != ids[2]
+      and o.count("acp session reuse") >= 1 and o.count("acp session new") >= 2, o + str(ids))
+o, tr, rc = run_acp([ev("ac5", "<<ACP_PERM>> 写一下"), ev("ac6", "<<ACP_PERM_BARE>> 再写")], "acp_perm", ACP_CFG)
+perms = [e.get("outcome") or {} for e in tr if e.get("event") == "permission_result"]
+check("权限请求一律拒绝：有拒绝项就选 reject-once，没有就 cancelled",
+      "已拒绝权限请求" in block(o, "ac5") and "已拒绝权限请求" in block(o, "ac6") and "权限被允许" not in o
+      and any(p.get("optionId") == "reject-once" for p in perms) and any(p.get("outcome") == "cancelled" for p in perms), o + str(perms))
+o, tr, rc = run_acp([ev("ac7", "<<ACP_STALL>> 卡住")], "acp_stall", acfg("acp_stall", stall_sec=2, max_runtime_sec=30))
+check("卡住后这一题回退到 -p，不把半截常驻输出当答案",
+      "acp fallback: stall" in o and "一次性回退答案" in block(o, "ac7") and "卡住前的片段" not in block(o, "ac7")
+      and any(e.get("event") == "argv" and "-p" in (e.get("argv") or []) for e in tr), o)
+o, tr, rc = run_acp([ev("ac8", "<<ACP_SLOW>> 一直有输出")], "acp_cap", acfg("acp_cap", stall_sec=30, max_runtime_sec=3))
+check("常驻总时长超过 max_runtime_sec 也回退到 -p", "acp fallback: max_runtime" in o and "一次性回退答案" in block(o, "ac8"), o)
+o, tr, rc = run_acp([ev("ac9", "<<ACP_CRASH>> 崩了"), ev("ac10", "崩完再问")], "acp_crash", ACP_CFG)
+n_init = sum(1 for e in tr if e.get("method") == "initialize")
+check("进程崩溃：这一题回退到 -p，后台重启后下一题仍走常驻",
+      "acp fallback:" in o and "process exited" in o and "一次性回退答案" in block(o, "ac9")
+      and "常驻答案" in block(o, "ac10") and "acp fallback" not in o.split("Q ac10", 1)[-1]
+      and n_init >= 2 and "acp restart" in o, o + " inits=%d" % n_init)
+o, tr, rc = run_acp([ev("ac11", "<<ACP_PROTO>> 协议错")], "acp_proto", ACP_CFG)
+check("协议出错：这一题回退到 -p", "acp fallback:" in o and "simulated protocol error" in o and "一次性回退答案" in block(o, "ac11"), o)
+o, tr, rc = run_acp([ev("ac12", "<<ACP_TOOL>> 最近聊了什么")], "acp_tool", ACP_CFG)
+check("常驻模式下工具回合仍可用",
+      "acp fallback" not in o and "tool call history" in o and "[fake-lark] im +chat-messages-list" in o
+      and "根据工具结果：周五交报名" in block(o, "ac12") and "<<TOOL>>" not in block(o, "ac12")
+      and len(new_ids(tr)[1]) == 1 and o.count("acp session reuse") >= 1, o)
+write_skill("progress-table", "查团队进度表。", "# 查进度表\n\n正文标记BODY_PROGRESS。\n", directory="skills_acp")
+_skc = json.load(open(acfg("acp_skill"), encoding="utf-8"))
+_skc["skills"] = {"enabled": True, "dir": "skills_acp", "index_budget_chars": 800}
+json.dump(_skc, open(os.path.join(T, "acp_skill.json"), "w", encoding="utf-8"), ensure_ascii=False)
+o, tr, rc = run_acp([ev("ac13", "<<ACP_SKILL>> 按技能说")], "acp_skill", os.path.join(T, "acp_skill.json"))
+check("常驻模式下 skill_read 仍可用",
+      "acp fallback" not in o and "tool call skill_read" in o and "按技能回答：BODY_PROGRESS" in block(o, "ac13")
+      and "name: progress-table" not in block(o, "ac13") and len(new_ids(tr)[1]) == 1, o)
+put_profile(CH, "# 群档案\n标记SNAP_OLD\n")
+snap_src = r'''
+import os, sys, time, runpy, json
+os.environ["AGENTBOT_FAKE_LARK"] = %r
+os.environ["AGENTBOT_ACP_TRACE"] = %r
+os.environ["AGENTBOT_AGENT_CMD"] = json.dumps([%r, %r])
+os.environ.pop("AGENTBOT_FAKE_AGENT", None)
+sys.path.insert(0, %r)
+sys.argv = ["agentbot.py", %r, "--dry-run"]
+g = runpy.run_path(%r, run_name="lib")
+base = {"chat_id": %r, "chat_type": "group", "message_type": "text", "sender_id": "user_sender", "sender_type": "user", "mentions": %s}
+g["handle"](dict(base, message_id="ac14", content="@%s 先问档案"))
+open(%r, "w", encoding="utf-8").write("# 群档案\n标记SNAP_NEW\n")
+g["handle"](dict(base, message_id="ac15", root_id="ac14", content="@%s 再问档案"))
+''' % (FP, os.path.join(T, "acp_snap.trace"), sys.executable, FAKE_ACP, FW, acfg("acp_snap", memory_on=True), os.path.join(FW, "agentbot.py"), CH, json.dumps(M), BN, os.path.join(T, "memory", "groups", CH, "GROUP.md"), BN)
+if os.path.exists(os.path.join(T, "acp_snap.trace")): os.remove(os.path.join(T, "acp_snap.trace"))
+env = dict(os.environ); env.pop("AGENTBOT_FAKE_AGENT", None); env.pop("AGENTBOT_FAKE_DUMP_PROMPT", None)
+pr = subprocess.run([sys.executable, "-c", snap_src], cwd=FW, capture_output=True, text=True, encoding="utf-8", env=env, timeout=60)
+o = (pr.stdout or "") + (pr.stderr or ""); tr = load_trace(os.path.join(T, "acp_snap.trace")); ps = prompts_of(tr)
+check("会话开始时冻结群档案，中途改档案不进同一会话",
+      len(ps) == 2 and "SNAP_OLD" in ps[0]["text"] and "SNAP_NEW" not in ps[0]["text"]
+      and "SNAP_OLD" in ps[1]["text"] and "SNAP_NEW" not in ps[1]["text"] and "acp snapshot kept" in o, o + str([p["text"][-200:] for p in ps]))
+idle_trace = os.path.join(T, "acp_idle.trace")
+idle_src = '''
+import os, sys, time, runpy, json
+os.environ["AGENTBOT_FAKE_LARK"] = %r
+os.environ["AGENTBOT_ACP_TRACE"] = %r
+os.environ["AGENTBOT_AGENT_CMD"] = json.dumps([%r, %r])
+os.environ.pop("AGENTBOT_FAKE_AGENT", None)
+sys.argv = ["agentbot.py", %r, "--dry-run"]
+g = runpy.run_path(%r, run_name="lib")
+base = {"chat_id": %r, "chat_type": "group", "message_type": "text", "sender_id": "user_sender", "sender_type": "user", "mentions": %s}
+g["handle"](dict(base, message_id="idle0", content="@%s 第一句"))
+time.sleep(1.6)
+g["handle"](dict(base, message_id="idle1", root_id="idle0", content="@%s 第二句"))
+''' % (FP, idle_trace, sys.executable, FAKE_ACP, acfg("acp_idle", acp_idle_sec=1), os.path.join(FW, "agentbot.py"), CH, json.dumps(M), BN, BN)
+if os.path.exists(idle_trace): os.remove(idle_trace)
+pr = subprocess.run([sys.executable, "-c", idle_src], cwd=FW, capture_output=True, text=True, encoding="utf-8", env=env, timeout=60)
+o = (pr.stdout or "") + (pr.stderr or ""); ids, news = new_ids(load_trace(idle_trace))
+check("空闲超过 acp_idle_sec：同一话题重新开会话",
+      len(news) == 2 and len(ids) == 2 and ids[0] != ids[1] and "acp session drop idle" in o, o + str(ids))
+o, tr, rc = run_acp([ev("cap0", "甲"), ev("cap1", "乙"), ev("cap2", "甲再问", root_id="cap0")], "acp_capn", acfg("acp_capn", acp_max_sessions=1))
+ids, news = new_ids(tr)
+check("会话数超过 acp_max_sessions：挤掉最久没用的，旧话题下次是新会话",
+      len(news) == 3 and len(ids) == 3 and len(set(ids)) == 3 and "acp session evict" in o, o + str(ids))
+o, tr, rc = run_acp([ev("nw0", "先聊"), ev("nw1", "/new", root_id="nw0"), ev("nw2", "清空后再问", root_id="nw0")], "acp_new", ACP_CFG)
+ids, news = new_ids(tr)
+check("新话题丢掉常驻会话，下一问重新建",
+      "已清空" in o and "acp session drop" in o and len(news) == 2 and len(ids) == 2 and ids[0] != ids[1], o + str(ids))
+o, tr, rc = run_acp([ev("os1", "不应走常驻")], "oneshot", acfg("oneshot_mode", mode="oneshot"))
+check("mode=oneshot：命令行是 -p --mode ask，没有 acp 子命令",
+      "acp ready" not in o and "acp session" not in o and "一次性回退答案" in block(o, "os1")
+      and any(e.get("event") == "argv" and "-p" in e.get("argv", []) and "acp" not in e.get("argv", []) and e["argv"][e["argv"].index("--mode") + 1] == "ask" for e in tr)
+      and not any(e.get("method") == "initialize" for e in tr), o + str([e for e in tr if e.get("event") == "argv"]))
+o, tr, rc = run_acp([ev("ask1", "旧配置")], "legacy_ask", acfg("legacy_ask", mode="ask"))
+check("旧的 mode=ask 行为不变：仍是一次性 --mode ask",
+      "一次性回退答案" in block(o, "ask1") and "acp ready" not in o
+      and any(e.get("event") == "argv" and e["argv"][e["argv"].index("--mode") + 1] == "ask" and "-p" in e["argv"] and "acp" not in e["argv"] for e in tr), o)
+o, tr, rc = run_acp([ev("plan1", "计划")], "legacy_plan", acfg("legacy_plan", mode="plan"))
+check("旧的 mode=plan 仍把 --mode plan 传给一次性进程",
+      any(e.get("event") == "argv" and e["argv"][e["argv"].index("--mode") + 1] == "plan" and "-p" in e["argv"] for e in tr) and "acp ready" not in o, str(tr)[:800])
+_cr = subprocess.run([sys.executable, os.path.join(FW, "agentbot.py"), ACP_CFG, "--check"], capture_output=True, text=True, encoding="utf-8",
+                     env=dict(os.environ, AGENTBOT_AGENT_CMD=json.dumps([sys.executable, FAKE_ACP]), AGENTBOT_ACP_TRACE=os.path.join(T, "acp_check.trace")), timeout=60)
+_co = (_cr.stdout or "") + (_cr.stderr or "")
+check("--check 在 mode=acp 时做 initialize 握手", "OK   acp" in _co and "protocolVersion=1" in _co and "FAIL acp" not in _co, _co)
+_bad = dict(os.environ, AGENTBOT_AGENT_CMD=json.dumps([sys.executable, FAKE_ACP]), AGENTBOT_ACP_FAIL_INIT="1")
+_bad.pop("AGENTBOT_FAKE_AGENT", None)
+_cr = subprocess.run([sys.executable, os.path.join(FW, "agentbot.py"), ACP_CFG, "--check"], capture_output=True, text=True, encoding="utf-8", env=_bad, timeout=60)
+_co = (_cr.stdout or "") + (_cr.stderr or "")
+check("--check 握手失败时报告原因并且退出码非 0", _cr.returncode != 0 and "FAIL acp" in _co and "process exited" in _co, _co)
+_cr = subprocess.run([sys.executable, os.path.join(FW, "agentbot.py"), acfg("check_oneshot", mode="oneshot"), "--check"], capture_output=True, text=True, encoding="utf-8", timeout=60)
+_co = (_cr.stdout or "") + (_cr.stderr or "")
+check("mode=oneshot 的 --check 不启动 ACP", "FAIL acp" not in _co and "OK   acp" not in _co and "acp spawn" not in _co, _co)
+o, tr, rc = run_acp([ev("par%d" % i, "并行%d" % i) for i in range(2)], "acp_par", ACP_CFG, args=("--parallel",))
+ids, news = new_ids(tr)
+check("常驻进程上两题并行仍各有会话，并发上限沿用原来的设置",
+      rc == 0 and "常驻答案" in block(o, "par0") and "常驻答案" in block(o, "par1") and len(news) == 2 and "Traceback" not in o, o + str(ids))
+
 print("\n%d/%d passed" % (sum(r for _, r in results), len(results))); shutil.rmtree(T, ignore_errors=True)
 sys.exit(0 if all(r for _, r in results) else 1)

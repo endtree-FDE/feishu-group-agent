@@ -21,6 +21,7 @@
 - 同一个应用只跑一个进程；看门狗发现卡住会在本机重启，不往群里说话。
 - 知识库可以定时收进来，先放待审区，你点头才换上。
 - 技能（默认关着）：提示词里只放一行目录。模型要用时再读那份步骤。见 [docs/技能.md](docs/技能.md)。
+- 常驻模式（默认关着）：`agent.mode` 写成 `acp` 后，Cursor 只启动一次。不改的话仍是每题一个进程。见 [docs/常驻模式.md](docs/常驻模式.md)。
 
 ## 在自己电脑上先检查
 
@@ -30,7 +31,7 @@
 python tests/run_tests.py
 ```
 
-一共 76 项，全部通过就可以。看 PDF 附件时才需要另外安装 `pypdf`。
+一共 99 项，全部通过就可以。看 PDF 附件时才需要另外安装 `pypdf`。
 
 从零开始：看 [docs/新建智能体.md](docs/新建智能体.md)。
 
@@ -43,6 +44,7 @@ python tests/run_tests.py
 | 文件 | 作用 |
 |---|---|
 | `agentbot.py` | 主程序：收消息、决定回不回、叫模型、回复 |
+| `acp_client.py` | 可选的常驻进程。默认不用，`agent.mode` 为 `acp` 才启动 |
 | `tools.py` | 动飞书的手：只读，以及要确认码的写入 |
 | `guard.py` | 打码和话题红线 |
 | `memory.py` | 每个群一份长期记忆 |
@@ -54,7 +56,8 @@ python tests/run_tests.py
 | `agents/CONFIG.md` | 每一项怎么填 |
 | `redact.example.txt` | 空的客户名名单样子，复制成 `redact.txt` 再用 |
 | `scripts/` | Windows 上的启动、停止、看门狗、计划任务 |
-| `tests/run_tests.py` | 离线测试，76 项 |
+| `tests/run_tests.py` | 离线测试，99 项 |
+| `tests/fake_acp_agent.py` | 测试用的假常驻服务，不是真的 cursor-agent |
 | `docs/` | 给人看的说明和架构图。技能怎么写见 `docs/技能.md` |
 | `SKILL.md` | 给帮忙操作的 AI 助手看的步骤 |
 
