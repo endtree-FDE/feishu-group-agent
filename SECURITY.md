@@ -2,7 +2,7 @@
 
 ## 支持的版本
 
-安全修复以 `main` 分支为准。这个仓库是模板，没有单独的版本号分支。
+版本号写在仓库根目录的 `VERSION`。还没有 GitHub Release。安全修复以 `main` 分支为准。以后打了 Release，就以最新的 Release 和 `main` 为准。
 
 ## 报告漏洞
 
@@ -52,4 +52,4 @@ lark-cli config init --app-id 你的应用ID --app-secret-stdin --brand feishu
 
 ## English
 
-Report vulnerabilities through [GitHub private security advisories](https://github.com/endtree-FDE/feishu-group-agent/security/advisories/new). Do not include secrets, Feishu IDs, or customer names in public issues. The bot runs on the operator's machine; this repository must not contain App Secrets or filled-in configuration.
+The version is the `VERSION` file. There is no GitHub Release yet, so security fixes target `main`. After a release exists, they target the latest release and `main`. Report vulnerabilities through [GitHub private security advisories](https://github.com/endtree-FDE/feishu-group-agent/security/advisories/new). Do not include secrets, Feishu IDs, or customer names in public issues. The bot runs on the operator's machine; this repository must not contain App Secrets or filled-in configuration.
