@@ -127,7 +127,12 @@ class Tools:
             m = json.load(open(fk, encoding="utf-8")); key = " ".join(argv[:2])
             self.fake = lambda av: m.get(" ".join(av[:2]), {"ok": True, "data": {}})
         if self.fake:
-            j = self.fake(argv); self.log.info("[fake-lark] %s -> ok=%s", " ".join(argv[:2]), j.get("ok"))
+            j = self.fake(argv)
+            # 测试用来假装附件下载很慢。生产环境没有这个变量。下载发生在模型调用之外，不刷新、也不触发静默检测。
+            delay = os.environ.get("AGENTBOT_FAKE_LARK_DELAY")
+            if delay:
+                time.sleep(float(delay))
+            self.log.info("[fake-lark] %s -> ok=%s", " ".join(argv[:2]), j.get("ok"))
         elif self.dry and (tool in WRITE_TOOLS and os.environ.get("AGENTBOT_DRY_LIVE_WRITES") != "1" or tool not in WRITE_TOOLS and not self.cfg.get("dry_run_live_reads")):
             self.log.info("[tools-dry-run] lark-cli %s", " ".join(argv)); return {"ok": True, "data": {"dry_run": True}}
         else:

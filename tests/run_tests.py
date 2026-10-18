@@ -517,9 +517,11 @@ argv0 = next((e.get("argv") or [] for e in tr if e.get("event") == "argv"), [])
 check("常驻启动参数：--mode ask、--model、子命令 acp",
       argv0[argv0.index("--mode") + 1] == "ask" and "acp" in argv0 and "--model" in argv0 and "grok-4.7-high-fast" in argv0, str(argv0))
 check("常驻握手：initialize、authenticate、session/set_mode=ask、set_config_option",
-      any(e.get("method") == "initialize" for e in tr) and any(e.get("method") == "authenticate" for e in tr)
+      any(e.get("method") == "initialize" and ((e.get("params") or {}).get("clientCapabilities") or {}).get("_meta", {}).get("parameterizedModelPicker") is True for e in tr)
+      and any(e.get("method") == "authenticate" for e in tr)
       and any(e.get("method") == "session/set_mode" and (e.get("params") or {}).get("modeId") == "ask" for e in tr)
-      and any(e.get("method") == "session/set_config_option" and (e.get("params") or {}).get("configId") == "model" and (e.get("params") or {}).get("value") == "grok-4.7-high-fast" for e in tr), str(tr)[:1500])
+      and any(e.get("method") == "session/set_config_option" and (e.get("params") or {}).get("configId") == "model"
+               and (e.get("params") or {}).get("value") == "grok-4.7-high-fast" and (e.get("params") or {}).get("type") == "id" for e in tr), str(tr)[:1500])
 def model_calls(tr):
     return [e for e in tr if e.get("method") == "session/set_config_option"]
 o, tr, rc = run_acp([ev("acp_same", "普通一句")], "acp_same", ACP_CFG, extra_env={"AGENTBOT_ACP_CONFIG_CASE": "same"})
@@ -542,7 +544,8 @@ check("当前值不一致：用返回的 configId 和可选值调用 set_config_
 o, tr, rc = run_acp([ev("acp_bad", "设模型失败")], "acp_invalid", ACP_CFG, extra_env={"AGENTBOT_ACP_CONFIG_CASE": "invalid"})
 _calls = model_calls(tr)
 check("set_config_option 失败只记 debug：这一题仍成功，日志没有这条 WARNING",
-      len(_calls) == 1 and "常驻答案" in block(o, "acp_bad") and "acp fallback" not in o
+      len(_calls) == 2 and (_calls[0].get("params") or {}).get("type") == "id" and "type" not in (_calls[1].get("params") or {})
+      and "常驻答案" in block(o, "acp_bad") and "acp fallback" not in o
       and "WARNING acp set_model" not in o and "Invalid params" not in o, o + str(_calls))
 o, tr, rc = run_acp([ev("ac2", "第一题"), ev("ac3", "第二题", root_id="ac2"), ev("ac4", "另一题")], "acp_reuse", ACP_CFG)
 ids, news = new_ids(tr)
@@ -1788,6 +1791,41 @@ o = _bot_py(_catch_src, {"EMPTY": _empty, "AGENTBOT_FAKE_LARK": _late_fp, "AGENT
 check("停机补答：只补窗口内 @ 了机器人且没答过的消息，并去重",
       o.count("[dry-run] reply late_ok") == 1 and "（延迟回复）" in o and "停机期间的问题" in o
       and "reply late_skip" not in o and "reply late_old" not in o, o)
+_now_ts = int(time.time())
+_age_fake = dict(_saved_fake)
+_age_fake["im +chat-messages-list"] = {"ok": True, "data": {"messages": [
+    {"message_id": "age_old", "content": "@" + BN + " 十五小时前", "msg_type": "text", "create_time": str(_now_ts - 15 * 3600),
+     "sender": {"id": "user_sender", "sender_type": "user"}, "mentions": M},
+    {"message_id": "age_recalled", "content": "@" + BN + " 已撤回", "msg_type": "text", "create_time": str(_now_ts - 120),
+     "deleted": True, "sender": {"id": "user_sender", "sender_type": "user"}, "mentions": M},
+    {"message_id": "age_status", "content": "@" + BN + " 状态是撤回", "msg_type": "text", "create_time": str(_now_ts - 90),
+     "message_status": "recalled", "sender": {"id": "user_sender", "sender_type": "user"}, "mentions": M},
+    {"message_id": "age_a", "content": "@" + BN + " 窗口内第一条", "msg_type": "text", "create_time": str(_now_ts - 80),
+     "sender": {"id": "user_sender", "sender_type": "user"}, "mentions": M},
+    {"message_id": "age_b", "content": "@" + BN + " 窗口内第二条", "msg_type": "text", "create_time": str(_now_ts - 40),
+     "sender": {"id": "user_sender", "sender_type": "user"}, "mentions": M},
+]}}
+_age_fp = os.path.join(T, "age_fake.json"); json.dump(_age_fake, open(_age_fp, "w", encoding="utf-8"), ensure_ascii=False)
+open(os.path.join(T, "state", "heartbeat"), "w", encoding="utf-8").write(str(_now_ts - 20 * 3600))
+_age_src = r'''
+import os, sys
+sys.argv = ["agentbot.py", os.environ["CFG"], "--dry-run", os.environ["EMPTY"]]
+os.environ["AGENTBOT_CATCHUP"] = "1"
+import agentbot
+c = dict(agentbot.CFG.get("catchup") or {})
+c.pop("max_age_sec", None)
+agentbot.CFG["catchup"] = c
+s = agentbot._catchup_settings()
+print("AGE", s["max_age_sec"], "COUNT", s["max_messages"])
+agentbot.CFG["catchup"] = {"enabled": True, "overlap_sec": 300, "max_messages": 1, "max_age_sec": 12 * 3600}
+agentbot.catch_up_mentions()
+'''
+o = _bot_py(_age_src, {"EMPTY": _empty, "AGENTBOT_FAKE_LARK": _age_fp, "AGENTBOT_CATCHUP": "1"})
+check("补答有 12 小时时限和条数上限，已撤回的不回",
+      "AGE 43200" in o and o.count("[dry-run] reply age_a") == 1 and "窗口内第一条" in o
+      and "reply age_b" not in o and "reply age_old" not in o
+      and "reply age_recalled" not in o and "reply age_status" not in o
+      and "catchup skip recalled" in o, o)
 _pw = ev("pw1", '<<FAKE_TOOL>>{"tool":"docs_create","args":{"title":"续写","markdown":"正文"}}<<END>> 建文档', sender_id="user_admin")
 o = run([_pw], name="pw_prop")
 _pw_code = (_re.search(r"确认 (\d{6})", o) or [None, None])[1]
@@ -2212,6 +2250,55 @@ o3 = run([ev("chain3", _q3, sender_id="user_admin")], name="chain_write", cfg_pa
 check("读完历史仍可提议写入，写入停在确认码，不会接着执行",
       "tool call history" in o3 and "tool call docs_create" in o3 and "确认" in o3
       and "[fake-lark] docs +create" not in o3 and "[fake] 已根据工具结果回答" not in o3, o3[-2000:])
+
+# 附件下载发生在两次模型调用之间。静默计时只包住模型调用，下载再久也不该当成卡死。
+_slow_fp = os.path.join(T, "slow_attach.json")
+json.dump({"im +messages-mget": {"ok": False, "error": {"code": 99991672, "message": "读不到 13812345678 附件正文XYZ"}}},
+          open(_slow_fp, "w", encoding="utf-8"), ensure_ascii=False)
+_slow_cfg = json.loads(json.dumps(cfg))
+_slow_cfg["agent"].update({"mode": "acp", "stall_sec": 1, "max_runtime_sec": 30, "network_retries": 0,
+                           "acp_max_sessions": 8, "acp_idle_sec": 1800})
+_slow_cfg_path = os.path.join(T, "acp_slow_attach.json")
+json.dump(_slow_cfg, open(_slow_cfg_path, "w", encoding="utf-8"), ensure_ascii=False)
+_slow_t0 = time.time()
+o, tr, rc = run_acp([ev("slow1", "<<ACP_ATTACH>> 附件问题TOKEN不要进日志")], "acp_slow_attach", _slow_cfg_path,
+                    extra_env={"AGENTBOT_FAKE_LARK": _slow_fp, "AGENTBOT_FAKE_LARK_DELAY": "2.2", "AGENTBOT_ACP_FOLLOW_PAUSE": "0.6"})
+_slow_elapsed = time.time() - _slow_t0
+_ev_path = os.path.join(T, "logs", "events.jsonl")
+_ev_body = open(_ev_path, encoding="utf-8").read() if os.path.isfile(_ev_path) else ""
+_ev_rows = []
+for _line in _ev_body.splitlines():
+    if not _line.strip(): continue
+    try: _ev_rows.append(json.loads(_line))
+    except Exception: pass
+_slow_tools = [r for r in _ev_rows if r.get("kind") == "tool" and r.get("mid") == "slow1"]
+_slow_ans = [r for r in _ev_rows if r.get("kind") == "answer" and r.get("mid") == "slow1"]
+_slow_blob = json.dumps(_slow_tools + _slow_ans, ensure_ascii=False)
+check("长时间读附件不会被静默检测当成卡死",
+      rc == 0 and _slow_elapsed >= 2.0 and "acp fallback: stall" not in o and "agent stopped: stall" not in o
+      and "tool call message_attachment" in o and "[fake-lark] im +messages-mget" in o
+      and "根据工具结果：周五交报名" in block(o, "slow1") and "这题比较复杂" not in block(o, "slow1"), o[-2000:])
+check("message_attachment 的错误码写入 events.jsonl，只有工具名和错误码",
+      len(_slow_tools) == 1 and _slow_tools[0].get("tool") == "message_attachment" and _slow_tools[0].get("ok") is False
+      and _slow_tools[0].get("code") == "99991672"
+      and _slow_ans and _slow_ans[-1].get("tools") == [{"tool": "message_attachment", "ok": False, "code": "99991672"}]
+      and "附件问题TOKEN不要进日志" not in _slow_blob and "13812345678" not in _slow_blob and "附件正文XYZ" not in _slow_blob,
+      _slow_blob)
+
+_rt = subprocess.run([sys.executable, os.path.join(FW, "tests", "test_acp_health.py")], capture_output=True, text=True, encoding="utf-8", timeout=60)
+check("ACP 卡死检测与配置项单测", _rt.returncode == 0, (_rt.stdout or "") + (_rt.stderr or ""))
+print("\n-- lifecycle --", flush=True)
+_lc = subprocess.run([sys.executable, os.path.join(FW, "tests", "test_lifecycle.py")], cwd=FW)
+results.append(("lifecycle 单实例与优雅停机", _lc.returncode == 0))
+print("\n-- link --", flush=True)
+_lk = subprocess.run([sys.executable, os.path.join(FW, "tests", "test_link.py")], cwd=FW)
+results.append(("长连接重连与休眠唤醒", _lk.returncode == 0))
+print("\n-- observe --", flush=True)
+_ob = subprocess.run([sys.executable, os.path.join(FW, "tests", "test_observe.py")], cwd=FW)
+results.append(("结构化日志与诊断", _ob.returncode == 0))
+print("\n-- verify --", flush=True)
+_vf = subprocess.run([sys.executable, os.path.join(FW, "tests", "test_verify_report.py")], cwd=FW)
+results.append(("部署后验证", _vf.returncode == 0))
 
 print("\n%d/%d passed" % (sum(r for _, r in results), len(results))); shutil.rmtree(T, ignore_errors=True)
 sys.exit(0 if all(r for _, r in results) else 1)
