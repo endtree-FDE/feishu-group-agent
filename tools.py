@@ -1,6 +1,6 @@
 # 工具层：只允许白名单内的 lark-cli 命令，统一 --as bot；写操作需确认码；全部写审计日志；缺权限优雅降级。
 import json, os, re, subprocess, time, random, threading, datetime, glob, shutil
-import skills
+import guard, skills
 
 def run_capture(cmd, cwd=None, timeout=60):
     """代替 subprocess.run：超时杀整棵进程树（Windows 上只杀父进程时孙进程仍占着管道，communicate 会一直卡住）"""
@@ -72,11 +72,14 @@ class Tools:
         self.pending = {}; self.pl = threading.Lock(); self.al = threading.Lock()
         self.fake = None  # 测试注入：callable(argv)->dict
         self.skills = skills.SkillSet(cfg, base)  # 技能目录；enabled 默认 false
+        self.names = guard.load_names(os.path.join(base, cfg.get("redact_file", "redact.txt")))
 
     # ---------- 基础 ----------
     def enabled(self, name): return bool(self.t.get(name, {}).get("enabled", False))
     def audit(self, **kw):
         kw["ts"] = datetime.datetime.now().isoformat(timespec="seconds")
+        for k in ("args", "summary", "detail", "err", "result"):
+            if isinstance(kw.get(k), str): kw[k] = guard.redact(kw[k], self.names)
         with self.al, open(os.path.join(self.audit_dir, datetime.date.today().strftime("%Y%m") + ".jsonl"), "a", encoding="utf-8") as f:
             f.write(json.dumps(kw, ensure_ascii=False) + "\n")
 
@@ -161,7 +164,7 @@ class Tools:
         doc = str(a.get("doc") or "").strip()
         if not doc: raise ToolError("没有给出文档链接")
         allow = self.t["docs_read"].get("allow_tokens")  # 为空表示：机器人能看到的都能读
-        if allow and not any(t in doc for t in allow): raise ToolError("这份文档不在可读白名单里")
+        if allow and not _allow_token(doc, allow): raise ToolError("这份文档不在可读白名单里")
         argv = ["docs", "+fetch", "--doc", doc, "--doc-format", "markdown"]
         if a.get("keyword"): argv += ["--scope", "keyword", "--keyword", str(a["keyword"])[:50]]
         j = self.lark("docs_read", argv)
@@ -218,7 +221,7 @@ class Tools:
         if name == "docs_append":
             doc = str(a.get("doc") or ""); allow = r.get("docs_append_tokens") or []
             if not allow: raise ToolError("还没配置允许追加的文档")
-            tok = next((t for t in allow if t in doc), None)
+            tok = _allow_token(doc, allow)
             if not tok: raise ToolError("这份文档不在可写白名单里")
             return (["docs", "+update", "--doc", tok, "--command", "append", "--doc-format", "markdown",
                      "--content", str(a.get("markdown") or "")[:20000]], "在文档 %s 末尾追加 %d 字" % (tok, len(str(a.get("markdown") or ""))))
@@ -270,10 +273,29 @@ class Tools:
         if not self.enabled("attachment"): raise ToolError("图片和文件识别还没在配置里启用")
         d = os.path.join(tmp_root, "att_" + re.sub(r"\W", "", message_id)[-20:]); os.makedirs(d, exist_ok=True)
         j = self.lark("attachment", ["im", "+messages-mget", "--message-ids", message_id, "--download-resources", "--no-reactions"], cwd=d, timeout=120)
-        files = [p for p in glob.glob(os.path.join(d, "lark-im-resources", "**", "*"), recursive=True) if os.path.isfile(p)]
+        files = []
+        root_r = os.path.realpath(d)
+        for p in glob.glob(os.path.join(d, "lark-im-resources", "**", "*"), recursive=True):
+            if not os.path.isfile(p): continue
+            # 下载目录之外的路径（符号链接、..）不读，避免附件名把别的文件带进提示词。
+            try:
+                if os.path.commonpath([root_r, os.path.realpath(p)]) != root_r: continue
+            except ValueError:
+                continue
+            files.append(p)
         self.audit(kind="read", tool="attachment", user=ctx["user"], chat=ctx["chat_id"], ok=True, n=len(files))
         msgs = (j.get("data") or {}).get("messages") or []
         return d, files, (msgs[0].get("msg_type") if msgs else "")
+
+def _allow_token(doc, allow):
+    """白名单要整段对上，不能只是子串。doxTEST 不能放行 doxTESTxxx。链接里独立的一段可以。"""
+    raw = str(doc or "").strip()
+    if not raw: return None
+    for t in allow or ():
+        t = str(t or "").strip()
+        if not t: continue
+        if raw == t or re.search(r"(^|[/=])" + re.escape(t) + r"(?=$|[/?#&])", raw): return t
+    return None
 
 def _brief(x):
     s = json.dumps(x, ensure_ascii=False) if not isinstance(x, str) else x

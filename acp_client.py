@@ -9,8 +9,9 @@
 #   https://agentclientprotocol.com/protocol/session-modes
 #   https://agentclientprotocol.com/protocol/schema
 # Cursor 官方示例的 protocolVersion 是 1。v2 草稿（/protocol/v2/）不在这条路径上。
-import ipaddress, json, os, re, socket, subprocess, threading, time
-from urllib.parse import unquote, urlparse
+import ipaddress, json, os, re, socket, subprocess, threading, time, urllib.request
+from urllib.parse import unquote, urljoin, urlparse
+import guard
 
 PROFILE_MARK = "以下是本群的长期档案"
 # 和 skills.PRELOAD_MARK 是同一句。预放正文会变，快照必须在这句之前结束。
@@ -193,16 +194,12 @@ def _describe_tool(upd):
     return "正在查资料…"
 
 
-# 这些网段和名字一律当内网。主机名会再解析一次，解析到这里也拒绝；解析失败就放过（尽力拦）。
-_BLOCKED_NETS = (
-    ipaddress.ip_network("10.0.0.0/8"),
-    ipaddress.ip_network("127.0.0.0/8"),
-    ipaddress.ip_network("169.254.0.0/16"),
-    ipaddress.ip_network("172.16.0.0/12"),
-    ipaddress.ip_network("192.168.0.0/16"),
-    ipaddress.ip_network("::1/128"),
-)
+# 主机名会解析两次。任一结果落在非公网、两次结果不一致、或解析失败，都拒绝。
+# 八进制、十六进制、省略写法（127.1）和写坏的数字主机名也拒绝，不交给后面的程序自己解释。
 _HTTP_URL = re.compile(r"https?://[^\s<>\"'\\]+", re.I)
+_IP_LITERAL = re.compile(r"^[0-9a-fA-FxX.:]+$")
+# 测试可以换成假的跳转探测。返回下一跳网址；没有跳转或网络失败时返回空字符串。
+_redirect_probe = None
 
 
 def _clip(text, n=80):
@@ -239,10 +236,44 @@ def _ip_is_blocked(value):
     mapped = getattr(addr, "ipv4_mapped", None)
     if mapped is not None:
         addr = mapped
-    for net in _BLOCKED_NETS:
-        if addr.version == net.version and addr in net:
-            return True
+    if addr.is_multicast or addr.is_reserved or addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_unspecified:
+        return True
+    # 共享地址（100.64/10 等）is_global 为假，也不当公网。
+    if not getattr(addr, "is_global", True):
+        return True
     return False
+
+
+def _parse_dotted(parts):
+    """把 1～4 段的十进制、八进制（0177）或十六进制（0x7f）拼成 IPv4。拼不起来返回 None。"""
+    nums = []
+    for p in parts:
+        if re.fullmatch(r"0x[0-9a-fA-F]+", p):
+            n = int(p, 16)
+        elif re.fullmatch(r"0[0-7]+", p):
+            n = int(p, 8)
+        elif p.isdigit():
+            n = int(p, 10)
+        else:
+            return None
+        if n < 0: return None
+        nums.append(n)
+    if len(nums) == 1:
+        n = nums[0]
+        if n > 0xFFFFFFFF: return None
+        return ipaddress.IPv4Address(n)
+    if len(nums) == 2:
+        a, b = nums
+        if a > 255 or b > 0xFFFFFF: return None
+        return ipaddress.IPv4Address((a << 24) | b)
+    if len(nums) == 3:
+        a, b, c = nums
+        if a > 255 or b > 255 or c > 0xFFFF: return None
+        return ipaddress.IPv4Address((a << 24) | (b << 16) | c)
+    if len(nums) == 4:
+        if any(n > 255 for n in nums): return None
+        return ipaddress.IPv4Address("%d.%d.%d.%d" % tuple(nums))
+    return None
 
 
 def _parse_ip(host):
@@ -250,11 +281,19 @@ def _parse_ip(host):
         return ipaddress.ip_address(host)
     except ValueError:
         pass
-    # 十进制写法的 IPv4，例如 2130706433 就是 127.0.0.1。
+    # 十进制或十六进制整数，例如 2130706433、0x7f000001 都是 127.0.0.1。
+    if re.fullmatch(r"0x[0-9a-fA-F]+", host):
+        n = int(host, 16)
+        if n <= 0xFFFFFFFF:
+            return ipaddress.IPv4Address(n)
+        return None
     if host.isdigit() and len(host) <= 10:
         n = int(host)
         if n <= 0xFFFFFFFF:
             return ipaddress.IPv4Address(n)
+        return None
+    if "." in host and _IP_LITERAL.match(host):
+        return _parse_dotted(host.split("."))
     return None
 
 
@@ -276,34 +315,59 @@ def _lookup_host(host):
     return box.get("infos") or []
 
 
-def _host_is_blocked(host):
-    host = unquote(str(host or "")).strip().lower().rstrip(".")
-    if host.startswith("[") and host.endswith("]"):
-        host = host[1:-1]
-    if not host or host == ".":
-        return True
-    if any(c in host for c in "/\\@?# \t\r\n\x00"):
-        return True
-    if host == "localhost" or host.endswith(".localhost"):
-        return True
-    ip = _parse_ip(host)
-    if ip is not None:
-        return _ip_is_blocked(ip)
-    try:
-        infos = _lookup_host(host)
-    except Exception:
-        return False
-    if not infos:
-        return False
-    for item in infos:
+def _addrs_of(infos):
+    out = set()
+    for item in infos or ():
         try:
             addr = item[4][0]
         except Exception:
             continue
         if isinstance(addr, str) and "%" in addr:
             addr = addr.split("%", 1)[0]
-        if _ip_is_blocked(addr):
-            return True
+        out.add(str(addr))
+    return out
+
+
+def _infos_blocked(infos):
+    addrs = _addrs_of(infos)
+    if not addrs:
+        return True
+    return any(_ip_is_blocked(a) for a in addrs)
+
+
+def _host_is_blocked(host):
+    host = unquote(str(host or "")).strip().lower().rstrip(".")
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
+    if "%" in host:
+        host = host.split("%", 1)[0]
+    if not host or host == ".":
+        return True
+    if any(c in host for c in "/\\@?# \t\r\n\x00"):
+        return True
+    if host in ("localhost", "metadata.google.internal") or host.endswith(".localhost") or host.endswith(".local"):
+        return True
+    ip = _parse_ip(host)
+    if ip is not None:
+        return _ip_is_blocked(ip)
+    # 看起来像 IP 但没能解析（例如八进制里混了 8、9）时拒绝，避免后面的程序用另一种规则解释。
+    if _IP_LITERAL.match(host) and any(c.isdigit() for c in host):
+        return True
+    try:
+        first = _lookup_host(host)
+    except Exception:
+        return True
+    if not first or _infos_blocked(first):
+        return True
+    try:
+        second = _lookup_host(host)
+    except Exception:
+        return True
+    if not second or _infos_blocked(second):
+        return True
+    # 两次解析不一致，按 DNS 重绑定处理。
+    if _addrs_of(first) != _addrs_of(second):
+        return True
     return False
 
 
@@ -316,15 +380,69 @@ def _first_http_url(text):
 
 def _public_http_url(url):
     raw = (url or "").strip()
-    if not raw or any(c in raw for c in "\\\x00\r\n\t"):
+    if not raw or any(c in raw for c in "\\\x00\r\n\t") or len(raw) > 1024:
         return False
     parts = urlparse(raw)
     if (parts.scheme or "").lower() not in ("http", "https"):
         return False
+    # 网址里带账号密码，既可能把密钥送出去，也可能用来混淆主机名。
+    if parts.username or parts.password:
+        return False
     host = parts.hostname
     if not host:
         return False
-    return not _host_is_blocked(host)
+    if not _host_is_blocked(host):
+        return True
+    return False
+
+
+def _url_exfil(url, names=()):
+    """网址或搜索词里夹带客户名、手机号、邮箱、密钥时返回 True。不管这台主机是不是公网。"""
+    return guard.embeds_secret(unquote(url or ""), names)
+
+
+class _StopRedirect(Exception):
+    def __init__(self, url):
+        self.url = url
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise _StopRedirect(newurl)
+
+
+def _probe_redirect(url):
+    """只看第一跳的 Location，不跟着走。失败当没有跳转（这一跳本身已经检查过）。"""
+    if _redirect_probe is not None:
+        return _redirect_probe(url)
+    opener = urllib.request.build_opener(_NoRedirect)
+    try:
+        opener.open(url, timeout=2)
+        return ""
+    except _StopRedirect as e:
+        return e.url or ""
+    except Exception:
+        return ""
+
+
+def _chain_public(url, names=()):
+    """初始网址和最多 3 次跳转都必须是公网，且不能夹带敏感信息。"""
+    seen = set()
+    cur = url
+    for _ in range(4):
+        if not cur or cur in seen:
+            return False
+        seen.add(cur)
+        if not _public_http_url(cur) or _url_exfil(cur, names):
+            return False
+        try:
+            nxt = _probe_redirect(cur)
+        except Exception:
+            return True
+        if not nxt:
+            return True
+        cur = urljoin(cur, nxt)
+    return False
 
 
 def _tool_text(tool, key):
@@ -501,6 +619,7 @@ class Pool:
         self.model = (self.cfg.get("model") or "").strip()
         self.allow_web = _flag(self.cfg, "acp_allow_web", True)
         self.web_max = _pos_int(self.cfg, "acp_web_max_per_turn", 15)
+        self._redact_names = None
         self.web_used = {}
         self.state_lock = threading.Lock()
         self.pending_lock = threading.Lock()
@@ -518,6 +637,11 @@ class Pool:
         self._restarting = False
         self._restart_thread = None
         self._err_tail = []
+
+    def _secret_names(self):
+        if self._redact_names is None:
+            self._redact_names = guard.load_names(os.path.join(self.cwd or "", "redact.txt"))
+        return self._redact_names
 
     def _alive(self):
         return bool(self.ready_flag and self.proc and self.proc.poll() is None)
@@ -657,7 +781,18 @@ class Pool:
         opts = params.get("options") if isinstance(params.get("options"), list) else []
         allowed = False
         chosen = ""
+        why = ""
         web = _is_public_web_tool(tool)
+        names = self._secret_names()
+        if web and _web_search_identity(tool) and _url_exfil(title, names):
+            web = False
+            why = "exfil"
+        elif web and _web_fetch_identity(tool) and any(_url_exfil(u, names) for u in _fetch_urls(tool)):
+            web = False
+            why = "exfil"
+        elif web and _web_fetch_identity(tool) and not all(_chain_public(u, names) for u in _fetch_urls(tool)):
+            web = False
+            why = "redirect"
         if web and not self.allow_web:
             why = "off"
         elif web:
@@ -675,6 +810,8 @@ class Pool:
                         allowed = True
                         chosen = oid
                         why = "web"
+        elif why:
+            pass
         elif _web_fetch_identity(tool):
             why = "private"
         else:
@@ -693,7 +830,7 @@ class Pool:
             "allowed" if allowed else "rejected",
             kind or "-",
             tid or "-",
-            _clip(title),
+            _clip(guard.redact(title, names)),
             chosen,
             why,
         )
