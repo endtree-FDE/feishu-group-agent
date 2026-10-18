@@ -440,7 +440,7 @@ class Progress:
         if not self.c.get("delete_status_after_reply", False) or not self.status_id or self.status_id == self.mid:
             return False
         sid = self.status_id
-        cmd = ["im", "messages", "delete", "--message-id", sid]  # DELETE /open-apis/im/v1/messages/:message_id
+        cmd = ["im", "messages", "delete", "--message-id", sid, "--yes"]  # DELETE /open-apis/im/v1/messages/:message_id；high-risk-write，缺 --yes 退出码 10
         if DRY:
             if os.environ.get("AGENTBOT_RECALL_FAIL") == "1":
                 log.info("[dry-run] recall %s failed", " ".join(cmd)); return False
