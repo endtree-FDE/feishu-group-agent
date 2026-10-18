@@ -105,10 +105,11 @@ check("私聊文件消息：调用 messages-mget 下载并回答", "[fake-lark] 
 evs = [ev("c%d" % i, "并发%d" % i, sender_id="u%d" % i) for i in range(8)]
 o = run(evs, ("--parallel",), name="conc"); check("并发上限 2 + 排队上限 4", "peak_active=2" in o and o.count("queue full") == 2, o)
 # ---------- 流式读取 / 卡死保护 / 部分结果 / 进度 ----------
-def mkcfg(name, mode="text", **agent):
+def mkcfg(name, mode="text", delete_status=False, **agent):
     c = json.loads(json.dumps(cfg)); c["agent"].update(agent)
     c["progress"] = {"enabled": True, "mode": mode, "card_interval_sec": 1, "reaction": "OnIt", "done_reaction": "DONE", "status_message": True,
                      "fast_interval_sec": 1, "fast_phase_sec": 120, "slow_interval_sec": 60, "min_gap_sec": 0, "max_edits": 17}
+    if delete_status: c["progress"]["delete_status_after_reply"] = True
     pth = os.path.join(T, name + ".json"); json.dump(c, open(pth, "w", encoding="utf-8"), ensure_ascii=False); return pth
 def block(o, mid):  # 发给用户的最终文本（状态消息替换成的答案，或直接回复），含多行
     i = o.rfind("[dry-run] edit dry_status_%s: " % mid)
@@ -151,6 +152,19 @@ cards2 = [l for l in o2.splitlines() if "[dry-run] card " in l]
 check("卡片 + 红线只作用于进度：思考面板里命中的行被删，答案照常", cards2 and not any("薪资" in l for l in cards2) and any("整理答案结构" in l for l in cards2) and "[dry-run] reply s8b" in o2, o2)
 o = run([ev("s9", "<<STREAM_STALL>> 卡片卡死")], name="s_cardstall", cfg_path=mkcfg("cardstall", mode="card", stall_sec=2), stream=True)
 check("卡片 + 卡死：发部分结果，卡片注明", "（时间到了，先给部分结果）" in block(o, "s9") and "已先给部分结果" in o, o)
+o = run([ev("s10", "<<STREAM_NORMAL>> 撤回状态")], name="s_recall", cfg_path=mkcfg("recall", mode="card", delete_status=True), stream=True)
+_done10 = [l for l in o.splitlines() if "[dry-run] patch dry_status_s10" in l and "✅ 已完成" in l]
+check("进度：答案另发后只撤回状态消息，不再改成已完成",
+      "[dry-run] reply s10" in o and "[dry-run] recall im messages delete --message-id dry_status_s10" in o
+      and "--message-id s10" not in o and not _done10, o)
+o = run([ev("s11", "<<STREAM_NORMAL>> 撤回失败")], name="s_recall_fail", cfg_path=mkcfg("recallfail", mode="card", delete_status=True), stream=True,
+        extra_env={"AGENTBOT_RECALL_FAIL": "1"})
+check("进度：撤回失败则退回把状态改成已完成",
+      "[dry-run] reply s11" in o and "[dry-run] recall im messages delete --message-id dry_status_s11 failed" in o
+      and any("✅ 已完成，用时" in l for l in o.splitlines() if "[dry-run] patch dry_status_s11" in l), o)
+o = run([ev("s12", "<<STREAM_NORMAL>> 文字不撤回")], name="s_recall_text", cfg_path=mkcfg("recalltext", mode="text", delete_status=True), stream=True)
+check("进度（text 模式）：状态已换成答案时不撤回",
+      "reply s12 ok=True via status edit" in o and "[dry-run] reply s12" not in o and "recall" not in o, o)
 
 # ---------- 长期记忆 P1：只读群档案 ----------
 CH2 = "chat_second_group"
@@ -733,6 +747,48 @@ o = run([ev("old1", "旧配置这一题")], name="old_provider", cfg_path=_oldp,
 check("没写 model_provider 的旧配置仍走 cursor 一次性进程", "普通回答" in block(o, "old1") and "model provider cursor" in o and "openai_compat" not in o, o)
 try: _oa.shutdown()
 except Exception: pass
+
+def _legacy_cfg(name, both=False):
+    c = json.loads(json.dumps(cfg)); c["model_provider"] = "fake"
+    tools, res = c["tools"], c["write"]["resources"]
+    for old, new in (("doc_search", "docs_search"), ("doc_read", "docs_read"), ("doc_create", "docs_create"), ("doc_append", "docs_append")):
+        tools[old] = dict(tools[new]);
+        if not both: tools.pop(new)
+    res["doc_folder_token"] = res["folder_token"]; res["doc_append_tokens"] = list(res["docs_append_tokens"])
+    if not both:
+        res.pop("folder_token"); res.pop("docs_append_tokens")
+    if both: tools["doc_search"] = {"enabled": False}  # 新键仍是 enabled true，旧的 false 必须被忽略
+    pth = os.path.join(T, name + ".json"); json.dump(c, open(pth, "w", encoding="utf-8"), ensure_ascii=False); return pth
+_LEG = _legacy_cfg("legacy")
+o = run([ev("leg1", '<<FAKE_TOOL>>{"tool":"docs_search","args":{"query":"进度"}}<<END>> 找文档')], name="legacy_search", cfg_path=_LEG)
+check("旧键 doc_search 仍能搜索文档", "[fake-lark] drive +search" in o and "reply leg1" in o, o)
+o = run([ev("leg2", '<<FAKE_TOOL>>{"tool":"docs_create","args":{"title":"周报","markdown":"内容"}}<<END>> 建文档', sender_id="user_admin")], name="legacy_create", cfg_path=_LEG)
+check("旧键 doc_folder_token 仍能提议新建文档", "确认" in o and "新建文档" in o and "还没配置专用文档文件夹" not in o, o)
+o = run([ev("leg3", '<<FAKE_TOOL>>{"tool":"docs_append","args":{"doc":"doxTEST","markdown":"x"}}<<END>> 追加', sender_id="user_admin")], name="legacy_append", cfg_path=_LEG)
+check("旧键 doc_append_tokens 仍能提议追加", "确认" in o and "末尾追加" in o and "不在可写白名单" not in o and "还没配置允许追加" not in o, o)
+_cr = subprocess.run([sys.executable, os.path.join(FW, "agentbot.py"), _LEG, "--check"], capture_output=True, text=True, encoding="utf-8", timeout=30)
+_co = (_cr.stdout or "") + (_cr.stderr or "")
+check("--check：旧配置键给出改名提示，且不因此失败",
+      all(s in _co for s in ("HINT tools.doc_search", "docs_search", "HINT tools.doc_read", "docs_read",
+                             "HINT tools.doc_create", "docs_create", "HINT tools.doc_append", "docs_append",
+                             "HINT write.resources.doc_folder_token", "folder_token",
+                             "HINT write.resources.doc_append_tokens", "docs_append_tokens", "已按"))
+      and not any(("doc_search" in l or "doc_folder" in l or "doc_append_tokens" in l) and l.startswith("FAIL") for l in _co.splitlines()), _co)
+_BOTH = _legacy_cfg("legacy_both", both=True)
+o = run([ev("leg4", '<<FAKE_TOOL>>{"tool":"docs_search","args":{"query":"进度"}}<<END>> 找文档')], name="legacy_both", cfg_path=_BOTH)
+_cr = subprocess.run([sys.executable, os.path.join(FW, "agentbot.py"), _BOTH, "--check"], capture_output=True, text=True, encoding="utf-8", timeout=30)
+_co = (_cr.stdout or "") + (_cr.stderr or "")
+check("新旧键同时存在时用新名字，--check 提示删掉旧的",
+      "[fake-lark] drive +search" in o and "HINT tools.doc_search 是旧名字，已忽略（在用 docs_search）" in _co, o + "\n" + _co)
+_clean = json.loads(json.dumps(cfg)); _clean["model_provider"] = "fake"
+_cleanp = os.path.join(T, "legacy_clean.json"); json.dump(_clean, open(_cleanp, "w", encoding="utf-8"), ensure_ascii=False)
+_cr = subprocess.run([sys.executable, os.path.join(FW, "agentbot.py"), _cleanp, "--check"], capture_output=True, text=True, encoding="utf-8", timeout=30)
+_co = (_cr.stdout or "") + (_cr.stderr or "")
+check("--check：没有旧键时不提示", "HINT" not in _co and "OK   fake" in _co, _co)
+_ps = open(os.path.join(FW, "scripts", "start.ps1"), encoding="utf-8-sig").read()
+check("start.ps1：本 profile 残留 event 进程会结束，conflict_pidfiles 还活着则拒绝",
+      "conflict_pidfiles" in _ps and "event\\s+(consume|_bus)" in _ps and "REFUSED" in _ps and "--profile" in _ps
+      and "tasklist" not in _ps.lower() and "Stop-Process -Id $_.ProcessId" in _ps, _ps)
 
 print("\n%d/%d passed" % (sum(r for _, r in results), len(results))); shutil.rmtree(T, ignore_errors=True)
 sys.exit(0 if all(r for _, r in results) else 1)

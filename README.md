@@ -32,7 +32,7 @@
 python tests/run_tests.py
 ```
 
-一共 129 项，全部通过就可以。看 PDF 附件时才需要另外安装 `pypdf`。
+一共 139 项，全部通过就可以。看 PDF 附件时才需要另外安装 `pypdf`。
 
 从零开始：看 [docs/新建智能体.md](docs/新建智能体.md)。
 
@@ -58,7 +58,7 @@ python tests/run_tests.py
 | `agents/CONFIG.md` | 每一项怎么填 |
 | `redact.example.txt` | 空的客户名名单样子，复制成 `redact.txt` 再用 |
 | `scripts/` | Windows 上的启动、停止、看门狗、计划任务 |
-| `tests/run_tests.py` | 离线测试，129 项 |
+| `tests/run_tests.py` | 离线测试，139 项 |
 | `tests/fake_acp_agent.py` | 测试用的假常驻服务，不是真的 cursor-agent |
 | `docs/` | 给人看的说明和架构图。技能怎么写见 `docs/技能.md` |
 | `SKILL.md` | 给帮忙操作的 AI 助手看的步骤 |

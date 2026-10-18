@@ -31,6 +31,24 @@ SCOPE_HINT = {
 }
 READ_TOOLS = {"history", "docs_read", "docs_search", "calendar_read", "base_read"}
 WRITE_TOOLS = {"docs_create", "docs_append", "calendar_create", "base_create"}
+# 旧机器人配置里的名字。读的时候当成现在的名字；两边都写了就用新的，并在 --check 里提示。
+_LEGACY_TOOLS = (("doc_search", "docs_search"), ("doc_read", "docs_read"), ("doc_create", "docs_create"), ("doc_append", "docs_append"))
+_LEGACY_RESOURCES = (("doc_folder_token", "folder_token"), ("doc_append_tokens", "docs_append_tokens"))
+
+def apply_legacy_names(cfg):
+    hints = []
+    def take(bucket, pairs, where):
+        if not isinstance(bucket, dict): return
+        for old, new in pairs:
+            if old not in bucket: continue
+            if new not in bucket:
+                bucket[new] = bucket.pop(old)
+                hints.append("%s.%s 是旧名字，已按 %s 读取。请改成 %s" % (where, old, new, new))
+            else:
+                hints.append("%s.%s 是旧名字，已忽略（在用 %s）。请删掉 %s" % (where, old, new, old))
+    take(cfg.get("tools"), _LEGACY_TOOLS, "tools")
+    take((cfg.get("write") or {}).get("resources"), _LEGACY_RESOURCES, "write.resources")
+    return hints
 
 TOOL_DOC = """可用工具（每次最多调用一个；需要时只输出一行：<<TOOL>>{"tool":"名称","args":{...}}，不要输出别的）：
 - history {"keyword":"可选关键词"}：读取本群最近 7 天消息（仅群聊可用）
@@ -48,6 +66,7 @@ TOOL_DOC = """可用工具（每次最多调用一个；需要时只输出一行
 class Tools:
     def __init__(self, cfg, base, lark_exe, log, dry=False):
         self.cfg, self.base, self.lark_exe, self.log, self.dry = cfg, base, lark_exe, log, dry
+        self.legacy_hints = apply_legacy_names(cfg)
         self.t = cfg.get("tools", {}); self.w = cfg.get("write", {})
         self.audit_dir = os.path.join(base, "audit"); os.makedirs(self.audit_dir, exist_ok=True)
         self.pending = {}; self.pl = threading.Lock(); self.al = threading.Lock()

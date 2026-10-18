@@ -94,6 +94,7 @@
     "reaction": "OnIt",
     "done_reaction": "DONE",
     "status_message": true,
+    "delete_status_after_reply": false,
     "thinking_panel": true,
     "thinking_chars": 1200,
     "card_interval_sec": 12,

@@ -23,7 +23,7 @@
 | `bot_open_id` | 机器人自己的编号。在群成员列表的 bots 里，抄 `member_id`。没填时，正式启动会被拒绝。演练模式可以暂时空着，但正式用之前必须填。 |
 | `bot_names` | 机器人在群里显示的名字，可写多个。有人 @ 这个名字时，程序会把 @ 去掉再理解问题。 |
 | `chat_ids` | 允许回答的群的编号，一个群一项。不在这里的群，即使被 @ 也不说话。编号只能含字母、数字、下划线和短横线。 |
-| `conflict_pidfiles` | 旧程序的 pid 文件路径。那些进程还活着时，新程序拒绝启动，避免同一个应用回复两次。没有旧程序就留空列表 `[]`。 |
+| `conflict_pidfiles` | 旧程序的 pid 文件路径。那些进程还活着时，新程序拒绝启动，避免同一个应用回复两次。`scripts\start.ps1` 启动前也会看这份列表，还活着就打出 REFUSED 并且不启动。没有旧程序就留空列表 `[]`。 |
 | `reply_in_thread` | `true` 表示回复在话题里，不打散群聊。一般保持 `true`。 |
 | `max_concurrency` | 同时最多答几题。默认 `2`。 |
 | `max_queue` | 排队最多几题，多出来的会回复「提问有点多」。默认 `4`。 |
@@ -161,7 +161,7 @@
 | `calendar_create` | 在团队日历建日程，不邀请任何人。要确认码。 |
 | `base_create` | 在表格里加一条记录。要确认码。 |
 
-工具名字是 `docs_search`、`docs_read`、`docs_create`、`docs_append`（docs 带 s）。如果你从旧机器人抄配置，旧名字少一个 s，要改成现在这样。
+工具名字是 `docs_search`、`docs_read`、`docs_create`、`docs_append`（docs 带 s）。旧名字 `doc_search`、`doc_read`、`doc_create`、`doc_append` 仍会按新名字读取。`write.resources` 里的 `doc_folder_token`、`doc_append_tokens` 同样，对应现在的 `folder_token`、`docs_append_tokens`。两边都写了就用新名字。`python agentbot.py 配置.json --check` 会打出 `HINT` 提醒改掉，这行不算失败。
 
 ## 写入 write
 
@@ -185,7 +185,7 @@
 
 `enabled` 默认 `false`：不发表情、不发「处理中」卡片，直接等答案。升级时先保持关闭，只读跑稳了再改成 `true`。
 
-打开后需要权限：表情 `im:message.reactions:write_only`，更新消息 `im:message:update`，卡片 `cardkit:card:write`。缺了也不会崩，只是没有进度提示。
+打开后需要权限：表情 `im:message.reactions:write_only`，更新消息 `im:message:update`，卡片 `cardkit:card:write`。`delete_status_after_reply` 为 true 时还要撤回权限 `im:message:recall`。缺了也不会崩，只是没有进度提示，或者撤回失败时改成「已完成」。
 
 | 键 | 含义 |
 |---|---|
@@ -193,6 +193,7 @@
 | `reaction` | 收到问题时贴的表情，默认 `OnIt`。 |
 | `done_reaction` | 答完换成的表情，默认 `DONE`。 |
 | `status_message` | 要不要发进度消息。 |
+| `delete_status_after_reply` | 默认 `false`。为 `true` 时，答案另发一条消息之后，撤回那条「处理中」状态消息（只撤机器人自己发的那条）。撤回失败就改成「✅ 已完成」。`false` 时仍是改成「✅ 已完成」。`text` 模式如果已经把状态消息换成答案，不会撤回。 |
 | `thinking_panel` | 卡片里要不要「思考过程」。会先去掉路径和客户名。 |
 | `thinking_chars` | 思考过程最多保留多少字。 |
 | `card_interval_sec` / `card_max_updates` | 卡片多久刷新一次、最多刷新多少次。 |

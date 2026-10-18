@@ -329,11 +329,12 @@ def sanitize_progress(text):
 class Progress:
     """收到问题：给原消息加「处理中」表情，并回复一条状态卡片（mode=card，默认收起的「思考过程」面板）或文本状态消息（mode=text）；
     作答期间按阶段/定时更新（含已用时间）。答完：
-      card：答案照常以文本回复（格式和以前完全一致），卡片改成「已完成，用时 X」；
-      text：状态消息直接替换成答案，替换失败就另发答案、状态改成「已完成，用时 X」。
+      card：答案照常以文本回复（格式和以前完全一致）。delete_status_after_reply 为 true 时撤回这条状态消息，撤回失败才改成「已完成，用时 X」；否则卡片改成「已完成，用时 X」；
+      text：状态消息直接替换成答案，替换失败就另发答案（这时才按上面的规则撤回或改成「已完成，用时 X」）。
     表情换成完成表情。任何一步失败都静默降级（卡片失败→文本状态→只有表情），不影响作答。"""
     def __init__(self, mid):
         self.c = dict({"enabled": False, "mode": "card", "reaction": "OnIt", "done_reaction": "DONE", "status_message": True,
+                       "delete_status_after_reply": False,
                        "fast_interval_sec": 15, "fast_phase_sec": 120, "slow_interval_sec": 60, "min_gap_sec": 10,
                        "max_edits": 17, "card_interval_sec": 12, "card_max_updates": 150, "thinking_panel": True, "thinking_chars": 1200},
                       **CFG.get("progress", {}))
@@ -434,6 +435,22 @@ class Progress:
     def mark_done_after_reply(self, note=""):
         if self.status_id:
             with self.elk: self._edit("✅ 已完成，用时 %s%s" % (fmt_secs(time.time() - self.t0), note), final=True)
+    def recall_status(self):
+        """答案已经另发一条之后：只撤回机器人自己发的那条状态消息。成功 True；未开启、没有状态消息、或撤回失败都是 False。"""
+        if not self.c.get("delete_status_after_reply", False) or not self.status_id or self.status_id == self.mid:
+            return False
+        sid = self.status_id
+        cmd = ["im", "messages", "delete", "--message-id", sid]  # DELETE /open-apis/im/v1/messages/:message_id
+        if DRY:
+            if os.environ.get("AGENTBOT_RECALL_FAIL") == "1":
+                log.info("[dry-run] recall %s failed", " ".join(cmd)); return False
+            log.info("[dry-run] recall %s", " ".join(cmd)); return True
+        j, err = lark_api(cmd, timeout=60)
+        if j:
+            log.info("status recalled %s", sid); return True
+        log.info("progress recall failed (fallback to done): %s", (err or "")[-300:])
+        if _SCOPE_RX.search(err or ""): _prog_fail("recall", "im:message:recall", err)
+        return False
     def _swap_reaction(self):
         if self.reaction_id:
             if DRY: log.info("[dry-run] unreact %s %s", self.mid, self.reaction_id)
@@ -547,8 +564,11 @@ def handle(ev):
     try: replaced = prog.finish(final)
     except Exception as e: log.warning("progress finish error (ignored): %s", e); replaced = False
     if replaced: log.info("reply %s ok=True via status edit", mid); return
-    reply(mid, final)
-    try: prog.mark_done_after_reply("（时间到了，已先给部分结果）" if partial else "")
+    sent = reply(mid, final)
+    try:
+        # 答案没发出去时留下状态消息；撤回失败再改成已完成
+        if not (sent and prog.recall_status()):
+            prog.mark_done_after_reply("（时间到了，已先给部分结果）" if partial else "")
     except Exception as e: log.warning("progress mark_done error (ignored): %s", e)
 
 def heartbeat():
@@ -559,6 +579,8 @@ def heartbeat():
 
 def self_check():
     ok = True
+    for h in getattr(TOOLS, "legacy_hints", ()):
+        print("HINT " + h)  # 旧键还能用，提示改名，不算失败
     def p(name, good, info=""):
         nonlocal ok; ok &= bool(good); print("%s %s %s" % ("OK  " if good else "FAIL", name, info))
     p("kb dir", os.path.isdir(KB), KB)
