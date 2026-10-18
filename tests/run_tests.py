@@ -1971,5 +1971,9 @@ _gtext = open(_gmd, encoding="utf-8").read() if os.path.isfile(_gmd) else ""
 check("确认后写入群记忆，并刷新已打开话题的档案快照",
       _mc and "已记" in o2 and "周四" in _gtext and "memory snapshot refreshed" in o2, o2 + "\n" + _gtext)
 
+print("\n-- link --", flush=True)
+_lk = subprocess.run([sys.executable, os.path.join(FW, "tests", "test_link.py")], cwd=FW)
+results.append(("长连接重连与休眠唤醒", _lk.returncode == 0))
+
 print("\n%d/%d passed" % (sum(r for _, r in results), len(results))); shutil.rmtree(T, ignore_errors=True)
 sys.exit(0 if all(r for _, r in results) else 1)

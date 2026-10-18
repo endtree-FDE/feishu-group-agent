@@ -10,7 +10,7 @@
 import json, os, re, subprocess, sys, time, logging, collections, threading, sqlite3, hashlib, atexit, shutil, datetime
 
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
-import acp_client, guard, memory, providers
+import acp_client, feishu_link, guard, memory, providers
 from providers.base import PartialText
 from tools import Tools, ToolError, TOOL_DOC, MEMORY_TOOL_DOC, READ_TOOLS, WRITE_TOOLS, run_capture, parse_cli_json, clip_body, message_text, attachment_limits, inspect_download, safe_download_name
 
@@ -1172,11 +1172,28 @@ def catch_up_mentions():
 def startup_recover():
     recover_inflight(); catch_up_mentions()
 
+_LINK = feishu_link.LinkWatch(jump_sec=feishu_link.jump_setting(CFG))
+def _on_wake(gap):
+    # 先补答再写新心跳。心跳文件里还是休眠前的时间，回扫才能盖住这段空档。
+    log.warning("wake or clock jump %.0fs, restart long connection and catch up", gap)
+    try: catch_up_mentions()
+    except Exception: log.exception("catchup after wake failed")
 def heartbeat():
+    _LINK.start()
+    wrote = 0
     while True:
-        try: open(os.path.join(STATE, "heartbeat"), "w").write(str(int(time.time())))
-        except OSError: pass
-        time.sleep(60)
+        try: gap = _LINK.pulse()
+        except Exception:
+            log.exception("link pulse failed"); gap = 0
+        if gap:
+            try: _on_wake(gap)
+            except Exception: log.exception("wake handler failed")
+        now = time.time()
+        if not gap and now - wrote >= 60:
+            try: open(os.path.join(STATE, "heartbeat"), "w").write(str(int(now)))
+            except OSError: pass
+            wrote = now
+        time.sleep(1)
 
 def self_check():
     ok = True
@@ -1244,21 +1261,63 @@ def main():
         threading.Thread(target=_consume_forever, args=(key,), daemon=True).start()
     _consume_forever(keys[0])
 
+def _poke_consumer(proc, created, seen, down):
+    """连接断了或刚唤醒时，只结束创建时间仍对得上的那一个，好让读取循环返回。"""
+    while proc.poll() is None:
+        if not down.is_set() and _LINK.generation == seen:
+            time.sleep(0.5); continue
+        if feishu_link.may_signal(proc, created):
+            try: proc.terminate()
+            except OSError: pass
+        else:
+            log.warning("skip consumer pid %s (not the process we started)", proc.pid)
+        return
 def _consume_forever(event_key):
     while True:
+        seen = _LINK.generation
         argv = consume_argv(event_key)
         p = subprocess.Popen(argv, cwd=BASE, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
+        created = feishu_link.created_token(p.pid)
         if event_key == "im.message.receive_v1":
             open(os.path.join(STATE, "consumer.pid"), "w").write(str(p.pid))
         log.info("consumer %s pid %s", event_key, p.pid)
-        threading.Thread(target=lambda proc=p, key=event_key: [log.info("[consume:%s] %s", key, l.rstrip()) for l in proc.stderr], daemon=True).start()
+        down = threading.Event()
+        def _err(proc=p, key=event_key, flag=down):
+            for line in proc.stderr:
+                log.info("[consume:%s] %s", key, line.rstrip())
+                if _LINK.note(key, line) == "down": flag.set()
+        threading.Thread(target=_err, daemon=True).start()
+        threading.Thread(target=_poke_consumer, args=(p, created, seen, down), daemon=True).start()
         for line in p.stdout:
+            if _LINK.generation != seen or down.is_set(): break
             line = line.strip()
             if not line.startswith("{"): continue
             try: obj = json.loads(line)
             except Exception: continue
             threading.Thread(target=ingest, args=(obj,), daemon=True).start()
-        log.warning("consumer %s exited rc=%s, restart in 10s", event_key, p.wait()); time.sleep(10)
+        if _LINK.generation != seen: reason = "wake"
+        elif down.is_set(): reason = "down"
+        else: reason = "exit"
+        if p.poll() is None and reason in ("wake", "down"):
+            if feishu_link.may_signal(p, created):
+                try: p.terminate()
+                except OSError: pass
+            else:
+                log.warning("skip consumer pid %s (not the process we started)", p.pid)
+        if p.poll() is None:
+            # 不能证明是自己拉起的，就一直等到它自己退出，绝不另起一个接收进程。
+            while p.poll() is None: time.sleep(0.5)
+        rc = p.wait()
+        if reason == "wake":
+            delay = 0
+            log.warning("consumer %s restart after wake", event_key)
+        else:
+            delay = _LINK.fail(event_key)
+            log.warning("consumer %s exited rc=%s (%s), restart in %ss", event_key, rc, reason, delay)
+        deadline = time.time() + delay
+        while time.time() < deadline:
+            if _LINK.generation != seen: break
+            time.sleep(0.5)
 
 if __name__ == "__main__":
     main()
