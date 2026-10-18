@@ -125,6 +125,7 @@ class CursorProvider(Provider):
         self.log = log
         self.kb = kb
         self._pool = None
+        self._pool_lock = threading.Lock()
 
     def _agent(self):
         return self.cfg.get("agent") or {}
@@ -138,12 +139,16 @@ class CursorProvider(Provider):
         return cmd
 
     def pool(self):
+        # 调用方可能并发。锁内建好并登记退出清理后才发布，避免起两个常驻进程。
         if self._pool is None:
-            a = dict(self._agent())
-            if not (a.get("model") or "").strip():
-                a["model"] = DEFAULT_MODEL
-            self._pool = acp_client.Pool(self.build_acp_cmd, a, self.kb, self.log)
-            atexit.register(self._pool.close)
+            with self._pool_lock:
+                if self._pool is None:
+                    a = dict(self._agent())
+                    if not (a.get("model") or "").strip():
+                        a["model"] = DEFAULT_MODEL
+                    pool = acp_client.Pool(self.build_acp_cmd, a, self.kb, self.log)
+                    atexit.register(pool.close)
+                    self._pool = pool
         return self._pool
 
     def drop(self, sess):
