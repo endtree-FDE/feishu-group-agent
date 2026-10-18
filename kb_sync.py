@@ -13,7 +13,11 @@ for d in (INBOX, STG): os.makedirs(d, exist_ok=True)
 def lark_exe(): return [os.path.join(os.environ["APPDATA"], "npm", "lark-cli.cmd")] if os.name == "nt" else ["lark-cli"]
 def put(dst_root, rel, text, rep):
     cands = guard.candidate_names(text); text, dropped = guard.drop_policy_paragraphs(text, guard.policy_rules(CFG, "kb"))
-    text = guard.redact(text, NAMES); p = os.path.join(dst_root, rel.replace("/", os.sep)); os.makedirs(os.path.dirname(p), exist_ok=True)
+    text = guard.redact(text, NAMES)
+    p = guard.safe_path(dst_root, rel)
+    if not p:
+        rep.append("- 跳过可疑路径 " + str(rel)); return set()
+    os.makedirs(os.path.dirname(p), exist_ok=True)
     open(p, "w", encoding="utf-8").write(text)
     if dropped: rep.append("- %s：按 policy.redlines 删除段落 %d 段" % (rel, dropped))
     return cands
@@ -38,7 +42,7 @@ if "--inbox" in A:
         with zipfile.ZipFile(zp) as zf:
             man = json.loads(zf.read("MANIFEST.json"))
             for rel, sha in man["files"].items():
-                if ".." in rel or rel.startswith(("/", "\\")): rep.append("- 跳过可疑路径 " + rel); continue
+                if guard.safe_path(dst, rel) is None: rep.append("- 跳过可疑路径 " + rel); continue
                 b = zf.read(rel)
                 if hashlib.sha256(b).hexdigest() != sha: rep.append("- 校验失败 " + rel); continue
                 cands |= put(dst, rel, b.decode("utf-8", "replace"), rep); n += 1
@@ -64,7 +68,10 @@ if "--apply" in A:
     for root, _, fs in os.walk(src):
         for f in fs:
             if f.startswith("_"): continue
-            rel = os.path.relpath(os.path.join(root, f), src); os.makedirs(os.path.dirname(os.path.join(new, rel)), exist_ok=True)
-            shutil.copy2(os.path.join(root, f), os.path.join(new, rel))
+            rel = os.path.relpath(os.path.join(root, f), src)
+            dest = guard.safe_path(new, rel)
+            if not dest: print("skip", rel); continue
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            shutil.copy2(os.path.join(root, f), dest)
     prev = KB + "_prev"; shutil.rmtree(prev, ignore_errors=True); os.rename(KB, prev); os.rename(new, KB)
     print("applied", stamp, "-> kb（旧版本在 kb_prev）")
