@@ -155,13 +155,42 @@ check("卡片 + 卡死：发部分结果，卡片注明", "（时间到了，先
 o = run([ev("s10", "<<STREAM_NORMAL>> 撤回状态")], name="s_recall", cfg_path=mkcfg("recall", mode="card", delete_status=True), stream=True)
 _done10 = [l for l in o.splitlines() if "[dry-run] patch dry_status_s10" in l and "✅ 已完成" in l]
 check("进度：答案另发后只撤回状态消息，不再改成已完成",
-      "[dry-run] reply s10" in o and "[dry-run] recall im messages delete --message-id dry_status_s10" in o
+      "[dry-run] reply s10" in o and "[dry-run] recall im messages delete --message-id dry_status_s10 --yes" in o
       and "--message-id s10" not in o and not _done10, o)
 o = run([ev("s11", "<<STREAM_NORMAL>> 撤回失败")], name="s_recall_fail", cfg_path=mkcfg("recallfail", mode="card", delete_status=True), stream=True,
         extra_env={"AGENTBOT_RECALL_FAIL": "1"})
 check("进度：撤回失败则退回把状态改成已完成",
-      "[dry-run] reply s11" in o and "[dry-run] recall im messages delete --message-id dry_status_s11 failed" in o
+      "[dry-run] reply s11" in o and "[dry-run] recall im messages delete --message-id dry_status_s11 --yes failed" in o
       and any("✅ 已完成，用时" in l for l in o.splitlines() if "[dry-run] patch dry_status_s11" in l), o)
+FAKE_LARK = os.path.join(FW, "tests", "fake_lark_cli.py")
+def _fake_lark(*args):
+    return subprocess.run([sys.executable, FAKE_LARK, *args], capture_output=True, text=True, encoding="utf-8")
+_no = _fake_lark("im", "messages", "delete", "--message-id", "sid")
+_patch = _fake_lark("im", "messages", "patch", "--message-id", "sid")
+_react = _fake_lark("im", "reactions", "delete", "--message-id", "sid", "--reaction-id", "rid")
+_docs = _fake_lark("docs", "+create", "--title", "周报")
+check("假 lark-cli：im messages delete 缺 --yes 退出码 10，其他写操作不要求 --yes",
+      _no.returncode == 10 and _patch.returncode == 0 and _react.returncode == 0 and _docs.returncode == 0,
+      "delete=%s patch=%s react=%s docs=%s" % (_no.returncode, _patch.returncode, _react.returncode, _docs.returncode))
+_recall_log = os.path.join(T, "recall_lark.log")
+_recall_src = r"""
+import os, sys
+sys.argv = ["agentbot.py", os.environ["AGENTBOT_RECALL_CFG"]]
+import agentbot
+agentbot.lark_exe = lambda: [sys.executable, os.environ["AGENTBOT_FAKE_LARK_CLI"]]
+p = agentbot.Progress("user_mid")
+p.status_id = "status_mid"
+p.mid = "user_mid"
+p.c["delete_status_after_reply"] = True
+print("RECALL_OK" if p.recall_status() else "RECALL_FAIL")
+"""
+_recall_env = dict(os.environ, AGENTBOT_RECALL_CFG=CP, AGENTBOT_FAKE_LARK_CLI=FAKE_LARK, AGENTBOT_FAKE_LARK_LOG=_recall_log)
+_rr = subprocess.run([sys.executable, "-c", _recall_src], cwd=FW, capture_output=True, text=True, encoding="utf-8", env=_recall_env, timeout=60)
+_rargs = json.loads(open(_recall_log, encoding="utf-8").read().strip().splitlines()[-1]) if os.path.isfile(_recall_log) else []
+check("撤回命令带 --yes，撤回成功",
+      "RECALL_OK" in (_rr.stdout or "") and _rargs[:3] == ["im", "messages", "delete"] and "--yes" in _rargs
+      and _rargs[_rargs.index("--message-id") + 1] == "status_mid",
+      (_rr.stdout or "") + (_rr.stderr or "") + "\n" + json.dumps(_rargs, ensure_ascii=False))
 o = run([ev("s12", "<<STREAM_NORMAL>> 文字不撤回")], name="s_recall_text", cfg_path=mkcfg("recalltext", mode="text", delete_status=True), stream=True)
 check("进度（text 模式）：状态已换成答案时不撤回",
       "reply s12 ok=True via status edit" in o and "[dry-run] reply s12" not in o and "recall" not in o, o)
