@@ -28,7 +28,7 @@ description: >-
 2. 用文档里的一键链接申请权限（把 `clientID` 换成 App ID）。事件订阅用长连接，事件名 `im.message.receive_v1`。然后由对方发布版本并设置可用范围。
 3. 在对方的 Windows 上安装 Python 3.12（勾选加入 PATH）、Node.js、`npm install -g @larksuite/cli`、Cursor。由对方运行 `cursor-agent login`。
 4. 由对方本人完成 `lark-cli config init`。你用 `lark-cli config show` 确认 profile 名字，不要把输出贴到公开处。
-5. 机器人拉进群后：`lark-cli im +chat-list --as bot --profile 对方的profile --page-all --format json` 抄群编号；`lark-cli im +chat-members-list --chat-id 群编号 --as bot --profile 对方的profile --page-all --format json` 抄机器人的 `member_id` 和白名单成员的 `member_id`。
+5. 机器人拉进群后：`lark-cli im +chat-list --as bot --profile 对方的profile --page-all --format json` 抄群编号；`lark-cli im +chat-members-list --chat-id 群编号 --as bot --profile 对方的profile --page-all --format json` 抄机器人的 `member_id` 和白名单成员的 `member_id`。对方如果要用自动认群，按 `docs/升级已有智能体.md` 的「14 附」把 `chat_ids` 留空，不要代他们在群里发 `/认群`。
 6. 复制 `agents/example.json` 为 `agents/<短名>.json`。按 `CONFIG.md` 填。`REPLACE_` 全部换掉。`memory.enabled` 和 `progress.enabled` 先保持 `false`。`base_dir` 用 `.`。人设改成这个机器人的名字，不写客户真名。
 7. 复制 `redact.example.txt` 为 `redact.txt`。没有确认过的客户名就先空着。
 8. 在仓库根目录运行 `python tests/run_tests.py`。必须全部通过。这一步不联网。

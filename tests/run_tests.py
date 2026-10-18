@@ -1008,5 +1008,206 @@ check("start.ps1：本 profile 残留 event 进程会结束，conflict_pidfiles 
       "conflict_pidfiles" in _ps and "event\\s+(consume|_bus)" in _ps and "REFUSED" in _ps and "--profile" in _ps
       and "tasklist" not in _ps.lower() and "Stop-Process -Id $_.ProcessId" in _ps, _ps)
 
+# ---------- 拉进群自动认群 ----------
+def acfg(name, admit="confirm", chat_ids=None, auto=True, memory=False, inviters=None, allowed=None, base=None):
+    c = json.loads(json.dumps(cfg)); c["chat_ids"] = [] if chat_ids is None else chat_ids
+    c["chats"] = {"auto_join": auto, "admit": admit, "inviter_open_ids": list(inviters or [])}
+    if memory: c.setdefault("memory", {})["enabled"] = True
+    if allowed is not None: c["write"]["allowed_users"] = allowed
+    if base:
+        os.makedirs(os.path.join(base, "kb"), exist_ok=True); c["base_dir"] = base
+    pth = os.path.join(T, name + ".json"); json.dump(c, open(pth, "w", encoding="utf-8"), ensure_ascii=False); return pth
+def joined(cid, inviter="", name="测试群", deleted=False):
+    op = {"open_id": inviter} if inviter else {}
+    return {"event_type": "im.chat.member.bot.deleted_v1" if deleted else "im.chat.member.bot.added_v1",
+            "chat_id": cid, "operator_id": op, "name": name}
+def chat_row(cid):
+    db = sqlite3.connect(os.path.join(T, "state", "state.db"))
+    row = db.execute("select status,source from chats where chat_id=?", (cid,)).fetchone()
+    return row or ("", "")
+o = run([joined("oc_sneaky", "user_admin"), ev("st1", "你好", chat_id="oc_sneaky"), ev("st2", "在的", chat_id=CH)],
+        name="aj_static", cfg_path=acfg("aj_static", admit="open", chat_ids=[CH], auto=True))
+check("chat_ids 非空时忽略 auto_join：名单外的群不回答，名单内照常回答",
+      "reply st1" not in o and "agent start st1" not in o and "[dry-run] reply st2" in o and chat_row("oc_sneaky")[0] == "", o)
+o = run([ev("off1", "你好", chat_id="oc_off")], name="aj_off", cfg_path=acfg("aj_off", auto=False))
+check("chat_ids 为空且 auto_join 关闭：群里 @ 不回答", "reply off1" not in o and "agent start off1" not in o and chat_row("oc_off")[0] == "", o)
+o = run([joined("oc_quiet", "user_stranger", name="安静群")], name="aj_quiet", cfg_path=acfg("aj_quiet"))
+check("进群事件只记账，不发任何消息",
+      "[dry-run] reply" not in o and "大家好" not in o and "agent start" not in o and chat_row("oc_quiet") == ("pending", "added"), o)
+o = run([ev("sil1", "帮我看看", chat_id="oc_sil")], name="aj_sil", cfg_path=acfg("aj_sil"))
+check("confirm：陌生人 @ 不回答、不调模型，群记为待认",
+      "reply sil1" not in o and "agent start sil1" not in o and "大家好" not in o and chat_row("oc_sil") == ("pending", "mention"), o)
+o = run([ev("na1", "/认群", chat_id="oc_na", sender_id="user_sender")], name="aj_na", cfg_path=acfg("aj_na"))
+check("confirm：非管理员发 /认群 不认群、不回复、不调模型",
+      "reply na1" not in o and "agent start na1" not in o and chat_row("oc_na")[0] == "pending", o)
+o = run([ev("h1", "在吗", chat_id="oc_hint", sender_id="user_admin"),
+         ev("h2", "/认群", chat_id="oc_hint", sender_id="user_admin"),
+         ev("h3", "现在可以问了吗", chat_id="oc_hint", sender_id="user_sender")], name="aj_confirm", cfg_path=acfg("aj_confirm"))
+check("confirm：管理员普通 @ 只提示认群，不调模型",
+      "这个群还没认" in o and "agent start h1" not in o and "[dry-run] reply h1" in o, o)
+check("confirm：管理员 /认群 才放行，回复里说明不会主动发消息，且不调模型",
+      "已认这个群" in o and "不会主动发消息" in o and "agent start h2" not in o and "大家好" not in o and chat_row("oc_hint") == ("admitted", "command"), o)
+check("confirm：认群之后其他成员 @ 才调模型", "agent start h3" in o and "[dry-run] reply h3" in o and "[fake]" in o, o)
+A, B, C = "oc_mem_a", "oc_mem_b", "oc_mem_c"
+o = run([ev("ma1", "/认群", chat_id=A, sender_id="user_admin"),
+         ev("mb1", "/认群", chat_id=B, sender_id="user_admin"),
+         ev("mc1", "/认群", chat_id=C, sender_id="user_admin"),
+         ev("md1", "你好", chat_id="oc_mem_d", sender_id="user_sender"),
+         ev("ma2", "记一下：标记：甲群ONLYA", chat_id=A, sender_id="user_admin"),
+         ev("mb2", "记一下：标记：乙群ONLYB", chat_id=B, sender_id="user_admin"),
+         ev("ma3", "/记忆", chat_id=A, sender_id="user_sender")], name="aj_mem", cfg_path=acfg("aj_mem", memory=True))
+fa = os.path.join(T, "memory", "groups", A, "facts.jsonl"); fb = os.path.join(T, "memory", "groups", B, "facts.jsonl")
+ta = open(fa, encoding="utf-8").read() if os.path.isfile(fa) else ""; tb = open(fb, encoding="utf-8").read() if os.path.isfile(fb) else ""
+check("认群后为该群单独建记忆目录；没认的群不建",
+      os.path.isfile(os.path.join(T, "memory", "groups", C, "meta.json")) and not os.path.isfile(os.path.join(T, "memory", "groups", C, "facts.jsonl"))
+      and not os.path.isdir(os.path.join(T, "memory", "groups", "oc_mem_d")), o)
+check("两个已认群的记忆互不混用",
+      "甲群ONLYA" in ta and "乙群ONLYB" not in ta and "乙群ONLYB" in tb and "甲群ONLYA" not in tb and "甲群ONLYA" in o and "乙群ONLYB" not in o.split("reply ma3")[-1], o)
+o = run([ev("rv0", "/认群", chat_id="oc_revoke", sender_id="user_admin"),
+         ev("rv1", "/忘群", chat_id="oc_revoke", sender_id="user_admin"),
+         ev("rv2", "还在吗", chat_id="oc_revoke")], name="aj_revoke", cfg_path=acfg("aj_revoke"))
+check("管理员 /忘群 之后不再回答，也不调模型",
+      "已不再回答这个群" in o and "agent start rv2" not in o and "reply rv2" not in o and chat_row("oc_revoke") == ("revoked", "command"), o)
+PCH = "oc_persist"
+run([ev("ps1", "/认群", chat_id=PCH, sender_id="user_admin")], name="aj_ps1", cfg_path=acfg("aj_ps1"))
+o = run([ev("ps2", "重启后还认吗", chat_id=PCH)], name="aj_ps2", cfg_path=acfg("aj_ps2"))
+check("认群写入 state.db，下次启动不用再认", "agent start ps2" in o and "[dry-run] reply ps2" in o and chat_row(PCH)[0] == "admitted", o)
+run([ev("ps3", "/忘群", chat_id=PCH, sender_id="user_admin")], name="aj_ps3", cfg_path=acfg("aj_ps3"))
+o = run([ev("ps4", "忘了之后呢", chat_id=PCH)], name="aj_ps4", cfg_path=acfg("aj_ps4"))
+check("忘群写入 state.db，重启后仍然不回答", "agent start ps4" not in o and "reply ps4" not in o and chat_row(PCH)[0] == "revoked", o)
+ENV = {"header": {"event_type": "im.chat.member.bot.added_v1", "event_id": "evt_test"},
+       "event": {"chat_id": "oc_env_group", "operator_id": {"open_id": "user_admin", "union_id": "on_not_used"}, "name": "信封群", "external": False}}
+o = run([ENV, ev("wl1", "白名单拉进来的", chat_id="oc_env_group"),
+         joined("oc_stranger_group", "user_stranger"), ev("wl2", "陌生人拉进来的", chat_id="oc_stranger_group"),
+         {"event_type": "im.chat.member.bot.added_v1", "chat_id": "oc_union_only", "operator_id": {"union_id": "on_user_admin"}, "name": "只有union"},
+         ev("wl3", "只有 union_id", chat_id="oc_union_only")], name="aj_wl", cfg_path=acfg("aj_wl", admit="whitelist"))
+check("whitelist：白名单成员拉进的群，@ 就回答，且没有进群招呼",
+      "[dry-run] reply wl1" in o and "agent start wl1" in o and "大家好" not in o and chat_row("oc_env_group")[0] == "admitted"
+      and o.count("[dry-run] reply") == 1, o)
+check("whitelist：陌生人拉进，或事件里没有 open_id，都不回答",
+      "reply wl2" not in o and "agent start wl2" not in o and "reply wl3" not in o and "agent start wl3" not in o
+      and chat_row("oc_stranger_group")[0] == "pending" and chat_row("oc_union_only")[0] == "pending", o)
+o = run([joined("oc_inviter", "ou_inviter_only"), ev("iv1", "指定邀请人", chat_id="oc_inviter")],
+        name="aj_inv", cfg_path=acfg("aj_inv", admit="whitelist", inviters=["ou_inviter_only"]))
+check("whitelist：inviter_open_ids 里的人拉进也会直接认",
+      "agent start iv1" in o and "[dry-run] reply iv1" in o and chat_row("oc_inviter")[0] == "admitted" and "大家好" not in o, o)
+o = run([joined("oc_fallback", "user_stranger"), ev("fb1", "/认群", chat_id="oc_fallback", sender_id="user_admin"),
+         ev("fb2", "现在呢", chat_id="oc_fallback")], name="aj_fb", cfg_path=acfg("aj_fb", admit="whitelist"))
+check("whitelist：陌生人拉进的群，管理员仍可用 /认群 放行",
+      "agent start fb1" not in o and "已认这个群" in o and "agent start fb2" in o, o)
+o = run([joined("oc_re", "user_admin"), ev("re1", "第一问", chat_id="oc_re"),
+         {"header": {"event_type": "im.chat.member.bot.deleted_v1"}, "event": {"chat_id": "oc_re", "operator_id": {"open_id": "user_admin"}, "name": "再进群"}},
+         ev("re2", "移出之后", chat_id="oc_re"),
+         joined("oc_re", "user_admin"), ev("re3", "再次拉进", chat_id="oc_re")], name="aj_re", cfg_path=acfg("aj_re", admit="whitelist"))
+check("移出群后不再回答；白名单成员再次拉进会重新认",
+      "agent start re1" in o and "reply re2" not in o and "agent start re2" not in o and "agent start re3" in o
+      and chat_row("oc_re")[0] == "admitted", o)
+o = run([ev("cr0", "/认群", chat_id="oc_cre", sender_id="user_admin"),
+         joined("oc_cre", "", deleted=True), joined("oc_cre", "user_admin"),
+         ev("cr1", "重新进来了", chat_id="oc_cre"),
+         ev("cr2", "/认群", chat_id="oc_cre", sender_id="user_admin"),
+         ev("cr3", "认过了", chat_id="oc_cre")], name="aj_cre", cfg_path=acfg("aj_cre"))
+check("confirm：移出后再被拉进回到待认，要重新 /认群",
+      "reply cr1" not in o and "agent start cr1" not in o and "agent start cr2" not in o and "agent start cr3" in o, o)
+o = run([ev("op1", "今天天气", chat_id="oc_open_one"),
+         ev("op2", "/忘群", chat_id="oc_open_one", sender_id="user_admin"),
+         ev("op3", "忘了之后", chat_id="oc_open_one")], name="aj_open", cfg_path=acfg("aj_open", admit="open"))
+check("open：第一次 @ 就回答，回复是答案本身而不是进群招呼",
+      "agent start op1" in o and "[fake] 今天天气" in o and "大家好" not in o and "已认这个群" not in o.split("reply op2")[0], o)
+check("open：管理员 /忘群 之后陌生人再 @ 也不回答",
+      "已不再回答这个群" in o and "reply op3" not in o and "agent start op3" not in o and chat_row("oc_open_one")[0] == "revoked", o)
+o = run([ev("badm", "你好", chat_id="not a chat"), joined("../etc", "user_admin"), ev("bad2", "/认群", chat_id="../etc", sender_id="user_admin")],
+        name="aj_bad", cfg_path=acfg("aj_bad", admit="open"))
+check("非法 chat_id 不入库、不回答",
+      "reply badm" not in o and "reply bad2" not in o and "agent start" not in o and chat_row("not a chat")[0] == "" and chat_row("../etc")[0] == "", o)
+o = run([ev("y1", "随便问", chat_id="oc_yolo")], name="aj_yolo", cfg_path=acfg("aj_yolo", admit="nope"))
+check("admit 无法识别时按 confirm 处理，不调模型",
+      "reply y1" not in o and "agent start y1" not in o and chat_row("oc_yolo")[0] == "pending", o)
+p2 = {"message_id": "ajp", "chat_id": "chat_p2p_aj", "chat_type": "p2p", "message_type": "text", "sender_id": "user_anyone", "sender_type": "user", "content": "私聊仍可用"}
+o = run([p2], name="aj_p2p", cfg_path=acfg("aj_p2p"))
+check("自动认群不改变私聊：允许的人不用 @ 也能问", "reply ajp" in o and "sess=p2p:chat_p2p_aj" in o, o)
+_co = subprocess.run([sys.executable, os.path.join(FW, "agentbot.py"), acfg("aj_chk_static", chat_ids=[CH], auto=True, admit="open"), "--check"],
+                     capture_output=True, text=True, encoding="utf-8", timeout=30)
+_co = (_co.stdout or "") + (_co.stderr or "")
+check("--check：chat_ids 非空时说明自动认群被忽略，且不因此失败",
+      "OK   chats static chat_ids=1（auto_join 已忽略）" in _co and "HINT chats.auto_join 已开启" in _co
+      and not any(l.startswith("FAIL chats") for l in _co.splitlines()), _co)
+_co = subprocess.run([sys.executable, os.path.join(FW, "agentbot.py"), acfg("aj_chk_on", base=os.path.join(T, "iso_chk_on")), "--check"],
+                     capture_output=True, text=True, encoding="utf-8", timeout=30)
+_co = (_co.stdout or "") + (_co.stderr or "")
+check("--check：自动认群生效时报告门槛，不把待认群说成失败",
+      "OK   chats auto_join admit=confirm admitted=0 pending=0" in _co and "HINT chats.auto_join 已开启" not in _co
+      and not any(l.startswith("FAIL chats") for l in _co.splitlines()), _co)
+_co = subprocess.run([sys.executable, os.path.join(FW, "agentbot.py"), acfg("aj_chk_empty", allowed={}, base=os.path.join(T, "iso_chk_empty")), "--check"],
+                     capture_output=True, text=True, encoding="utf-8", timeout=30)
+_co = (_co.stdout or "") + (_co.stderr or "")
+check("--check：confirm 且没有白名单时提示没人能认群", "HINT chats.admit=confirm" in _co and "/认群" in _co, _co)
+SYNC = r'''
+import os, sys, json
+sys.argv = ["agentbot.py", os.environ["CFG"]]
+import agentbot
+listed = json.loads(os.environ.get("LISTED") or "[]")
+def fake_api(argv, payload=None, timeout=30):
+    if os.environ.get("LIST_FAIL") == "1": return None, "99991672 access denied"
+    if argv[:2] == ["im", "+chat-list"]: return {"ok": True, "data": {"chats": listed}}, ""
+    return None, "unexpected"
+agentbot.lark_api = fake_api
+for row in json.loads(os.environ.get("SEED") or "[]"):
+    agentbot.save_chat(row["chat_id"], row["status"], row.get("source") or "command")
+agentbot.sync_joined_chats()
+print("SYNC " + json.dumps(agentbot.all_chats(), ensure_ascii=False))
+print("KEYS " + json.dumps(agentbot.consumer_keys(), ensure_ascii=False))
+print("CMD " + json.dumps(agentbot.consume_argv("im.chat.member.bot.added_v1"), ensure_ascii=False))
+print("ITEMS " + ",".join(r["chat_id"] for r in agentbot.extract_chat_rows({"data": {"items": [{"chat_id": "oc_item_shape", "name": "原始接口"}]}})))
+'''
+def run_sync(name, admit, listed, seed=(), fail=False):
+    base = os.path.join(T, "iso_" + name); os.makedirs(os.path.join(base, "kb"), exist_ok=True)
+    c = json.loads(json.dumps(cfg)); c["base_dir"] = base; c["chat_ids"] = []
+    c["chats"] = {"auto_join": True, "admit": admit, "inviter_open_ids": []}; c.setdefault("memory", {})["enabled"] = True
+    pth = os.path.join(T, name + ".json"); json.dump(c, open(pth, "w", encoding="utf-8"), ensure_ascii=False)
+    env = dict(os.environ, CFG=pth, LISTED=json.dumps(listed, ensure_ascii=False), SEED=json.dumps(list(seed), ensure_ascii=False), LIST_FAIL="1" if fail else "")
+    env["AGENTBOT_FAKE_AGENT"] = "0.1"
+    r = subprocess.run([sys.executable, "-c", SYNC], cwd=FW, capture_output=True, text=True, encoding="utf-8", env=env, timeout=60)
+    return (r.stdout or "") + (r.stderr or ""), base
+def sync_map(out):
+    line = [l for l in out.splitlines() if l.startswith("SYNC ")]
+    rows = json.loads(line[0][5:]) if line else []
+    return {r["chat_id"]: r["status"] for r in rows}
+o, base = run_sync("sync_cf", "confirm",
+                   [{"chat_id": "oc_listed_new", "name": "列出的群", "chat_status": "normal"},
+                    {"chat_id": "oc_listed_dead", "name": "已解散", "chat_status": "dissolved"},
+                    {"chat_id": "oc_hold", "name": "保持忘群", "chat_status": "normal"}],
+                   seed=({"chat_id": "oc_gone", "status": "admitted"}, {"chat_id": "oc_hold", "status": "revoked"},
+                         {"chat_id": "oc_old_config", "status": "admitted", "source": "config"}))
+sm = sync_map(o)
+check("启动列出所在群：confirm 记为待认，解散和已不在的群不再回答，忘群保持",
+      sm.get("oc_listed_new") == "pending" and sm.get("oc_listed_dead") == "left" and sm.get("oc_gone") == "left"
+      and sm.get("oc_old_config") == "left" and sm.get("oc_hold") == "revoked"
+      and "[dry-run] reply" not in o and "大家好" not in o and "im.chat.member.bot.added_v1" in o and "im.chat.member.bot.deleted_v1" in o
+      and "oc_item_shape" in o, o)
+o, base = run_sync("sync_open", "open", [{"chat_id": "oc_open_listed", "name": "打开即认", "chat_status": "normal"},
+                                         {"chat_id": "oc_open_hold", "name": "仍忘", "chat_status": "normal"},
+                                         {"chat_id": "oc_was_pending", "name": "原先待认", "chat_status": "normal"}],
+                   seed=({"chat_id": "oc_open_hold", "status": "revoked"}, {"chat_id": "oc_was_pending", "status": "pending"}))
+sm = sync_map(o)
+check("open：启动时列出的群直接认下，但不发消息；忘过的群不会被列表重新打开",
+      sm.get("oc_open_listed") == "admitted" and sm.get("oc_open_hold") == "revoked" and sm.get("oc_was_pending") == "admitted"
+      and os.path.isfile(os.path.join(base, "memory", "groups", "oc_open_listed", "meta.json"))
+      and "[dry-run] reply" not in o and "大家好" not in o, o)
+o, base = run_sync("sync_fail", "confirm", [], seed=({"chat_id": "oc_keep", "status": "admitted"},), fail=True)
+check("列出群失败时保留已认记录，不清空",
+      sync_map(o).get("oc_keep") == "admitted" and "chat list unavailable" in o, o)
+_keys = subprocess.run([sys.executable, "-c", """
+import os, sys, json
+sys.argv = ['agentbot.py', os.environ['CFG']]
+import agentbot
+print('KEYS ' + json.dumps(agentbot.consumer_keys()))
+print('CMD ' + json.dumps(agentbot.consume_argv('im.message.receive_v1')))
+"""], cwd=FW, capture_output=True, text=True, encoding="utf-8", env=dict(os.environ, CFG=CP), timeout=30)
+_ko = (_keys.stdout or "") + (_keys.stderr or "")
+check("默认仍只订阅消息事件；进群事件命令本身带 --as bot",
+      '["im.message.receive_v1"]' in _ko and "im.chat.member.bot.added_v1" not in _ko.split("CMD")[0]
+      and '"event"' in _ko and '"consume"' in _ko and '"--as"' in _ko and '"bot"' in _ko, _ko)
+
 print("\n%d/%d passed" % (sum(r for _, r in results), len(results))); shutil.rmtree(T, ignore_errors=True)
 sys.exit(0 if all(r for _, r in results) else 1)

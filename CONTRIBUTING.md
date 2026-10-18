@@ -16,7 +16,7 @@
 python tests/run_tests.py
 ```
 
-当前是 147 项。提交之前请让它们全部通过。测试用假的 lark-cli 和假的模型进程，不会访问飞书。
+当前是 178 项。提交之前请让它们全部通过。测试用假的 lark-cli 和假的模型进程，不会访问飞书。
 
 改了启动脚本、配置键或工具名时，把对应的检查补进 `tests/run_tests.py`。
 
@@ -44,4 +44,4 @@ python tests/run_tests.py
 
 ## English
 
-Run `python tests/run_tests.py` and keep all 147 checks passing. Do not commit secrets, filled-in `agents/*.json`, `redact.txt`, `memory/`, `logs/`, or real knowledge-base files. Contributions are licensed under Apache-2.0.
+Run `python tests/run_tests.py` and keep all 178 checks passing. Do not commit secrets, filled-in `agents/*.json`, `redact.txt`, `memory/`, `logs/`, or real knowledge-base files. Contributions are licensed under Apache-2.0.
