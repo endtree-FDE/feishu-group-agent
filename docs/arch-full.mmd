@@ -37,11 +37,18 @@ flowchart TB
     P5 --> ASM
   end
 
-  subgraph L5["⑤ 模型运行层：思考与查资料"]
+  subgraph L5["⑤ 模型运行层：两条里选一条"]
     direction LR
-    ACP["cursor-agent 常驻进程<br/>配置里的模型 · ask 只读"]:::model --> STREAM["流式事件<br/>思考·工具·文字片段"]:::model
-    ACP -. 按需读全文 .-> SKD["skills/某技能/SKILL.md"]:::store
-    ACP -. 按需读原文 .-> KBF["kb/某文件.md"]:::store
+    CHOOSE{"model_provider"}:::model
+    CUR["cursor-agent<br/>本机登录 · 可常驻 · ask 只读"]:::model
+    OAI["OpenAI 兼容接口<br/>DeepSeek · 通义 · 智谱 · 盘古<br/>或自填 / 比赛地址<br/>密钥只在环境变量"]:::model
+    STREAM["流式事件<br/>思考 · 文字片段"]:::model
+    CHOOSE --> CUR
+    CHOOSE --> OAI
+    CUR --> STREAM
+    OAI --> STREAM
+    CUR -. 可自己翻工作区 .-> SKD["skills/某技能/SKILL.md"]:::store
+    CUR -. 可自己翻工作区 .-> KBF["kb/某文件.md"]:::store
   end
 
   subgraph L6["⑥ 工具与写操作层：动飞书前先确认"]
