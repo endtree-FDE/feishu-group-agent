@@ -4,6 +4,7 @@ import json, os, queue, re, socket, threading, time, urllib.error, urllib.reques
 
 import acp_client
 from providers.base import PartialText, Provider, emit
+from providers.presets import preset_id, resolve_agent
 
 _RETRY_HTTP = {408, 409, 429, 500, 502, 503, 504}
 
@@ -31,9 +32,13 @@ class OpenAICompatProvider(Provider):
     def __init__(self, cfg, log):
         self.cfg = cfg
         self.log = log
+        pid = preset_id(cfg)
+        if pid:
+            self.log.info("model preset %s", pid)
 
     def _agent(self):
-        return self.cfg.get("agent") or {}
+        # 预设只补空着的地址、模型名和变量名。调用方配置原样留着，这里不读密钥。
+        return resolve_agent(self.cfg)
 
     def _model(self):
         return (self._agent().get("model") or "").strip()
