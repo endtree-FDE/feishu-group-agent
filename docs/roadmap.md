@@ -1,6 +1,6 @@
 # 路线图
 
-写于 2026-10-18。目标是把这个飞书群智能体框架做到接近成熟开源项目：回答准、联网和读文件可靠、记忆好用、写入安全、崩溃能自己恢复、日志查得到、新人大约半小时能部署。
+写于 2026-10-18。目标是达到可以公开的成熟开源项目水平：回答准、联网和读文件可靠、记忆好用、写入安全、崩溃能自己恢复、日志查得到、新人大约半小时能部署。许可证用仓库里已有的 Apache-2.0。公开之后，同一套门卫、确认码和脱敏要能换模型和换运行平台，方便拿去参赛（例如 2026 年 CCF BDCI 上由 openJiuwen / JiuwenSwarm 支撑的赛题）。比赛用的密钥、股票池和客户数据不进这个仓库。
 
 排序按「收益高、风险低」在前。每一项都要保持这些红线：不主动往群里发消息，不加话题屏蔽，写入仍要白名单和 6 位确认码，不把真实账号、群号、密钥、客户名写进仓库。已有 `agents/*.json` 缺了新键时，要么保持原行为，要么只在本来就安全的方向上补默认值（下面每项写明是哪一种）。
 
@@ -82,3 +82,93 @@
 - 放宽写入：不取消确认码，不取消白名单，不邀请人，不代发 `@全员`（除非对方原话要求，且是已确认的日程）。
 - 把问题原文、工具结果或提示词写成可外传的轨迹。
 - 为了检索去接托管记忆或向量服务。
+
+## 开源就绪
+
+公开仓库要让陌生人能看懂、能跑测试、能报告漏洞。下面每一项都还没做完；已经有的文件写明了，避免推倒重来。做的时候仍遵守上面的红线，不把真实账号、群号、密钥、客户名写进示例或截图。
+
+### 9. 中英双语 README
+
+- **目标：** 首页同时给中文和英文读者：这是什么、架构图、半小时能走完的快速开始、安全边界、许可证。
+- **现状：** [README.md](../README.md) 已有中英两段、mermaid 架构图和快速开始。[LICENSE](../LICENSE) 已是 Apache-2.0。快速开始里的测试条数仍写着 208，和现在的测试数量不一致。
+- **参考：** [NoneBot2 README](https://github.com/nonebot/nonebot2)、[OpenClaw](https://github.com/openclaw/openclaw)。
+- **验收：** 中文和英文都覆盖用途、架构图、复制 `agents/example.json` 的快速开始、测试命令、不要提交的文件。测试条数与当时的 `tests/run_tests.py` 一致，或改成「全部通过」而不写会死的数字。不出现真实群号和客户名。
+
+### 10. CONTRIBUTING 和代码规范
+
+- **目标：** 贡献者知道怎么跑测试、什么不能提交、代码按什么风格改。
+- **现状：** [CONTRIBUTING.md](../CONTRIBUTING.md) 已有，但测试条数仍写着 178，也没有代码规范。
+- **参考：** [GitHub 开源指南里的贡献文档](https://docs.github.com/en/communities/setting-up-your-project-for-healthy-contributions)。
+- **验收：** 文档写明：Python 3.12、`python tests/run_tests.py` 必须全过、不提交填好的配置和密钥、新行为要补测试。代码规范写成仓库里已经在用的写法（紧凑的 Python，注释说明为什么），并有一个不强迫全库重排的检查能在 CI 里通过。不把现有默认开关改成开。
+
+### 11. SECURITY.md
+
+- **目标：** 别人知道往哪私下报告漏洞，以及哪些文件不能公开。
+- **现状：** [SECURITY.md](../SECURITY.md) 已有私人通报链接和禁止提交的清单。它写着「没有单独的版本号分支」。有了版本号之后要改成「安全修复以最新发布版和 `main` 为准」。
+- **参考：** [GitHub 安全政策](https://docs.github.com/en/code-security/getting-started/adding-a-security-policy-to-your-repository)。
+- **验收：** 中英都说明：不要在公开 Issue 里贴密钥和飞书编号；给出私人通报入口；列出不提交的路径。版本政策与当时是否已发布一致。
+
+### 12. CHANGELOG、版本号和 Release
+
+- **目标：** 每次对用户可见的改动有一条记录，打标签就能下载。
+- **现状：** 没有 `CHANGELOG.md`，也没有 GitHub Release。`acp_client.py` 里给协议用的 `clientInfo` 版本字符串不是对外发布号。
+- **参考：** [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)、[语义化版本](https://semver.org/lang/zh-CN/)、[GitHub Releases](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)。
+- **验收：** 仓库根有 `CHANGELOG.md`，至少有一个未发布或已发布的版本节。有一处单一版本号（例如 `VERSION` 文件），和 changelog、Release 标签一致。缺这个文件时，程序行为与现在相同。Release 说明不包含密钥和真实编号。
+
+### 13. Issue 和 Pull Request 模板
+
+- **目标：** 报问题和提改动时，先写清复现步骤、影响和有没有碰到写入或脱敏。
+- **现状：** 没有 `.github/ISSUE_TEMPLATE/`，也没有拉取请求模板。
+- **参考：** [Issue 和 PR 模板](https://docs.github.com/en/communities/using-templates-to-encourage-useful-issues-and-pull-requests/about-issue-and-pull-request-templates)。
+- **验收：** 至少有一个 bug 模板、一个功能模板、一个 PR 模板。模板提醒不要粘贴 App Secret、群号、open_id、客户名。不因为加了模板而改变程序行为。
+
+### 14. GitHub Actions：测试和 lint，Windows 与 Linux
+
+- **目标：** 每次推送和拉取请求都在 Windows 和 Linux 上跑测试，并跑第 10 项的 lint。
+- **现状：** 没有 `.github/workflows/`。本地测试不需要第三方包，也不需要飞书。
+- **参考：** [GitHub Actions](https://docs.github.com/en/actions)。
+- **验收：** 两个系统都执行 `python tests/run_tests.py`，失败则工作流失败。不在 CI 里访问飞书，不把密钥写进工作流。Windows 上没有 PowerShell 的检查仍只核对脚本源码，和现在的测试一样。
+
+### 15. 示例配置
+
+- **目标：** 新人复制一份就能看出每一项该换成自己的值。
+- **现状：** [agents/example.json](../agents/example.json) 已用 `REPLACE_` 占位，并被当作唯一允许提交的智能体配置。
+- **参考：** [agents/CONFIG.md](../agents/CONFIG.md)。
+- **验收：** 示例里没有真实 App Secret、群号、open_id、客户名。新增的开关在示例里写出默认值，并在 CONFIG 里说明「不写这一项时怎样」。`python agentbot.py agents/example.json --check` 对占位符的提示与第 5 项一致，不要求在这一项里先做完第 5 项。
+
+### 16. 演示截图和动图占位
+
+- **目标：** 首页能放一张界面说明，但公开前不放带真实聊天记录的图。
+- **现状：** 没有 `docs/demo/` 之类的占位。
+- **参考：** 常见做法是仓库里放一张不含账号的示意图，或在 README 里写明「截图待补」。
+- **验收：** 有一处占位（图或说明文件），写明替换时要遮住群名、头像、open_id 和客户名。占位文件本身不含这些内容。不把真实会话截图提交进来。
+
+### 17. 模型和平台可替换
+
+- **目标：** 参赛或换供应商时，只换模型或换运行平台，不复制一份飞书门卫、确认码和 SSRF 检查。
+- **现状：** `model_provider` 已能在 `cursor`、`openai_compat`、`fake` 之间换，密钥只留在环境变量里。消息入口和工具仍绑在飞书 / lark-cli 上。
+- **参考：** [docs/模型接口.md](模型接口.md)、[openJiuwen 赛题报道](https://caijing.chinadaily.com.cn/a/202607/20/WS6a5dd2a3a310d709c2fbe862.html)、[职场赛题](https://competitions.atomgit.com/competition/2079523455267733506)、[量化赛题](https://competitions.atomgit.com/competition/2079794808848314369)、[论文赛题](https://competitions.atomgit.com/competition/2079803553561747457)。赛题要接的是 openJiuwen / JiuwenSwarm 这一类运行时，模型名由参赛者自己配。
+- **验收：** 不写新的平台配置时，飞书入口和现有两种模型与现在相同。文档说明怎样接另一种 OpenAI 兼容模型，以及平台接口要守住的边界：白名单、确认码、脱敏、不主动发消息。仓库不收录比赛密钥、账号或赛题数据。默认不自动切换到第二家模型（那是第 8 项，默认关）。
+
+### 18. 自动化密钥扫描
+
+- **目标：** 每次推送都扫一遍工作区和提交，发现像密钥的字符串就让检查失败。
+- **现状：** 没有 gitleaks 或同类配置。`.gitignore` 已排除填好的配置、`redact.txt`、`.env`、记忆和日志。
+- **参考：** [gitleaks](https://github.com/gitleaks/gitleaks)。
+- **验收：** CI 里有一次密钥扫描。`agents/example.json` 的 `REPLACE_` 占位和测试里的虚构客户名不会被判失败。扫描告警里的原文不写进仓库。这一项不代替下面的公开前人工复查。
+
+## 公开前清理
+
+这一节只规定怎么查、怎么报告。查到了也不改写 Git 历史：不用 `git filter-repo`，不 rebase，不 amend 旧提交。要删历史里的真实数据，必须由维护者另作决定。
+
+公开之前，对 `git rev-list --all` 里的每一个提交再查一遍，至少包括：
+
+- 飞书 `ou_` open_id、`on_` union_id、较长的 `oc_` 群号、`cli_` 应用编号、`om_` 消息编号
+- App Secret、`sk-` 密钥、私钥、云厂商访问密钥、带真实口令的赋值
+- 手机号、邮箱、用户目录路径
+- 不带「某某」的公司名或客户名
+- 提交说明和作者字段里的真实账号
+
+报告只写种类、文件路径和提交号，值打码。占位符（`REPLACE_`）、文档和测试里的「小李」「小助手」「某某」公司、以及测试用的短 `oc_` 群号，要和真实数据分开写。
+
+2026-10-18 对当时本地能看到的全部 44 个提交、1924 个文件版本查过一次，没有改写历史。文件内容里没有上述真实编号、密钥、手机号、邮箱或客户名。公司名都带「某某」，或是 `guard.py` 里用来打码的后缀规则。测试里的手机号是虚构的。短的 `oc_` 是测试群号。提交作者是维护者的 GitHub noreply 地址，以及云代理的维护邮箱，这两处在提交元数据里，不是密钥，也没有从历史里删掉。下一次公开前要按上面的范围再查，因为这之后还会有新提交。
