@@ -6,16 +6,17 @@ from providers.base import Provider, emit
 
 def _scripted_steps(prompt):
     """测试用：<<FAKE_SEQ>>[...]<<END>> 按已经出现的工具结果条数取下一步。
-    <<FAKE_SEQ_FORCE>> 即使上一轮已经要求直接回答，也继续吐出工具行，用来确认多出来的调用不会被执行。"""
-    for marker, force in (("<<FAKE_SEQ_FORCE>>", True), ("<<FAKE_SEQ>>", False)):
+    <<FAKE_SEQ_FORCE>> 即使上一轮已经要求直接回答，也继续吐出带前缀的工具行，用来确认多出来的调用不会被执行。
+    <<FAKE_SEQ_BARE>> 同样忽略停止语，但只吐工具行、不带前缀，用来确认剥掉之后不会变成空回答。"""
+    for marker, mode in (("<<FAKE_SEQ_BARE>>", "bare"), ("<<FAKE_SEQ_FORCE>>", "force"), ("<<FAKE_SEQ>>", "normal")):
         i = prompt.find(marker)
         if i < 0: continue
         j = prompt.find("<<END>>", i)
-        if j < 0: return None, False
+        if j < 0: return None, "normal"
         try: data = json.loads(prompt[i + len(marker):j])
-        except Exception: return None, False
-        if isinstance(data, list): return data, force
-    return None, False
+        except Exception: return None, "normal"
+        if isinstance(data, list): return data, mode
+    return None, "normal"
 
 class FakeProvider(Provider):
     name = "fake"
@@ -31,12 +32,12 @@ class FakeProvider(Provider):
             time.sleep(float(delay))
         if os.environ.get("AGENTBOT_FAKE_DUMP_PROMPT"):
             self.log.info("fake prompt: %s", json.dumps(prompt, ensure_ascii=False))
-        steps, force = _scripted_steps(prompt)
+        steps, mode = _scripted_steps(prompt)
         if steps is not None:
             done = prompt.count("工具结果（")
             stop = "不要再调用工具" in prompt
-            if done < len(steps) and (force or not stop):
-                prefix = "先说到这里\n" if force else ""
+            if done < len(steps) and (mode != "normal" or not stop):
+                prefix = "先说到这里\n" if mode == "force" else ""
                 return prefix + "<<TOOL>>" + json.dumps(steps[done], ensure_ascii=False)
             return "[fake] 已根据工具结果回答"
         m = re.search(r"<<FAKE_TOOL>>(\{.*?\})<<END>>", prompt)

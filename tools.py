@@ -78,7 +78,7 @@ TOOL_DOC = """可用工具（每一轮只输出一行：<<TOOL>>{"tool":"名称"
 上面这些只是飞书读写。联网搜索和打开网页是你自带的能力，不在这张表里，需要时直接用，不要拒绝。
 多个日程用 calendar_create_batch，仍然只输出一行。notify_all 只在对方明确说要 @全员 或通知所有人时才设为 true，不要自己写 at 标签，也不要邀请任何人。
 没有必要就不要调用工具，直接回答。
-被问到本群里的文件、图片、飞书文档或知识库时，要真的去读，不要只看发送记录：先用 history 看 [文件 文件名 id=om_…] 和文档链接，再用 message_attachment 按消息编号读取附件，用 docs_read 读取文档或知识库，读完再总结。
+被问到本群里的文件、图片、飞书文档或知识库时，要真的去读，不要只看发送记录：先用 history 看 [文件 文件名 id=om_…] 和文档链接，再用 message_attachment 按消息编号读取附件，用 docs_read 读取文档或知识库，读完再总结。回答用户时不要复述消息编号。
 重要：你处于只读模式，不能改本地文件，但飞书的新建/追加/建日程/改日程/删日程/加记录不需要你自己执行——只要输出上面那一行 <<TOOL>>，机器人会代为执行（写操作先让发起人回复确认码）。用户要求写飞书时，直接输出对应工具行，绝不要回答“切换到可编辑模式”或“无法创建”。"""
 MEMORY_TOOL_DOC = """还可以提议写入群记忆（需白名单发起人确认，仍只输出一行）：
 - memory_propose {"text":"主题：内容"}：用户明确说「记住」「以后都」这类偏好时使用。不要把没经确认的内容当成已经记住。"""
@@ -266,7 +266,7 @@ class Tools:
         msg = _pick_message(j.get("data") or {}, mid)
         if not msg: raise ToolError("没有找到这条消息")
         got = str(msg.get("message_id") or msg.get("id") or "")
-        if got and got != mid: raise ToolError("没有对上这条消息，不能读取附件")
+        if got != mid: raise ToolError("没有对上这条消息，不能读取附件")
         if _msg_chat(msg) != chat:
             raise ToolError("只能读取当前会话里的附件")
         ts = message_ts(msg.get("create_time") if msg.get("create_time") is not None else msg.get("create_time_ms"))
@@ -275,13 +275,18 @@ class Tools:
         if time.time() - ts > days * 86400:
             raise ToolError("这条消息超过了最近 %d 天，不能读取附件" % days)
         d, files, mtype, saved = self.fetch_attachments(mid, ctx, os.path.join(self.base, "tmp"), must_enable=False)
+        saved_id = str((saved or {}).get("message_id") or (saved or {}).get("id") or "")
+        saved_chat = _msg_chat(saved)
+        if (saved_id and saved_id != mid) or (saved_chat and saved_chat != chat):
+            shutil.rmtree(d, ignore_errors=True)
+            raise ToolError("下载结果和当前会话对不上，没有读取附件")
         img_dir = None
         try:
             limits = attachment_limits(self.cfg)
             vision = bool((self.cfg.get("features") or {}).get("vision", True))
             kb = os.path.join(self.base, self.cfg.get("kb_dir", "kb"))
             lines, img_dir, n, skipped = render_saved_files(
-                files, limits, vision, mtype or (saved or {}).get("msg_type") or "", kb, os.path.basename(d), cap - used)
+                files, limits, vision, mtype or (saved or {}).get("msg_type") or "", kb, os.path.basename(d), cap - used, self.names)
             if isinstance(ctx, dict):
                 ctx["_attach_used"] = used + n
             if not lines and not files:
@@ -535,7 +540,7 @@ class Tools:
             files.append(p)
         msgs = (j.get("data") or {}).get("messages") or []
         msg = msgs[0] if msgs else {}
-        files = apply_original_names(files, msg)
+        files = apply_original_names(files, msg, self.names)
         self.audit(kind="read", tool="attachment", user=ctx["user"], chat=ctx["chat_id"], ok=True, n=len(files))
         return d, files, (msg.get("msg_type") or msg.get("message_type") or ""), msg
 
@@ -966,10 +971,30 @@ def attachment_names(msg):
         seen.add(mark); out.append(mark)
     return out
 
-def apply_original_names(files, msg):
-    """下载文件名常常是 file_key。改成消息里的原文件名，模型和提示词都不再看到 file_key。"""
+def disk_download_name(name, names=None):
+    """落盘只用打码后的文件名。客户名不留在临时目录或 kb/.attach/。"""
+    safe = safe_download_name(name)
+    if not safe: return None
+    if names:
+        safe = safe_download_name(guard.redact(safe, names)) or "file"
+    return safe
+
+def _place_download(path, new_name):
+    if not new_name: return path
+    dest = os.path.join(os.path.dirname(path), new_name)
+    if os.path.abspath(dest) == os.path.abspath(path): return path
+    stem, ext = os.path.splitext(new_name); n = 1
+    while os.path.exists(dest):
+        dest = os.path.join(os.path.dirname(path), "%s_%d%s" % (stem, n, ext)); n += 1
+    try: os.replace(path, dest); return dest
+    except OSError: return path
+
+def apply_original_names(files, msg, names=None):
+    """下载文件名常常是 file_key。改成消息里的原文件名，模型和提示词都不再看到 file_key。落盘前先打码。"""
     pairs = attachment_names(msg)
-    if not files or not pairs: return files
+    if names:
+        pairs = [(k, disk_download_name(n, names) or "file") for k, n in pairs]
+    if not files: return files
     used = set(); renamed = []
     for p in files:
         base = os.path.basename(p)
@@ -978,19 +1003,17 @@ def apply_original_names(files, msg):
             if name in used: continue
             if key and key in base:
                 pick = name; break
-        if pick is None and len([x for x in files]) == 1 and len(pairs) == 1 and pairs[0][1] not in used:
+        if pick is None and len(files) == 1 and len(pairs) == 1 and pairs[0][1] not in used:
             pick = pairs[0][1]
-        if not pick:
-            renamed.append(p); continue
-        used.add(pick)
-        dest = os.path.join(os.path.dirname(p), pick)
-        if os.path.abspath(dest) != os.path.abspath(p):
-            stem, ext = os.path.splitext(pick); n = 1
-            while os.path.exists(dest):
-                dest = os.path.join(os.path.dirname(p), "%s_%d%s" % (stem, n, ext)); n += 1
-            try: os.replace(p, dest); p = dest
-            except OSError: pass
-        renamed.append(p)
+        if pick:
+            used.add(pick)
+            placed = _place_download(p, pick)
+        else:
+            placed = p
+        if names and os.path.basename(placed) == base:
+            red = disk_download_name(base, names)
+            if red and red != base: placed = _place_download(placed, red)
+        renamed.append(placed)
     return renamed
 
 _W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
@@ -1493,7 +1516,7 @@ def inspect_download(path, limits=None, msg_type="", vision=True, depth=0, displ
         return {"lines": lines, "images": []}
     return {"lines": ["%s的类型暂不支持识别。" % title], "images": []}
 
-def render_saved_files(files, limits, vision, msg_type, kb_dir, folder_name, max_files):
+def render_saved_files(files, limits, vision, msg_type, kb_dir, folder_name, max_files, names=None):
     """读已下载的附件，最多 max_files 个。图片复制到知识库 .attach，方便模型查看。返回 (文字, 图片目录, 已计入个数, 没读个数)。"""
     parts, img_dir = [], None
     used = 0
@@ -1515,7 +1538,7 @@ def render_saved_files(files, limits, vision, msg_type, kb_dir, folder_name, max
         for im in found["images"]:
             img_dir = img_dir or os.path.join(kb_dir, ".attach", folder_name)
             os.makedirs(img_dir, exist_ok=True)
-            dest_name = safe_download_name(im.get("name") or name) or "image"
+            dest_name = disk_download_name(im.get("name") or name, names) or "image"
             dest = os.path.join(img_dir, dest_name)
             stem, ext = os.path.splitext(dest_name); n = 1
             while os.path.exists(dest):

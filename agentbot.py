@@ -12,7 +12,7 @@ import json, os, re, subprocess, sys, time, logging, collections, threading, sql
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import acp_client, guard, memory, providers
 from providers.base import PartialText
-from tools import Tools, ToolError, TOOL_DOC, MEMORY_TOOL_DOC, READ_TOOLS, WRITE_TOOLS, run_capture, parse_cli_json, clip_body, message_text, attachment_limits, inspect_download, safe_download_name
+from tools import Tools, ToolError, TOOL_DOC, MEMORY_TOOL_DOC, READ_TOOLS, WRITE_TOOLS, run_capture, parse_cli_json, clip_body, message_text, attachment_limits, inspect_download, disk_download_name
 
 CFG_PATH = sys.argv[1]; ARGS = sys.argv[2:]
 def _opt(name):
@@ -595,6 +595,21 @@ def _cleanup_reads(ctx):
     for c in ctx.pop("_cleanups", None) or []:
         try: c()
         except Exception: pass
+_EXHAUSTED_NOTE = "这几步已经查完，但没有整理成回答。请把问题拆小一点再问。"
+def _already_read(blob):
+    """轮数用尽、模型没整理成回答时，把已经读到的工具结果收成一段摘要。"""
+    if not blob: return ""
+    bits = []
+    for m in re.finditer(r"工具结果（[^）]*）：\n(.*?)(?=\n\n工具结果（|\Z)", blob, re.S):
+        body = m.group(1)
+        for follow in (_FOLLOW_STOP, _FOLLOW_MORE, _FOLLOW_SKILL):
+            body = body.replace(follow, "")
+        body = re.sub(r"[ \t]*id=om_[A-Za-z0-9]+", "", body).strip()
+        if body: bits.append(body[:500])
+    if not bits: return ""
+    text = "\n\n".join(bits)
+    if len(text) > 1200: text = text[:1200].rstrip() + "…"
+    return "已经读到的内容：\n" + text
 def answer(q, sess, ctx, extra="", on_stage=None):
     q = guard.redact(q, REDACT_NAMES)
     extra = guard.neutralize(extra) if extra else extra
@@ -621,7 +636,11 @@ def answer(q, sess, ctx, extra="", on_stage=None):
             out = run_agent(build_prompt(q, sess, ctx, blob), on_stage, sess)
         if isinstance(out, PartialText): return _partial_clean(out)
         if out and TOOL_RX.search(out): out = TOOL_RX.sub("", out).strip()
-        return out or None
+        elif isinstance(out, str): out = out.strip()
+        if not out:
+            summary = _already_read(blob)
+            return (_EXHAUSTED_NOTE + "\n\n" + summary).strip() if summary else _EXHAUSTED_NOTE
+        return out
     finally:
         _cleanup_reads(ctx)
 
@@ -655,7 +674,7 @@ def attachment_context(msg_id, ctx, label=""):
         parts.extend(found["lines"])
         for im in found["images"]:
             img_dir = img_dir or os.path.join(KB, ".attach", os.path.basename(d)); os.makedirs(img_dir, exist_ok=True)
-            dest_name = safe_download_name(im.get("name") or name) or "image"
+            dest_name = disk_download_name(im.get("name") or name, REDACT_NAMES) or "image"
             dest = os.path.join(img_dir, dest_name)
             stem, ext = os.path.splitext(dest_name); n = 1
             while os.path.exists(dest):
