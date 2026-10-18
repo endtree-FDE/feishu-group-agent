@@ -614,7 +614,9 @@ try:
         "http://[::1]/", "http://[::ffff:127.0.0.1]/", "http://[::ffff:10.1.2.3]/",
         "http://localhost/", "http://localhost:8080/a", "http://LocalHost/a", "http://foo.localhost/a",
         "http://2130706433/", "http://0x7f000001/", "http://0177.0.0.1/", "http://0x7f.0.0.1/", "http://127.1/",
-        "http://0.0.0.0/", "http://100.64.0.1/", "http://[::]/", "http://[fc00::1]/", "http://[fe80::1]/",
+        "http://0.0.0.0/", "http://100.64.0.1/", "http://198.18.1.111/", "http://198.19.255.255/",
+        "http://3323068783/", "http://[::ffff:198.18.1.111]/",
+        "http://[::]/", "http://[fc00::1]/", "http://[fe80::1]/",
         "http://[::ffff:169.254.169.254]/", "https://user:pass@1.1.1.1/secret",
         "http://example.com@127.0.0.1/", "https://user:pass@192.168.0.8/a",
         "file:///etc/passwd", "http://inside.test/", "http://loop.test/", "http://v6.test/",
@@ -670,7 +672,7 @@ check("默认每轮放行 15 次上网，超出拒绝并截断标题；开关关
       and "option=allow-always" not in "\n".join(_plog.lines + _off_log.lines),
       "\n".join(_plog.lines + _off_log.lines))
 _web_q = " ".join(["<<ACP_WEB_SEARCH>>", "<<ACP_WEB_FETCH_PUB>>", "<<ACP_WEB_FETCH_PRIV>>", "<<ACP_WEB_FETCH_LOCAL>>", "<<ACP_GREP>>", "<<ACP_EDIT>>", "<<ACP_EXEC>>", "<<ACP_WEB_NO_ONCE>>", "<<ACP_WEB_ALWAYS_BARE>>", "上网"])
-o, tr, rc = run_acp([ev("web1", _web_q)], "acp_web", ACP_CFG)
+o, tr, rc = run_acp([ev("web1", _web_q)], "acp_web", ACP_CFG, extra_env={"AGENTBOT_FAKE_DNS": json.dumps({"example.com": ["198.18.1.111"]})})
 _wperms = [e for e in tr if e.get("event") == "permission_result"]
 _wdec = [_perm_decision(e) for e in _wperms]
 _wids = [e.get("toolCallId") for e in _wperms]
@@ -1008,9 +1010,11 @@ _cr = subprocess.run([sys.executable, os.path.join(FW, "agentbot.py"), _cleanp, 
 _co = (_cr.stdout or "") + (_cr.stderr or "")
 check("--check：没有旧键时不提示", "HINT" not in _co and "OK   fake" in _co, _co)
 _ps = open(os.path.join(FW, "scripts", "start.ps1"), encoding="utf-8-sig").read()
+_bp = open(os.path.join(FW, "scripts", "botproc.ps1"), encoding="utf-8-sig").read()
 check("start.ps1：本 profile 残留 event 进程会结束，conflict_pidfiles 还活着则拒绝",
-      "conflict_pidfiles" in _ps and "event\\s+(consume|_bus)" in _ps and "REFUSED" in _ps and "--profile" in _ps
-      and "tasklist" not in _ps.lower() and "Stop-Process -Id $_.ProcessId" in _ps, _ps)
+      "conflict_pidfiles" in _ps and "REFUSED" in _ps and "Stop-LarkLeftovers" in _ps
+      and "event\\s+(consume|_bus)" in _bp and "--profile" in _bp and "Test-LarkLeftover" in _bp
+      and "tasklist" not in _ps.lower() and "ParentProcessId" not in _ps, _ps)
 
 # ---------- 拉进群自动认群 ----------
 def acfg(name, admit="confirm", chat_ids=None, auto=True, memory=False, inviters=None, allowed=None, base=None):
@@ -1267,6 +1271,63 @@ check("SSRF：公网网址跳到内网则拒绝；搜索词或网址带密钥则
       and any("toolCallId=web_fetch_q" in l and "why=exfil" in l for l in _plog_r.lines)
       and "13812345678" not in "\n".join(_plog_r.lines) and "token=abcd" not in "\n".join(_plog_r.lines),
       "\n".join(_plog_r.lines))
+def _fake_ip_lookup(host):
+    table = {
+        "example.com": [(None, None, None, None, ("198.18.1.111", 0))],
+        "news.example": [(None, None, None, None, ("198.18.2.2", 0))],
+        "inside.test": [(None, None, None, None, ("10.1.2.3", 0))],
+        "lan.test": [(None, None, None, None, ("192.168.1.9", 0))],
+        "link.test": [(None, None, None, None, ("169.254.1.1", 0))],
+        "loop.test": [(None, None, None, None, ("127.0.0.1", 0))],
+        "cgnat.test": [(None, None, None, None, ("100.64.0.8", 0))],
+        "v6.test": [(None, None, None, None, ("::1", 0))],
+        "mixed.test": [(None, None, None, None, ("198.18.1.111", 0)), (None, None, None, None, ("10.9.9.9", 0))],
+    }
+    if host not in table:
+        raise OSError(host)
+    return table[host]
+_old_fake_nets = _acp._FAKE_NETS
+_acp._lookup_host = _fake_ip_lookup
+_acp.configure_web({})
+check("域名解析到 198.18/15 时放行，裸 IP 和其它内网段仍拒绝",
+      _acp._public_http_url("https://example.com/news") and _acp._public_http_url("https://news.example/a")
+      and not _acp._public_http_url("http://198.18.1.111/secret")
+      and not _acp._public_http_url("http://inside.test/") and not _acp._public_http_url("http://lan.test/")
+      and not _acp._public_http_url("http://link.test/") and not _acp._public_http_url("http://loop.test/")
+      and not _acp._public_http_url("http://cgnat.test/") and not _acp._public_http_url("http://v6.test/")
+      and not _acp._public_http_url("http://mixed.test/") and not _acp._public_http_url("http://10.1.2.3/")
+      and not _acp._public_http_url("http://192.168.0.1/") and not _acp._public_http_url("http://[::1]/"))
+def _fake_hop(url):
+    if url.startswith("https://example.com/start"): return "https://news.example/next"
+    if url.startswith("https://example.com/to-ip"): return "http://198.18.1.111/x"
+    if url.startswith("https://example.com/to-lan"): return "http://10.1.2.3/x"
+    if url.startswith("https://example.com/to-name"): return "http://inside.test/x"
+    return ""
+_acp._redirect_probe = _fake_hop
+check("假 IP：跳到另一个公网域名仍放行，跳到裸 IP 或内网则拒绝",
+      _acp._chain_public("https://example.com/start")
+      and not _acp._chain_public("https://example.com/to-ip")
+      and not _acp._chain_public("https://example.com/to-lan")
+      and not _acp._chain_public("https://example.com/to-name"))
+_acp.configure_web({"tools": {"web": {"allow_fake_ip_ranges": ["198.18.0.0/15", "10.0.0.0/8"]}}})
+check("把 10/8 写进假 IP 列表也不会放行局域网",
+      _acp._public_http_url("https://example.com/a") and not _acp._public_http_url("http://inside.test/")
+      and not _acp._public_http_url("http://10.1.2.3/"))
+_acp.configure_web({"tools": {"web": {"allow_fake_ip_ranges": []}}})
+check("allow_fake_ip_ranges 为空时，解析到 198.18 的域名也拒绝", not _acp._public_http_url("https://example.com/news"))
+_acp.configure_web({})
+_acp._FAKE_NETS = _old_fake_nets
+_acp._redirect_probe = None
+_acp._lookup_host = _old_lookup2
+_stop_txt = open(os.path.join(FW, "scripts", "stop.ps1"), encoding="utf-8").read()
+_proc_txt = open(os.path.join(FW, "scripts", "botproc.ps1"), encoding="utf-8").read()
+_start_txt = open(os.path.join(FW, "scripts", "start.ps1"), encoding="utf-8").read()
+check("停止脚本不再按父 PID 整棵结束，并核对命令行、创建时间和本目录",
+      "Kill-Tree" not in _stop_txt and "ParentProcessId" in _proc_txt and "CreationDate" in _proc_txt
+      and "agentbot.py" in _proc_txt and "bot.pid" in _stop_txt and "bot.lock" in _stop_txt
+      and "Test-OurAgent" in _stop_txt and "Stop-Process -Id $id -Force" not in _stop_txt)
+check("启动前清残留 lark-cli 会在结束前再核对命令行",
+      "Stop-LarkLeftovers" in _start_txt and "Test-LarkLeftover" in _proc_txt and "ParentProcessId" not in _start_txt)
 
 o = run([ev("ph1", "我的电话是 13812345678 请回我")], name="sec_phone")
 check("日志和回复都不留下手机号", "13812345678" not in o and "手机号已隐藏" in o, o)

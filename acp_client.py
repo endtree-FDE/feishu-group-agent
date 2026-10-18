@@ -228,7 +228,65 @@ def _pos_int(cfg, key, default):
     return n if n >= 0 else 0
 
 
-def _ip_is_blocked(value):
+# Clash 等假 IP 代理把公网域名解析到 198.18.0.0/15。这段在 Python 里算 private，但不能跟局域网混为一谈。
+# 只有「用域名访问、解析结果落在配置的段里」才放行。网址里直接写的 IP 不放行。
+# 127/8、10/8、172.16/12、192.168/16、169.254/16、100.64/10、::1 等即使写进配置也不放行。
+_DEFAULT_FAKE_RANGES = ("198.18.0.0/15",)
+_ALWAYS_BLOCK = (
+    "0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16",
+    "172.16.0.0/12", "192.168.0.0/16", "::/128", "::1/128", "fc00::/7", "fe80::/10", "ff00::/8",
+)
+
+
+def _parse_nets(items):
+    out = []
+    for raw in items or ():
+        try:
+            out.append(ipaddress.ip_network(str(raw).strip(), strict=False))
+        except (TypeError, ValueError):
+            continue
+    return tuple(out)
+
+
+_ALWAYS_NETS = _parse_nets(_ALWAYS_BLOCK)
+_FAKE_NETS = _parse_nets(_DEFAULT_FAKE_RANGES)
+
+
+def configure_web(cfg):
+    """读取 tools.web.allow_fake_ip_ranges。没写这项时用 198.18.0.0/15。写成 [] 或 false 表示不放行假 IP。"""
+    global _FAKE_NETS
+    web = None
+    if isinstance(cfg, dict):
+        tools = cfg.get("tools")
+        if isinstance(tools, dict):
+            web = tools.get("web")
+    if not isinstance(web, dict) or "allow_fake_ip_ranges" not in web:
+        _FAKE_NETS = _parse_nets(_DEFAULT_FAKE_RANGES)
+        return _FAKE_NETS
+    raw = web.get("allow_fake_ip_ranges")
+    if raw is False or raw is None:
+        _FAKE_NETS = ()
+        return _FAKE_NETS
+    if isinstance(raw, str):
+        raw = [p.strip() for p in raw.split(",") if p.strip()]
+    if not isinstance(raw, (list, tuple)):
+        _FAKE_NETS = ()
+        return _FAKE_NETS
+    _FAKE_NETS = _parse_nets(raw)
+    return _FAKE_NETS
+
+
+def _in_nets(addr, nets):
+    for net in nets:
+        try:
+            if addr in net:
+                return True
+        except TypeError:
+            continue
+    return False
+
+
+def _ip_is_blocked(value, allow_fake=False):
     try:
         addr = value if isinstance(value, (ipaddress.IPv4Address, ipaddress.IPv6Address)) else ipaddress.ip_address(str(value))
     except ValueError:
@@ -236,9 +294,13 @@ def _ip_is_blocked(value):
     mapped = getattr(addr, "ipv4_mapped", None)
     if mapped is not None:
         addr = mapped
-    if addr.is_multicast or addr.is_reserved or addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_unspecified:
+    # 局域网、回环、链路本地、共享地址、组播：配置不能把它们改成放行。
+    if addr.is_multicast or addr.is_loopback or addr.is_link_local or addr.is_unspecified or _in_nets(addr, _ALWAYS_NETS):
         return True
-    # 共享地址（100.64/10 等）is_global 为假，也不当公网。
+    if allow_fake and _in_nets(addr, _FAKE_NETS):
+        return False
+    if addr.is_reserved or addr.is_private:
+        return True
     if not getattr(addr, "is_global", True):
         return True
     return False
@@ -298,7 +360,21 @@ def _parse_ip(host):
 
 
 def _lookup_host(host):
-    """解析主机名。失败或超时返回空列表，调用方按「没解析出来」处理。"""
+    """解析主机名。失败或超时返回空列表，调用方按「没解析出来」处理。
+    AGENTBOT_FAKE_DNS 只给测试用：JSON 对象，主机名到 IP 列表。设置之后不再访问真实 DNS。"""
+    raw = os.environ.get("AGENTBOT_FAKE_DNS")
+    if raw:
+        try:
+            table = json.loads(raw)
+        except (TypeError, ValueError):
+            table = None
+        if isinstance(table, dict):
+            ips = table.get(host)
+            if isinstance(ips, str):
+                ips = [ips]
+            if not isinstance(ips, list):
+                return []
+            return [(None, None, None, None, (str(ip), 0)) for ip in ips if ip]
     box = {}
 
     def run():
@@ -328,11 +404,11 @@ def _addrs_of(infos):
     return out
 
 
-def _infos_blocked(infos):
+def _infos_blocked(infos, allow_fake=False):
     addrs = _addrs_of(infos)
     if not addrs:
         return True
-    return any(_ip_is_blocked(a) for a in addrs)
+    return any(_ip_is_blocked(a, allow_fake=allow_fake) for a in addrs)
 
 
 def _host_is_blocked(host):
@@ -349,7 +425,8 @@ def _host_is_blocked(host):
         return True
     ip = _parse_ip(host)
     if ip is not None:
-        return _ip_is_blocked(ip)
+        # 裸 IP 不吃假 IP 例外。198.18.x 写在网址里仍然拒绝。
+        return _ip_is_blocked(ip, allow_fake=False)
     # 看起来像 IP 但没能解析（例如八进制里混了 8、9）时拒绝，避免后面的程序用另一种规则解释。
     if _IP_LITERAL.match(host) and any(c.isdigit() for c in host):
         return True
@@ -357,13 +434,13 @@ def _host_is_blocked(host):
         first = _lookup_host(host)
     except Exception:
         return True
-    if not first or _infos_blocked(first):
+    if not first or _infos_blocked(first, allow_fake=True):
         return True
     try:
         second = _lookup_host(host)
     except Exception:
         return True
-    if not second or _infos_blocked(second):
+    if not second or _infos_blocked(second, allow_fake=True):
         return True
     # 两次解析不一致，按 DNS 重绑定处理。
     if _addrs_of(first) != _addrs_of(second):

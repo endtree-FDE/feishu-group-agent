@@ -10,7 +10,7 @@
 import json, os, re, subprocess, sys, time, logging, collections, threading, sqlite3, hashlib, atexit, shutil, datetime
 
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
-import guard, memory, providers
+import acp_client, guard, memory, providers
 from providers.base import PartialText
 from tools import Tools, ToolError, TOOL_DOC, MEMORY_TOOL_DOC, READ_TOOLS, WRITE_TOOLS, run_capture, parse_cli_json, clip_body, message_text, attachment_limits, inspect_download, safe_download_name
 
@@ -21,6 +21,7 @@ def _opt(name):
     return nxt if nxt and not nxt.startswith("--") else ""
 DRY = _opt("--dry-run") is not None; PARALLEL = "--parallel" in ARGS; LOCK_TEST = _opt("--lock-test"); CHECK = "--check" in ARGS
 CFG = json.load(open(CFG_PATH, encoding="utf-8-sig"))
+acp_client.configure_web(CFG)
 if not CFG.get("bot_open_id") and not DRY:
     sys.stderr.write("配置缺少 bot_open_id：请用户本人确认机器人 open_id 后填写；拒绝启动\n"); sys.exit(2)
 BASE = os.path.abspath(CFG.get("base_dir") or os.path.dirname(os.path.abspath(CFG_PATH)))

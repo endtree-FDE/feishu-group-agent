@@ -223,6 +223,7 @@
 | `calendar_read` | 读日历。`calendar_id` 可空，空则用下面 `write.resources.calendar_id`。 |
 | `base_read` | 读多维表格。`base_token`、`table_id` 换成你的表。`search_fields` 是可搜索的列名，没有就留 `[]`。 |
 | `attachment` | 下载图片和文件。`max_mb` 是单文件上限，默认 20。`max_chars` 是提取出的正文最多多少字，没写时跟 `agent.body_max_chars`（默认 `20000`）。能读：纯文本（txt、md、csv、json、log 等）、常见代码文件、PDF、`.docx`、`.pptx`、图片（png、jpg、gif、webp、bmp，要开 `features.vision`）。`.docx` 和 `.pptx` 只用标准库。PDF 需要 `pypdf`，按页抽文字；没装会说明请安装或另存成文本。某一页没有文字时，会抽出前 `pdf_scan_pages`（默认 3）页里内嵌的 JPG、PNG 或 BMP 交给模型看；抽不出就请对方把那一页导出成图片。不渲染整页，也不需要 Poppler。`.xlsx` 在装了 `openpyxl` 时读取，没装会说明读不了，并建议另存 CSV。旧格式 `.doc`、`.ppt`、`.xls` 会请对方另存为对应的新格式。zip 会先列目录，再读取其中支持的文件；默认最多列出 `zip_max_files`（30）项、读取 `zip_max_read`（8）个，解压总体积不超过 `zip_max_mb`（40）。路径里带 `..`、绝对路径、压缩比异常或内层 zip 都会跳过。音频和视频只说明类型，不听不看。下载后的文件会尽量改成消息里的原文件名，而不是 `file_key`。这些上限没写进配置时用括号里的默认值。 |
+| `web` | 只影响常驻模式里「打开网页」。`allow_fake_ip_ranges` 默认 `["198.18.0.0/15"]`。Clash 这类假 IP 代理会把公网域名解析到这个段。用域名访问、并且两次解析都落在这段里时放行。网址里直接写 `198.18.x` 仍然拒绝。`127/8`、`10/8`、`172.16/12`、`192.168/16`、`169.254/16`、`100.64/10`、`::1` 一律拒绝，写进这个列表也不放行。跳转每一跳都按同一规则检查。没写 `web` 时也是这个默认。写成 `[]` 或 `false` 就连假 IP 段也不放行。 |
 | `docs_create` | 在专用文件夹新建文档。要确认码。 |
 | `docs_append` | 在白名单文档末尾追加。要确认码。 |
 | `calendar_create` | 在团队日历建一个日程，不邀请任何人。要确认码。 |

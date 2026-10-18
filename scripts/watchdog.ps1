@@ -2,8 +2,16 @@
 param([string]$Config = "agents\example.json")
 $base = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $hb = Join-Path $base "state\heartbeat"; $wl = Join-Path $base "logs\watchdog.log"
+. (Join-Path $PSScriptRoot "botproc.ps1")
 $pidf = Join-Path $base "bot.pid"; $alive = $false
-if (Test-Path $pidf) { $alive = [bool](Get-Process -Id ([int](Get-Content $pidf)) -ErrorAction SilentlyContinue) }
+if (Test-Path $pidf) {
+  $rawId = "$((Get-Content $pidf -ErrorAction SilentlyContinue | Select-Object -First 1))".Trim()
+  if ($rawId -match '^\d+$') {
+    $aliveProc = Get-CimInstance Win32_Process -Filter "ProcessId=$([int]$rawId)" -ErrorAction SilentlyContinue
+    # 编号被别的程序复用时，不当成自己还活着，后面的 stop 也不会结束那个进程。
+    $alive = [bool]($aliveProc -and (Test-OurAgent $aliveProc $base))
+  }
+}
 $stale = (-not (Test-Path $hb)) -or (([DateTimeOffset]::UtcNow.ToUnixTimeSeconds()) - [int](Get-Content $hb)) -gt 180
 if ((-not $alive) -or $stale) {
   "$(Get-Date -Format s) restart (alive=$alive stale=$stale)" | Add-Content $wl -Encoding utf8

@@ -11,13 +11,18 @@ $cfgPath = $Config
 if (-not [IO.Path]::IsPathRooted($cfgPath)) { $cfgPath = Join-Path $base $cfgPath }
 if (-not (Test-Path -LiteralPath $cfgPath)) { "config not found: $cfgPath"; exit 2 }
 $cfg = [IO.File]::ReadAllText($cfgPath) | ConvertFrom-Json
+. (Join-Path $PSScriptRoot "botproc.ps1")
 
-# 本目录已经在跑就不要再启动，也不要结束它自己的 event 进程
+# 本目录已经在跑就不要再启动，也不要结束它自己的 event 进程。
+# 锁里的编号若已被别的程序复用，不当成自己还活着。
 $lock = Join-Path $base "state\bot.lock"
 if (Test-Path $lock) {
   $old = (Get-Content $lock -ErrorAction SilentlyContinue | Select-Object -First 1)
   $old = "$old".Trim()
-  if ($old -match '^\d+$' -and (Get-Process -Id ([int]$old) -ErrorAction SilentlyContinue)) { "already running pid $old"; exit 0 }
+  if ($old -match '^\d+$') {
+    $oldProc = Get-CimInstance Win32_Process -Filter "ProcessId=$([int]$old)" -ErrorAction SilentlyContinue
+    if ($oldProc -and (Test-OurAgent $oldProc $base)) { "already running pid $old"; exit 0 }
+  }
 }
 
 # 配置里点名的旧版 pid 还活着：拒绝启动
@@ -32,23 +37,9 @@ foreach ($pf in @($cfg.conflict_pidfiles)) {
   }
 }
 
-# 只结束本配置 profile 残留的 event consume / event _bus（用命令行匹配，不按进程名整批结束）
-$profile = [string]$cfg.profile
-if ($profile) {
-  $esc = [regex]::Escape($profile)
-  $profRe = "(?i)(?:^|\s)--profile(?:=|\s+)[`"']?$esc(?:[`"']|(?=\s|$))"
-  $eventRe = '(?i)(?:^|\s)event\s+(consume|_bus)(?:\s|$)'
-  Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | ForEach-Object {
-    $cl = [string]$_.CommandLine
-    if (-not $cl) { return }
-    $isLark = ([string]$_.Name -match '(?i)^lark-cli') -or ($cl -match '(?i)(^|[\\/])lark-cli(\.exe|\.cmd)?(\s|$)')
-    if (-not $isLark) { return }
-    if ($cl -notmatch $eventRe) { return }
-    if ($cl -notmatch $profRe) { return }
-    "stopping leftover lark-cli pid $($_.ProcessId)"
-    Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-  }
-}
+# 只结束本配置 profile 残留的 event consume / event _bus。
+# 结束前再读一次命令行，避免编号刚被别的进程复用。工作目录若明确是另一个目录，则不动。
+Stop-LarkLeftovers $base ([string]$cfg.profile)
 
 $py = (Get-Command python.exe -ErrorAction SilentlyContinue).Source; if (-not $py) { $py = "C:\Program Files\Python312\python.exe" }
 New-Item -ItemType Directory -Force (Join-Path $base "logs") | Out-Null
