@@ -2255,9 +2255,13 @@ check("读完历史仍可提议写入，写入停在确认码，不会接着执�
 _slow_fp = os.path.join(T, "slow_attach.json")
 json.dump({"im +messages-mget": {"ok": False, "error": {"code": 99991672, "message": "读不到 13812345678 附件正文XYZ"}}},
           open(_slow_fp, "w", encoding="utf-8"), ensure_ascii=False)
+_slow_cfg = json.loads(json.dumps(cfg))
+_slow_cfg["agent"].update({"mode": "acp", "stall_sec": 1, "max_runtime_sec": 30, "network_retries": 0,
+                           "acp_max_sessions": 8, "acp_idle_sec": 1800})
+_slow_cfg_path = os.path.join(T, "acp_slow_attach.json")
+json.dump(_slow_cfg, open(_slow_cfg_path, "w", encoding="utf-8"), ensure_ascii=False)
 _slow_t0 = time.time()
-o, tr, rc = run_acp([ev("slow1", "<<ACP_ATTACH>> 附件问题TOKEN不要进日志")], "acp_slow_attach",
-                    acfg("acp_slow_attach", stall_sec=1, max_runtime_sec=30),
+o, tr, rc = run_acp([ev("slow1", "<<ACP_ATTACH>> 附件问题TOKEN不要进日志")], "acp_slow_attach", _slow_cfg_path,
                     extra_env={"AGENTBOT_FAKE_LARK": _slow_fp, "AGENTBOT_FAKE_LARK_DELAY": "2.2", "AGENTBOT_ACP_FOLLOW_PAUSE": "0.6"})
 _slow_elapsed = time.time() - _slow_t0
 _ev_path = os.path.join(T, "logs", "events.jsonl")
