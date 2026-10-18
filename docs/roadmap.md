@@ -91,7 +91,7 @@
 ### 9. 中英双语 README（本轮草稿）
 
 - **目标：** 首页同时给中文和英文读者：这是什么、架构图、半小时能走完的快速开始、安全边界、许可证。
-- **现状：** [README.md](../README.md) 有中文说明、英文导读、mermaid 架构图，以及中英两份快速开始。测试条数改为看运行结果，不再写 208。[LICENSE](../LICENSE) 已是 Apache-2.0。
+- **现状：** [README.md](../README.md) 有中文说明、英文导读、mermaid 架构图，以及中英两份快速开始。测试条数改为看运行结果，不再写 208。[docs/arch-now.mmd](arch-now.mmd) 画的是现在这条路；[docs/arch-full.mmd](arch-full.mmd) 的模型层可以在 Cursor 和 OpenAI 兼容接口之间选。每晚整理仍是设计，默认不跑。[LICENSE](../LICENSE) 已是 Apache-2.0。
 - **参考：** [NoneBot2 README](https://github.com/nonebot/nonebot2)、[OpenClaw](https://github.com/openclaw/openclaw)。
 - **验收：** 中文和英文都覆盖用途、架构图、复制 `agents/example.json` 的快速开始、测试命令、不要提交的文件。测试条数与当时的 `tests/run_tests.py` 一致，或改成「全部通过」而不写会死的数字。不出现真实群号和客户名。
 

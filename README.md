@@ -34,7 +34,8 @@ flowchart LR
 完整分层图和设计说明：
 
 - [docs/架构.md](docs/架构.md)
-- [docs/arch-full.mmd](docs/arch-full.mmd)
+- [docs/arch-now.mmd](docs/arch-now.mmd)（现在实际走的路）
+- [docs/arch-full.mmd](docs/arch-full.mmd)（分层设计，含尚未默认打开的整理任务）
 - [docs/memory-flow.mmd](docs/memory-flow.mmd)
 
 ## 功能
@@ -75,7 +76,7 @@ python tests/run_tests.py
 
 ## English guide
 
-The purpose, the write lock, and the “do not commit” rule are in the English paragraph at the top. The diagram in [架构](#架构) is the path from a Feishu message to a redacted reply.
+The purpose, the write lock, and the “do not commit” rule are in the English paragraph at the top. The diagram in [架构](#架构) is the path from a Feishu message to a redacted reply. [docs/arch-now.mmd](docs/arch-now.mmd) is that same path with the model choice. [docs/arch-full.mmd](docs/arch-full.mmd) is the longer design, including jobs that are not on by default.
 
 Quick start:
 
