@@ -280,6 +280,8 @@ def build_prompt(q, sess, ctx, extra=""):
     parts.append("当前会话类型：%s。" % ("私聊" if ctx["chat_type"] == "p2p" else "群聊"))
     tools_on = [n for n in READ_TOOLS | WRITE_TOOLS if TOOLS.enabled(n)]
     if FEAT.get("tools") and tools_on: parts.append(TOOL_DOC + "\n（当前启用：%s）" % "、".join(sorted(tools_on)))
+    sk = TOOLS.skills.prompt_block()  # 技能目录：工具说明之后、群档案之前；关闭时是空的，什么都不加
+    if sk: parts.append(sk)
     gm = GMEM.prompt_block(ctx.get("chat_id"), ctx["chat_type"])  # 群档案：放在不常变的前缀之后、会变的对话历史之前
     if gm: parts.append(gm)
     h = history(sess)
@@ -291,33 +293,64 @@ def build_prompt(q, sess, ctx, extra=""):
     return "\n\n".join(parts)
 
 TOOL_RX = re.compile(r"<<TOOL>>\s*(\{.*\})", re.S)
-TOOL_LABEL = {"history": "群聊记录", "docs_search": "飞书文档搜索", "docs_read": "飞书文档", "calendar_read": "团队日历", "base_read": "多维表格"}
+TOOL_LABEL = {"history": "群聊记录", "docs_search": "飞书文档搜索", "docs_read": "飞书文档", "calendar_read": "团队日历", "base_read": "多维表格", "skill_read": "技能说明"}
 def _partial_clean(p):
     """部分结果里如果有（可能不完整的）工具行，只保留它前面的文字"""
     i = p.find("<<TOOL>>")
     return PartialText((p[:i] if i >= 0 else p).strip())
+_FOLLOW_STOP = "请根据工具结果直接回答，不要再调用工具；如果工具不可用，就如实告诉提问者原因。"
+# 读完技能后还可以按步骤再调一个飞书工具（例如查表），然后必须作答。写操作仍走确认码。
+_FOLLOW_SKILL = "请按技能步骤回答。如果步骤要求调用一个已启用的飞书工具，可以再输出一行 <<TOOL>>；否则直接回答，不要再读取技能。"
+
+def _tool_args(call):
+    """技能读取把名字写在顶层 name 上；其它工具仍用 args。"""
+    args = call.get("args") or {}
+    if isinstance(args, dict) and call.get("name") and "name" not in args:
+        args = dict(args); args["name"] = call["name"]
+    return args
+
+def _run_tool(name, args, ctx, on_stage):
+    """返回 (text, done)。done 为真时，text 就是给用户的最终回复（确认码或拒绝）。"""
+    log.info("tool call %s %s", name, json.dumps(args, ensure_ascii=False)[:200])
+    if on_stage and name in TOOL_LABEL: on_stage("正在查%s…" % TOOL_LABEL[name])
+    if name in WRITE_TOOLS:
+        try: return TOOLS.propose_write(name, args, ctx), True
+        except ToolError as e: return e.user_msg, True
+    try: res = TOOLS.run_read(name, args, ctx)
+    except ToolError as e:
+        log.info("tool %s degraded: %s %s", name, e.user_msg, e.detail[:200]); res = "工具不可用：" + e.user_msg
+    return guard.redact(res, REDACT_NAMES), False
+
 def answer(q, sess, ctx, extra="", on_stage=None):
     out = run_agent(build_prompt(q, sess, ctx, extra), on_stage)
     if isinstance(out, PartialText): return _partial_clean(out)
     if not out: return None
     m = TOOL_RX.search(out)
     if not (m and FEAT.get("tools")): return out
-    try: call = json.loads(m.group(1)); name = call.get("tool"); args = call.get("args") or {}
+    try: call = json.loads(m.group(1)); name = call.get("tool"); args = _tool_args(call)
     except Exception: return out.replace(m.group(0), "").strip() or None
-    log.info("tool call %s %s", name, json.dumps(args, ensure_ascii=False)[:200])
-    if on_stage and name in TOOL_LABEL: on_stage("正在查%s…" % TOOL_LABEL[name])
-    if name in WRITE_TOOLS:
-        try: return TOOLS.propose_write(name, args, ctx)
-        except ToolError as e: return e.user_msg
-    try: res = TOOLS.run_read(name, args, ctx)
-    except ToolError as e:
-        log.info("tool %s degraded: %s %s", name, e.user_msg, e.detail[:200]); res = "工具不可用：" + e.user_msg
-    res = guard.redact(res, REDACT_NAMES)
+    res, done = _run_tool(name, args, ctx, on_stage)
+    if done: return res
     if on_stage: on_stage("正在整理答案…")
-    out2 = run_agent(build_prompt(q, sess, ctx, extra + "\n\n工具结果（%s）：\n%s\n\n请根据工具结果直接回答，不要再调用工具；如果工具不可用，就如实告诉提问者原因。" % (name, res[:9000])), on_stage)
+    follow = _FOLLOW_SKILL if name == "skill_read" and not str(res).startswith("工具不可用") else _FOLLOW_STOP
+    out2 = run_agent(build_prompt(q, sess, ctx, extra + "\n\n工具结果（%s）：\n%s\n\n%s" % (name, res[:9000], follow)), on_stage)
     if isinstance(out2, PartialText): return _partial_clean(out2)
-    if out2 and TOOL_RX.search(out2): out2 = TOOL_RX.sub("", out2).strip()
-    return out2 or ("工具不可用：" + res if res.startswith("工具不可用") else None)
+    m2 = TOOL_RX.search(out2 or "")
+    # 只有「刚读完一份技能、步骤还要求调飞书」才再走一轮原来的工具回合，避免连环读技能
+    if not (m2 and follow == _FOLLOW_SKILL):
+        if out2 and m2: out2 = TOOL_RX.sub("", out2).strip()
+        return out2 or ("工具不可用：" + res if str(res).startswith("工具不可用") else None)
+    try: call2 = json.loads(m2.group(1)); name2 = call2.get("tool"); args2 = _tool_args(call2)
+    except Exception: return (out2 or "").replace(m2.group(0), "").strip() or None
+    if not name2 or name2 == "skill_read":
+        return TOOL_RX.sub("", out2).strip() or None
+    res2, done2 = _run_tool(name2, args2, ctx, on_stage)
+    if done2: return res2
+    if on_stage: on_stage("正在整理答案…")
+    out3 = run_agent(build_prompt(q, sess, ctx, extra + "\n\n工具结果（%s）：\n%s\n\n%s" % (name2, str(res2)[:9000], _FOLLOW_STOP)), on_stage)
+    if isinstance(out3, PartialText): return _partial_clean(out3)
+    if out3 and TOOL_RX.search(out3): out3 = TOOL_RX.sub("", out3).strip()
+    return out3 or ("工具不可用：" + res2 if str(res2).startswith("工具不可用") else None)
 
 # ---------- 附件 ----------
 TEXT_EXT = {".txt", ".md", ".csv", ".json", ".log", ".tsv"}; IMG_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
@@ -666,6 +699,10 @@ def self_check():
     p("redact names", True, "%d 个（%s）" % (len(REDACT_NAMES), CFG.get("redact_file", "redact.txt")))
     w = CFG.get("write", {}); p("write whitelist", True, "users=%s" % list((w.get("allowed_users") or {}).values()))
     p("group memory", True, "enabled=%s budget=%d profiles=%s" % (GMEM.enabled, GMEM.budget, [c for c in CFG["chat_ids"] if GMEM.path(c) and os.path.isfile(GMEM.path(c))]))
+    sks = TOOLS.skills
+    p("skills", not sks.invalid, sks.status())
+    for bad in sks.invalid:
+        print("FAIL skill %s %s" % (bad.folder, bad.reason)); ok = False
     if "--probe" in ARGS:
         try:
             for k, (good, scope, err) in probe_progress().items():

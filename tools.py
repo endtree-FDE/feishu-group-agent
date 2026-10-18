@@ -1,5 +1,6 @@
 # 工具层：只允许白名单内的 lark-cli 命令，统一 --as bot；写操作需确认码；全部写审计日志；缺权限优雅降级。
 import json, os, re, subprocess, time, random, threading, datetime, glob, shutil
+import skills
 
 def run_capture(cmd, cwd=None, timeout=60):
     """代替 subprocess.run：超时杀整棵进程树（Windows 上只杀父进程时孙进程仍占着管道，communicate 会一直卡住）"""
@@ -51,6 +52,7 @@ class Tools:
         self.audit_dir = os.path.join(base, "audit"); os.makedirs(self.audit_dir, exist_ok=True)
         self.pending = {}; self.pl = threading.Lock(); self.al = threading.Lock()
         self.fake = None  # 测试注入：callable(argv)->dict
+        self.skills = skills.SkillSet(cfg, base)  # 技能目录；enabled 默认 false
 
     # ---------- 基础 ----------
     def enabled(self, name): return bool(self.t.get(name, {}).get("enabled", False))
@@ -97,13 +99,23 @@ class Tools:
 
     # ---------- 读 ----------
     def run_read(self, name, args, ctx):
-        if name not in READ_TOOLS: raise ToolError("未知工具")
-        if not self.enabled(name): raise ToolError("这项能力还没在配置里启用")
-        try: res = getattr(self, "_" + name)(args or {}, ctx)
+        # skill_read 只在技能层打开时才算已知工具；关掉时和以前一样是「未知工具」
+        if name == "skill_read" and self.skills.enabled:
+            call = self._skill_read
+        else:
+            if name not in READ_TOOLS: raise ToolError("未知工具")
+            if not self.enabled(name): raise ToolError("这项能力还没在配置里启用")
+            call = getattr(self, "_" + name)
+        try: res = call(args or {}, ctx)
         except ToolError as e:
             self.audit(kind="read", tool=name, user=ctx["user"], chat=ctx["chat_id"], ok=False, err=e.user_msg); raise
         self.audit(kind="read", tool=name, user=ctx["user"], chat=ctx["chat_id"], ok=True, args=_brief(args))
         return res
+
+    def _skill_read(self, a, ctx):
+        """只读技能正文。名字必须在启动时扫到的目录里，不拼接用户给的路径。"""
+        try: return self.skills.read((a or {}).get("name"))
+        except skills.SkillError as e: raise ToolError(str(e))
 
     def _history(self, a, ctx):
         if ctx.get("chat_type") != "group": raise ToolError("私聊里不提供群历史查询")
