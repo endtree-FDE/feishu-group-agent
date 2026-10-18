@@ -64,3 +64,9 @@ python tests/run_tests.py
 | `SKILL.md` | 给帮忙操作的 AI 助手看的步骤 |
 
 设计说明和两张流程图在 `docs/架构.md`、`docs/arch-full.mmd`、`docs/memory-flow.mmd`。
+
+## 许可证
+
+本项目以 Apache-2.0 开源。你可以商用、修改、再分发，需要保留许可证和版权声明。全文见 [LICENSE](LICENSE)，版权信息见 [NOTICE](NOTICE)。
+
+本项目调用的第三方模型和工具（例如 Cursor CLI、各家模型 API、飞书开放平台）各有自己的服务条款。使用者需要自己遵守这些条款，并使用自己的账号。
