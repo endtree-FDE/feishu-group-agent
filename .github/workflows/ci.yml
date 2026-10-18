@@ -30,3 +30,24 @@ jobs:
           PYTHONUTF8: "1"
           PYTHONIOENCODING: utf-8
         run: python tests/run_tests.py
+
+  secrets:
+    name: secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: gitleaks
+        run: |
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v8.28.0/gitleaks_8.28.0_linux_x64.tar.gz" -o "$RUNNER_TEMP/gitleaks.tgz"
+          tar -xzf "$RUNNER_TEMP/gitleaks.tgz" -C "$RUNNER_TEMP" gitleaks
+          "$RUNNER_TEMP/gitleaks" detect --source . --config .gitleaks.toml --redact --exit-code 1
+      - name: History scan
+        env:
+          PYTHONUTF8: "1"
+        run: python checks/history_scan.py
