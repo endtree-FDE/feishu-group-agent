@@ -1,6 +1,11 @@
 # 测试用假 cursor-agent：按提示词里的标记输出 stream-json（--stream-partial-output 格式，与 2026.10.16 版实测一致）
-import json, sys, time
+import json, os, sys, time
 prompt = sys.argv[-1]; SID = "fake-session"
+_trace = os.environ.get("AGENTBOT_STREAM_TRACE")
+if _trace:
+    with open(_trace, "a", encoding="utf-8") as _tf:
+        _tf.write(prompt)
+        _tf.write("\n")
 def out(e): sys.stdout.write(json.dumps(e, ensure_ascii=False) + "\n"); sys.stdout.flush()
 def ts(): return int(time.time() * 1000)
 def delta(t): out({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": t}]}, "session_id": SID, "timestamp_ms": ts()})

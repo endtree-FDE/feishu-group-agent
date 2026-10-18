@@ -34,7 +34,9 @@
   "skills": {
     "enabled": false,
     "dir": "skills",
-    "index_budget_chars": 800
+    "index_budget_chars": 800,
+    "preload": true,
+    "preload_budget_chars": 3000
   },
   "p2p": {
     "allow_open_ids": [],

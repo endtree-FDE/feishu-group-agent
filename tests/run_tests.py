@@ -22,12 +22,15 @@ FAKE = {"im +chat-messages-list": {"ok": True, "data": {"messages": [{"create_ti
         "im +messages-mget": {"ok": True, "data": {"messages": [{"msg_type": "file"}]}}}
 FP = os.path.join(T, "fake.json"); json.dump(FAKE, open(FP, "w", encoding="utf-8"), ensure_ascii=False)
 results = []
-def run(events, extra_args=(), name="", cfg_path=None, stream=False):
+def run(events, extra_args=(), name="", cfg_path=None, stream=False, extra_env=None):
     p = os.path.join(T, name + ".jsonl")
     open(p, "w", encoding="utf-8").write("\n".join(json.dumps({"event": e}, ensure_ascii=False) for e in events) + "\n")
     env = dict(os.environ, AGENTBOT_FAKE_AGENT="0.3", AGENTBOT_FAKE_LARK=FP)
     if stream:  # 用假的流式 cursor-agent 走真实的 stream-json 读取路径
         env.pop("AGENTBOT_FAKE_AGENT"); env["AGENTBOT_AGENT_CMD"] = json.dumps([sys.executable, os.path.join(FW, "tests", "fake_stream_agent.py")])
+    for k, v in (extra_env or {}).items():
+        if v is None: env.pop(k, None)
+        else: env[k] = v
     r = subprocess.run([sys.executable, os.path.join(FW, "agentbot.py"), cfg_path or CP, "--dry-run", p, *extra_args], capture_output=True, text=True, encoding="utf-8", env=env, timeout=240)
     return r.stdout + r.stderr
 def ev(mid, text, **kw):
@@ -256,14 +259,17 @@ check("/忘记全部：要确认码；错码、别人、重复使用都不清空
 # ---------- 技能层：目录注入 + skill_read（默认关闭）----------
 import skills as _sk
 os.environ["AGENTBOT_FAKE_DUMP_PROMPT"] = "1"
-def skcfg(name, budget=800, memory_on=False, enabled=True, directory="skills"):
+def skcfg(name, budget=800, memory_on=False, enabled=True, directory="skills", preload=None, preload_budget=None):
     c = json.loads(json.dumps(cfg))
     c["skills"] = {"enabled": enabled, "dir": directory, "index_budget_chars": budget}
+    if preload is not None: c["skills"]["preload"] = preload
+    if preload_budget is not None: c["skills"]["preload_budget_chars"] = preload_budget
     if memory_on: c.setdefault("memory", {})["enabled"] = True
     pth = os.path.join(T, name + ".json"); json.dump(c, open(pth, "w", encoding="utf-8"), ensure_ascii=False); return pth
-def write_skill(folder, desc, body, directory="skills", name=None):
+def write_skill(folder, desc, body, directory="skills", name=None, triggers=None):
     d = os.path.join(T, directory, folder); os.makedirs(d, exist_ok=True)
-    open(os.path.join(d, "SKILL.md"), "w", encoding="utf-8").write("---\nname: %s\ndescription: %s\n---\n\n%s\n" % (name or folder, desc, body))
+    trig = ("triggers: [%s]\n" % ", ".join(triggers)) if triggers else ""
+    open(os.path.join(d, "SKILL.md"), "w", encoding="utf-8").write("---\nname: %s\ndescription: %s\n%s---\n\n%s\n" % (name or folder, desc, trig, body))
 qsame = "今天安排是什么"
 o = run([ev("sk0", qsame)], name="sk_before"); p_before = prompts(o)[0]
 write_skill("meeting-minutes", "整理会议纪要。用户要纪要、结论或待办时使用。只组织文字，不写入。", "# 整理会议纪要\n\n没有的信息写「未提及」。正文标记BODY_MEETING。\n")
@@ -327,7 +333,81 @@ _mb = _repo.read("meeting-minutes") if "meeting-minutes" in _by else ""
 check("仓库示例技能格式合法：查进度表、整理会议纪要",
       [s.name for s in _repo.valid] == ["meeting-minutes", "progress-table"] and not _repo.invalid
       and "base_read" in _rb and "表里没有" in _rb and "name: progress-table" not in _rb
-      and "未提及" in _mb and "不写入" in _mb and "name: meeting-minutes" not in _mb, _repo.status() + _rb[:200] + _mb[:200])
+      and "未提及" in _mb and "不写入" in _mb and "name: meeting-minutes" not in _mb
+      and "进度表" in _by["progress-table"].triggers and "谁负责" in _by["progress-table"].triggers
+      and "会议纪要" in _by["meeting-minutes"].triggers and "待办" in _by["meeting-minutes"].triggers,
+      _repo.status() + str(_by["progress-table"].triggers) + str(_by["meeting-minutes"].triggers))
+_inline, _ibody, _ierr = _sk.parse_skill('---\nname: demo-skill\ndescription: 演示触发词。\ntriggers: ["进度表", 纪要]\n---\n\n步骤。\n')
+_block, _bbody, _berr = _sk.parse_skill("---\nname: demo-skill\ndescription: 演示触发词。\ntriggers:\n  - 进度表\n  - 纪要\n---\n\n步骤。\n")
+check("triggers：一行列表和缩进列表都能解析",
+      _ierr is None and (_inline or {}).get("triggers") == ["进度表", "纪要"] and "步骤" in (_ibody or "")
+      and _berr is None and (_block or {}).get("triggers") == ["进度表", "纪要"], str(_inline) + str(_block) + str(_ierr) + str(_berr))
+def _head(p):
+    cut = len(p)
+    for m in ("\n\n以下是本话题之前的对话", "\n\n" + _sk.PRELOAD_MARK, "\n\n提问："):
+        i = p.find(m)
+        if i != -1: cut = min(cut, i)
+    return p[:cut]
+def _pre_body(p):
+    mark = "\n\n" + _sk.PRELOAD_MARK
+    i = p.find(mark)
+    if i < 0: return ""
+    rest = p[i + 2:]
+    j = rest.find("\n\n提问：")
+    return rest if j < 0 else rest[:j]
+put_profile(CH, "# 群档案：测试群\n【成员与分工】小李：负责测试（档案标记PREAAA）\n")
+write_skill("progress-table", "查团队进度表。", "# 查进度表\n\n这里提到杭州某某科技有限公司，电话 13812345678。\n正文标记PROG_BODY。\n", directory="skills_pre", triggers=["进度表", "进度"])
+write_skill("meeting-minutes", "整理会议纪要。", "# 整理会议纪要\n\n正文标记MEET_BODY。\n", directory="skills_pre", triggers=["会议纪要", "纪要"])
+PRE = skcfg("sk_pre", memory_on=True, directory="skills_pre")
+o = run([ev("pr0", "今天天气怎么样"), ev("pr1", "看一下进度表", root_id="pr0"), ev("pr2", "进度和会议纪要都要")], name="sk_pre", cfg_path=PRE)
+ps = prompts(o)
+_b1 = _pre_body(ps[1]) if len(ps) > 1 else ""
+_b2 = _pre_body(ps[2]) if len(ps) > 2 else ""
+check("触发词命中：正文放在档案和历史之后、提问之前，已脱敏，不含 YAML 头",
+      len(ps) >= 2 and "档案标记PREAAA" in ps[1] and ps[1].index("档案标记PREAAA") < ps[1].index(_sk.PRELOAD_MARK) < ps[1].index("提问：")
+      and "以下是本话题之前的对话" in ps[1] and ps[1].index("以下是本话题之前的对话") < ps[1].index(_sk.PRELOAD_MARK)
+      and "PROG_BODY" in _b1 and "MEET_BODY" not in _b1 and "name: progress-table" not in ps[1]
+      and "杭州某某科技有限公司" not in ps[1] and "13812345678" not in ps[1]
+      and "某客户" in _b1 and "手机号已隐藏" in _b1 and "progress-table" in _b1, ps[1] if len(ps) > 1 else o)
+check("触发词未命中：不预放正文，目录仍在",
+      ps and "PROG_BODY" not in ps[0] and "MEET_BODY" not in ps[0] and _sk.PRELOAD_MARK not in ps[0]
+      and "技能目录" in ps[0] and "progress-table：查团队进度表" in ps[0], ps[0] if ps else o)
+check("多个触发词命中：只预放得分最高的一个",
+      len(ps) >= 3 and "MEET_BODY" in _b2 and "PROG_BODY" not in _b2 and _b2.count(_sk.PRELOAD_MARK) == 1 and "meeting-minutes" in _b2, _b2)
+check("预放不改变稳定前缀：目录和档案在预放之前，同一话题两次提问逐字相同",
+      len(ps) >= 2 and _head(ps[0]) == _head(ps[1]) and "技能目录" in _head(ps[0]) and "档案标记PREAAA" in _head(ps[0])
+      and "PROG_BODY" not in _head(ps[0]) and _sk.PRELOAD_MARK not in _head(ps[0]), _head(ps[0])[-300:] + "\n---\n" + _head(ps[1])[-300:])
+_long = "甲" * 80 + "ENDMARKER_LONG"
+write_skill("progress-table", "查团队进度表。", "# 长正文\n\n" + _long + "\n", directory="skills_pre_budget", triggers=["进度表"])
+_pbudget = 40
+o = run([ev("pr3", "看进度表")], name="sk_pre_budget", cfg_path=skcfg("sk_pre_budget", directory="skills_pre_budget", preload_budget=_pbudget))
+ps = prompts(o); _inner = _pre_body(ps[0]) if ps else ""; _nl = _inner.find("\n"); _inner = _inner[_nl + 1:] if _nl >= 0 else _inner
+check("预放预算：正文超过 preload_budget_chars 时截断",
+      ps and _sk.PRELOAD_NOTE in _inner and len(_inner) <= _pbudget and "ENDMARKER_LONG" not in ps[0] and _sk.PRELOAD_MARK in ps[0], _inner + " len=%d" % len(_inner))
+o = run([ev("pr4", "看一下进度表")], name="sk_pre_off", cfg_path=skcfg("sk_pre_off", enabled=False, directory="skills_pre"))
+ps = prompts(o)
+check("skills.enabled=false：有触发词也不预放，提示词里没有技能目录和正文",
+      ps and "PROG_BODY" not in ps[0] and "MEET_BODY" not in ps[0] and _sk.PRELOAD_MARK not in ps[0] and "技能目录" not in ps[0] and "progress-table" not in ps[0], ps[0] if ps else o)
+o = run([ev("pr5", "看一下进度表")], name="sk_pre_nopreload", cfg_path=skcfg("sk_pre_nopreload", directory="skills_pre", preload=False))
+ps = prompts(o)
+check("skills.preload=false：仍放目录，不预放正文",
+      ps and "技能目录" in ps[0] and "progress-table：查团队进度表" in ps[0] and "PROG_BODY" not in ps[0] and _sk.PRELOAD_MARK not in ps[0], ps[0] if ps else o)
+_fc = json.load(open(PRE, encoding="utf-8")); _fc["model_provider"] = "fake"
+json.dump(_fc, open(os.path.join(T, "sk_pre_fake.json"), "w", encoding="utf-8"), ensure_ascii=False)
+o = run([ev("pr6", "看一下进度表")], name="sk_pre_fake", cfg_path=os.path.join(T, "sk_pre_fake.json"), extra_env={"AGENTBOT_FAKE_AGENT": None})
+ps = prompts(o)
+check("model_provider=fake：命中触发词也预放正文",
+      "model provider fake" in o and ps and "PROG_BODY" in ps[0] and _sk.PRELOAD_MARK in ps[0] and "某客户" in ps[0] and "杭州某某科技有限公司" not in ps[0], ps[0] if ps else o)
+_ctrace = os.path.join(T, "sk_pre_cursor.trace")
+if os.path.exists(_ctrace): os.remove(_ctrace)
+_cc = json.load(open(PRE, encoding="utf-8")); _cc["model_provider"] = "cursor"
+json.dump(_cc, open(os.path.join(T, "sk_pre_cursor.json"), "w", encoding="utf-8"), ensure_ascii=False)
+o = run([ev("pr7", "看一下进度表")], name="sk_pre_cursor", cfg_path=os.path.join(T, "sk_pre_cursor.json"), stream=True, extra_env={"AGENTBOT_STREAM_TRACE": _ctrace})
+_ct = open(_ctrace, encoding="utf-8").read() if os.path.exists(_ctrace) else ""
+check("model_provider=cursor：命中触发词也预放正文",
+      "model provider cursor" in o and "PROG_BODY" in _ct and _sk.PRELOAD_MARK in _ct
+      and _ct.index("技能目录") < _ct.index(_sk.PRELOAD_MARK) < _ct.index("提问：")
+      and "杭州某某科技有限公司" not in _ct and "某客户" in _ct, (o[-400:] + "\n" + _ct[-500:]))
 os.environ.pop("AGENTBOT_FAKE_DUMP_PROMPT", None)
 
 # ---------- 常驻 ACP（假服务端；默认 oneshot 不走这条路径）----------
@@ -337,6 +417,18 @@ _kept = _acp.apply_snapshot(_snap.replace("SNAP_OLD", "SNAP_NEW"), "以下是本
 _wiped = _acp.apply_snapshot("规则\n\n以下是本群的长期档案：\nNEW\n\n提问：x", "")
 check("档案快照：换回会话开始时的正文，开始时没有档案就不再插入",
       "SNAP_OLD" in _kept and "SNAP_NEW" not in _kept and "提问：后来" in _kept and "长期档案" not in _wiped and _wiped.endswith("提问：x"), _kept + "\n" + _wiped)
+_pre_prompt = "规则\n\n以下是本群的长期档案（说明）：\nSNAP_NEW\n\n本次预放技能（progress-table）：\nNEW_BODY\n\n提问：进度"
+_pre_kept = _acp.apply_snapshot(_pre_prompt, "以下是本群的长期档案（说明）：\nSNAP_OLD")
+check("档案快照停在预放标记之前，不吞掉会变的技能正文",
+      "SNAP_OLD" in _pre_kept and "SNAP_NEW" not in _pre_kept and "NEW_BODY" in _pre_kept and "提问：进度" in _pre_kept
+      and _sk.PRELOAD_MARK == _acp.PRELOAD_MARK and ("\n\n" + _acp.PRELOAD_MARK) in _acp._PROFILE_NEXT, _pre_kept)
+check("模型配置项：一致、没有可选值、不在列表里都跳过；不一致时用返回的 configId 和可选值",
+      _acp._model_set_params({"configOptions": [{"id": "model", "category": "model", "type": "select", "currentValue": "grok-4.7-high-fast", "options": [{"value": "grok-4.7-high-fast"}]}]}, "grok-4.7-high-fast") is None
+      and _acp._model_set_params({"configOptions": []}, "grok-4.7-high-fast") is None
+      and _acp._model_set_params({"configOptions": [{"id": "model", "category": "model", "currentValue": "auto", "options": []}]}, "grok-4.7-high-fast") is None
+      and _acp._model_set_params({"configOptions": [{"id": "model", "category": "model", "currentValue": "other", "options": [{"value": "other"}]}]}, "grok-4.7-high-fast") is None
+      and _acp._model_set_params({"configOptions": [{"configId": "cursor_model", "category": "model", "currentValue": "auto", "options": [{"group": "g", "options": [{"value": "model-value-id", "name": "grok-4.7-high-fast"}]}]}]}, "grok-4.7-high-fast") == ("cursor_model", "model-value-id")
+      and _acp._model_set_params({"configOptions": [{"id": "model", "category": "model", "currentValue": "auto", "options": [{"value": "grok-4.7-high-fast"}]}]}, "grok-4.7-high-fast") == ("model", "grok-4.7-high-fast"))
 FAKE_ACP = os.path.join(FW, "tests", "fake_acp_agent.py")
 def acfg(name, progress=False, memory_on=False, **agent):
     c = json.loads(json.dumps(cfg))
@@ -383,7 +475,31 @@ check("常驻启动参数：--mode ask、--model、子命令 acp",
 check("常驻握手：initialize、authenticate、session/set_mode=ask、set_config_option",
       any(e.get("method") == "initialize" for e in tr) and any(e.get("method") == "authenticate" for e in tr)
       and any(e.get("method") == "session/set_mode" and (e.get("params") or {}).get("modeId") == "ask" for e in tr)
-      and any(e.get("method") == "session/set_config_option" and (e.get("params") or {}).get("configId") == "model" for e in tr), str(tr)[:1500])
+      and any(e.get("method") == "session/set_config_option" and (e.get("params") or {}).get("configId") == "model" and (e.get("params") or {}).get("value") == "grok-4.7-high-fast" for e in tr), str(tr)[:1500])
+def model_calls(tr):
+    return [e for e in tr if e.get("method") == "session/set_config_option"]
+o, tr, rc = run_acp([ev("acp_same", "普通一句")], "acp_same", ACP_CFG, extra_env={"AGENTBOT_ACP_CONFIG_CASE": "same"})
+check("模型配置项当前值已与配置一致：不调用 set_config_option",
+      rc == 0 and not model_calls(tr) and "常驻答案" in block(o, "acp_same") and "acp set_model" not in o and "acp fallback" not in o, o)
+o, tr, rc = run_acp([ev("acp_none", "普通一句")], "acp_none", ACP_CFG, extra_env={"AGENTBOT_ACP_CONFIG_CASE": "none"})
+o2, tr2, rc2 = run_acp([ev("acp_empty", "普通一句")], "acp_empty", ACP_CFG, extra_env={"AGENTBOT_ACP_CONFIG_CASE": "empty"})
+check("没有可用的模型配置项：不调用 set_config_option",
+      not model_calls(tr) and not model_calls(tr2) and "常驻答案" in block(o, "acp_none") and "常驻答案" in block(o2, "acp_empty")
+      and "acp set_model" not in o and "acp set_model" not in o2, o + o2)
+o, tr, rc = run_acp([ev("acp_unlisted", "普通一句")], "acp_unlisted", ACP_CFG, extra_env={"AGENTBOT_ACP_CONFIG_CASE": "unlisted"})
+check("配置的模型不在可选值里：不调用 set_config_option",
+      not model_calls(tr) and "常驻答案" in block(o, "acp_unlisted") and "acp fallback" not in o and "Invalid params" not in o, o)
+o, tr, rc = run_acp([ev("acp_grp", "分组模型")], "acp_grouped", ACP_CFG, extra_env={"AGENTBOT_ACP_CONFIG_CASE": "grouped"})
+_calls = model_calls(tr)
+check("当前值不一致：用返回的 configId 和可选值调用 set_config_option",
+      len(_calls) == 1 and (_calls[0].get("params") or {}).get("configId") == "cursor_model"
+      and (_calls[0].get("params") or {}).get("value") == "model-value-id"
+      and "常驻答案" in block(o, "acp_grp") and "acp fallback" not in o, o + str(_calls))
+o, tr, rc = run_acp([ev("acp_bad", "设模型失败")], "acp_invalid", ACP_CFG, extra_env={"AGENTBOT_ACP_CONFIG_CASE": "invalid"})
+_calls = model_calls(tr)
+check("set_config_option 失败只记 debug：这一题仍成功，日志没有这条 WARNING",
+      len(_calls) == 1 and "常驻答案" in block(o, "acp_bad") and "acp fallback" not in o
+      and "WARNING acp set_model" not in o and "Invalid params" not in o, o + str(_calls))
 o, tr, rc = run_acp([ev("ac2", "第一题"), ev("ac3", "第二题", root_id="ac2"), ev("ac4", "另一题")], "acp_reuse", ACP_CFG)
 ids, news = new_ids(tr)
 check("同话题复用会话，不同话题分开",
@@ -443,6 +559,38 @@ o = (pr.stdout or "") + (pr.stderr or ""); tr = load_trace(os.path.join(T, "acp_
 check("会话开始时冻结群档案，中途改档案不进同一会话",
       len(ps) == 2 and "SNAP_OLD" in ps[0]["text"] and "SNAP_NEW" not in ps[0]["text"]
       and "SNAP_OLD" in ps[1]["text"] and "SNAP_NEW" not in ps[1]["text"] and "acp snapshot kept" in o, o + str([p["text"][-200:] for p in ps]))
+write_skill("meeting-minutes", "整理会议纪要。", "# 纪要\n\n正文标记MEET_PRE。\n", directory="skills_pre_acp", triggers=["会议纪要"])
+write_skill("progress-table", "查团队进度表。", "# 进度\n\n正文标记PROG_PRE。\n", directory="skills_pre_acp", triggers=["进度表"])
+put_profile(CH, "# 群档案\n标记PRE_OLD\n")
+_precfg = json.load(open(acfg("acp_pre", memory_on=True), encoding="utf-8"))
+_precfg["skills"] = {"enabled": True, "dir": "skills_pre_acp", "index_budget_chars": 800, "preload": True}
+json.dump(_precfg, open(os.path.join(T, "acp_pre.json"), "w", encoding="utf-8"), ensure_ascii=False)
+_pre_trace = os.path.join(T, "acp_pre.trace")
+pre_src = r'''
+import os, sys, runpy, json
+os.environ["AGENTBOT_FAKE_LARK"] = %r
+os.environ["AGENTBOT_ACP_TRACE"] = %r
+os.environ["AGENTBOT_AGENT_CMD"] = json.dumps([%r, %r])
+os.environ.pop("AGENTBOT_FAKE_AGENT", None)
+sys.path.insert(0, %r)
+sys.argv = ["agentbot.py", %r, "--dry-run"]
+g = runpy.run_path(%r, run_name="lib")
+base = {"chat_id": %r, "chat_type": "group", "message_type": "text", "sender_id": "user_sender", "sender_type": "user", "mentions": %s}
+g["handle"](dict(base, message_id="acpre0", content="@%s 请整理会议纪要"))
+open(%r, "w", encoding="utf-8").write("# 群档案\n标记PRE_NEW\n")
+g["handle"](dict(base, message_id="acpre1", root_id="acpre0", content="@%s 看一下进度表"))
+''' % (FP, _pre_trace, sys.executable, FAKE_ACP, FW, os.path.join(T, "acp_pre.json"), os.path.join(FW, "agentbot.py"), CH, json.dumps(M), BN, os.path.join(T, "memory", "groups", CH, "GROUP.md"), BN)
+if os.path.exists(_pre_trace): os.remove(_pre_trace)
+env = dict(os.environ); env.pop("AGENTBOT_FAKE_AGENT", None); env.pop("AGENTBOT_FAKE_DUMP_PROMPT", None)
+pr = subprocess.run([sys.executable, "-c", pre_src], cwd=FW, capture_output=True, text=True, encoding="utf-8", env=env, timeout=60)
+o = (pr.stdout or "") + (pr.stderr or ""); tr = load_trace(_pre_trace); ps = prompts_of(tr)
+_t0 = ps[0]["text"] if len(ps) > 0 else ""
+_t1 = ps[1]["text"] if len(ps) > 1 else ""
+check("常驻会话里预放技能留在快照之外：换题换正文，档案仍是开始时那份",
+      len(ps) == 2 and "MEET_PRE" in _t0 and "PROG_PRE" not in _t0 and "PRE_OLD" in _t0 and "PRE_NEW" not in _t0
+      and "PROG_PRE" in _t1 and "MEET_PRE" not in _t1 and "PRE_OLD" in _t1 and "PRE_NEW" not in _t1
+      and _t1.index("PRE_OLD") < _t1.index(_sk.PRELOAD_MARK) < _t1.index("提问：")
+      and "acp snapshot kept" in o and "acp fallback" not in o, o + _t0[-180:] + "\n---\n" + _t1[-180:])
 idle_trace = os.path.join(T, "acp_idle.trace")
 idle_src = '''
 import os, sys, time, runpy, json
@@ -541,6 +689,17 @@ json.dump(_skc, open(os.path.join(T, "oa_skill.json"), "w", encoding="utf-8"), e
 o, rc = run_oa([ev("oa4", "<<OA_SKILL>> 按技能说")], "oa_skill", os.path.join(T, "oa_skill.json"))
 check("openai_compat：skill_read 仍可用，正文经过脱敏路径",
       "tool call skill_read" in o and "按技能回答：BODY_PROGRESS" in block(o, "oa4") and "name: progress-table" not in block(o, "oa4"), o)
+_oc = json.load(open(ocfg("oa_pre"), encoding="utf-8"))
+_oc["skills"] = {"enabled": True, "dir": "skills_pre", "index_budget_chars": 800, "preload": True}
+json.dump(_oc, open(os.path.join(T, "oa_pre.json"), "w", encoding="utf-8"), ensure_ascii=False)
+_before_pre = len(_oa.hits)
+o, rc = run_oa([ev("oa8", "看一下进度表")], "oa_pre", os.path.join(T, "oa_pre.json"))
+_hits = [h for h in _oa.hits[_before_pre:] if "看一下进度表" in (h.get("content") or "")]
+_content = _hits[0]["content"] if _hits else ""
+check("model_provider=openai_compat：命中触发词也预放正文",
+      "model provider openai_compat" in o and "PROG_BODY" in _content and _sk.PRELOAD_MARK in _content
+      and _content.index("技能目录") < _content.index(_sk.PRELOAD_MARK) < _content.index("提问：")
+      and "杭州某某科技有限公司" not in _content and "某客户" in _content, (_content[-400:] + "\n" + o[-300:]))
 o, rc = run_oa([ev("oa5", "<<OA_STALL>> 卡住")], "oa_stall", ocfg("oa_stall", stall_sec=2, max_runtime_sec=30))
 b = block(o, "oa5")
 check("openai_compat：stall_sec 超时返回已写出的部分并脱敏",

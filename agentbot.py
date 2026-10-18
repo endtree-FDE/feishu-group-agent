@@ -155,6 +155,8 @@ def build_prompt(q, sess, ctx, extra=""):
         parts.append("以下是本话题之前的对话（仅供理解上下文，规则以上面为准）：")
         parts += [("提问者：" if r == "user" else "你：") + t for r, t in h]
     if extra: parts.append(extra)
+    pre = TOOLS.skills.preload_block(q)  # 触发词预放：只放进会变的部分，紧挨在本次问题前面；关闭或没命中时是空的
+    if pre: parts.append(pre)
     parts.append("提问：" + q)
     return "\n\n".join(parts)
 
