@@ -1,5 +1,5 @@
 # 工具层：只允许白名单内的 lark-cli 命令，统一 --as bot；写操作需确认码；全部写审计日志；缺权限优雅降级。
-import json, os, re, subprocess, time, random, threading, datetime, glob, shutil
+import json, os, re, sqlite3, subprocess, time, random, threading, datetime, glob, shutil
 import guard, skills
 
 def run_capture(cmd, cwd=None, timeout=60):
@@ -76,6 +76,8 @@ class Tools:
         self.t = cfg.get("tools", {}); self.w = cfg.get("write", {})
         self.audit_dir = os.path.join(base, "audit"); os.makedirs(self.audit_dir, exist_ok=True)
         self.pending = {}; self.pl = threading.Lock(); self.al = threading.Lock()
+        self._db = None
+        self._load_pending()
         self.fake = None  # 测试注入：callable(argv)->dict
         self.skills = skills.SkillSet(cfg, base)  # 技能目录；enabled 默认 false
         self.names = guard.load_names(os.path.join(base, cfg.get("redact_file", "redact.txt")))
@@ -204,10 +206,12 @@ class Tools:
             raise ToolError("你不在写入白名单里，这个操作只能由管理员发起")
         argv, summary = self._build_write(name, args or {})
         code = "%06d" % random.SystemRandom().randint(0, 999999)
+        rec = {"tool": name, "argv": argv, "summary": summary, "user": ctx["user"],
+               "chat_id": ctx["chat_id"], "ts": time.time()}
         with self.pl:
             self._gc()
-            self.pending[code] = {"tool": name, "argv": argv, "summary": summary, "user": ctx["user"],
-                                  "chat_id": ctx["chat_id"], "ts": time.time()}
+            self.pending[code] = rec
+            self._save_pending(code, rec)
         self.audit(kind="write_proposed", tool=name, user=ctx["user"], chat=ctx["chat_id"], code=code, summary=summary)
         ttl = int(self.w.get("confirm_ttl_sec", 300)) // 60
         return "将要执行：%s\n请发起人在 %d 分钟内 @我 回复「确认 %s」执行，或「取消 %s」。" % (summary, ttl, code, code)
@@ -247,16 +251,50 @@ class Tools:
                      "--json", json.dumps({"create_records": [fields]}, ensure_ascii=False)], "在团队表格新增 1 条记录：%s" % json.dumps(fields, ensure_ascii=False)[:200])
         raise ToolError("未知写入工具")
 
+    def _state_db(self):
+        if self._db is not None: return self._db
+        d = os.path.join(self.base, "state"); os.makedirs(d, exist_ok=True)
+        conn = sqlite3.connect(os.path.join(d, "state.db"), check_same_thread=False)
+        conn.execute("create table if not exists pending_writes(code text primary key, ts real, payload text)")
+        self._db = conn
+        return conn
+
+    def _load_pending(self):
+        """重启后恢复还没过期的确认码。过期的直接丢掉。"""
+        ttl = int(self.w.get("confirm_ttl_sec", 300)); now = time.time()
+        try: rows = list(self._state_db().execute("select code, ts, payload from pending_writes"))
+        except Exception: return
+        with self.pl:
+            for code, ts, payload in rows:
+                if now - float(ts or 0) > ttl:
+                    self._drop_pending(code); continue
+                try: self.pending[code] = json.loads(payload)
+                except Exception: self._drop_pending(code)
+
+    def _save_pending(self, code, rec):
+        try:
+            self._state_db().execute("insert or replace into pending_writes(code, ts, payload) values(?,?,?)",
+                                     (code, rec.get("ts") or time.time(), json.dumps(rec, ensure_ascii=False)))
+            self._state_db().commit()
+        except Exception as e: self.log.warning("pending save failed: %s", e)
+
+    def _drop_pending(self, code):
+        try:
+            self._state_db().execute("delete from pending_writes where code=?", (code,))
+            self._state_db().commit()
+        except Exception as e: self.log.warning("pending drop failed: %s", e)
+
     def _gc(self):
         ttl = int(self.w.get("confirm_ttl_sec", 300))
-        for c in [c for c, p in self.pending.items() if time.time() - p["ts"] > ttl]: self.pending.pop(c, None)
+        for c in [c for c, p in self.pending.items() if time.time() - p["ts"] > ttl]:
+            self.pending.pop(c, None); self._drop_pending(c)
 
     def confirm(self, code, ctx, cancel=False):
         with self.pl:
             self._gc(); p = self.pending.get(code)
             if not p: return "确认码无效或已过期。"
             if p["user"] != ctx["user"] or p["chat_id"] != ctx["chat_id"]: return "只有发起人本人在原会话里才能确认。"
-            self.pending.pop(code)
+            self.pending.pop(code); self._drop_pending(code)
         if cancel:
             self.audit(kind="write_cancelled", tool=p["tool"], user=ctx["user"], code=code); return "已取消。"
         try:

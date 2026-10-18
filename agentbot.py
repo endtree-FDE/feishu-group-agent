@@ -87,11 +87,48 @@ with DBL:
     DB.execute("create table if not exists turns(sess text, ts real, role text, text text)")
     DB.execute("create index if not exists turns_sess on turns(sess, ts)")
     DB.execute("create table if not exists chats(chat_id text primary key, name text, status text, source text, inviter text, ts real, updated real)")
+    _seen_cols = {r[1] for r in DB.execute("pragma table_info(seen)")}
+    # 旧库只有 mid/ts，那些行视为已经答过，避免升级后把历史消息再答一遍。
+    if "status" not in _seen_cols: DB.execute("alter table seen add column status text default 'answered'")
+    if "event" not in _seen_cols: DB.execute("alter table seen add column event text")
+    if "attempts" not in _seen_cols: DB.execute("alter table seen add column attempts integer default 0")
     DB.commit()
+LATE = threading.local()
+def _event_blob(ev):
+    if not isinstance(ev, dict): return None
+    try: return json.dumps({k: v for k, v in ev.items() if not str(k).startswith("_")}, ensure_ascii=False)[:20000]
+    except Exception: return None
 def seen_or_mark(mid):
+    """记成已回答并返回是否见过。用在明确不调用模型的分支，避免补答时再进一次。"""
     with DBL:
-        try: DB.execute("insert into seen values(?,?)", (mid, time.time())); DB.commit(); return False
-        except sqlite3.IntegrityError: return True
+        row = DB.execute("select 1 from seen where mid=?", (mid,)).fetchone()
+        if row: return True
+        DB.execute("insert into seen(mid, ts, status, event, attempts) values(?,?,?,?,0)", (mid, time.time(), "answered", None))
+        DB.commit(); return False
+def claim_message(mid, ev=None, replay=False):
+    """新消息记为 received。已答过的跳过。上次进程没答完的，启动补答时再处理一次。"""
+    blob = _event_blob(ev)
+    with DBL:
+        row = DB.execute("select status, attempts from seen where mid=?", (mid,)).fetchone()
+        if row:
+            st, attempts = row[0] or "answered", int(row[1] or 0)
+            if st == "received" and replay:
+                if attempts >= 1:
+                    DB.execute("update seen set status='answered', event=null where mid=?", (mid,))
+                    DB.commit(); log.warning("give up inflight %s", mid); return "skip"
+                DB.execute("update seen set ts=?, attempts=? where mid=?", (time.time(), attempts + 1, mid))
+                DB.commit(); return "replay"
+            return "skip"
+        DB.execute("insert into seen(mid, ts, status, event, attempts) values(?,?,?,?,0)", (mid, time.time(), "received", blob))
+        DB.commit(); return "new"
+def mark_answered(mid):
+    with DBL:
+        DB.execute("update seen set status='answered', event=null where mid=?", (mid,))
+        DB.commit()
+def _with_late(text):
+    note = getattr(LATE, "note", "") or ""
+    if note and not str(text or "").startswith(note): return note + "\n" + (text or "")
+    return text
 def seen_event(eid):
     """进群/出群事件按 event_id 只处理一次。没有编号的事件无法和一次新的拉群区分，仍会处理。"""
     eid = str(eid or "")[:120]
@@ -587,7 +624,7 @@ def reply_key(mid, index, total):
     if total <= 1: return ("re_" + str(mid))[:50]
     return ("re_%s_%d" % (mid, index))[:50]
 def reply(mid, text):
-    text = guard.redact(text, REDACT_NAMES)
+    text = _with_late(guard.redact(text, REDACT_NAMES))
     chunks = split_reply(text)
     total = len(chunks)
     ok_all = True
@@ -829,7 +866,6 @@ def probe_progress():
 
 CONFIRM_RX = re.compile(r"^(确认|取消)\s*(\d{6})$")
 def handle(ev):
-    global _active, _waiting, _peak
     mid = ev.get("message_id") or ev.get("id")
     if not mid: return
     if (ev.get("sender_type") or "") in ("app", "bot"): return
@@ -864,7 +900,15 @@ def handle(ev):
             save_chat(ev.get("chat_id"), "admitted", "mention")
         elif gate != "allow":
             return
-    if seen_or_mark(mid): return
+    how = claim_message(mid, ev, replay=bool(ev.get("_replay")))
+    if how == "skip": return
+    if ev.get("_late") or how == "replay": LATE.note = "（延迟回复）"
+    try: _handle_claimed(ev, mid, ctype, uid)
+    finally:
+        mark_answered(mid); LATE.note = ""
+
+def _handle_claimed(ev, mid, ctype, uid):
+    global _active, _waiting, _peak
     sess = session_key(ev); mtype = ev.get("message_type") or "text"
     ctx = {"user": uid, "chat_id": ev.get("chat_id"), "chat_type": ctype, "message_id": mid, "limited": p2p_limited(uid, ctype)}
     q = clean_q(ev.get("content") or "")
@@ -927,7 +971,7 @@ def handle(ev):
         if a: a = str(a) + "\n\n" + CFG["texts"].get("partial_note", "（时间到了，先给部分结果）")
         else: a = CFG["texts"].get("stall", "这题比较复杂，没在时间内答完，可以拆成更小的问题再问我。")
     elif a: remember(sess, "user", guard.neutralize(guard.redact(q_model, REDACT_NAMES))); remember(sess, "bot", a)
-    final = a or CFG["texts"]["fail"]
+    final = _with_late(a or CFG["texts"]["fail"])
     log.info("metric kind=answer chat=%s limited=%d in_chars=%d out_chars=%d elapsed=%.1fs ok=%d partial=%d",
              "p2p" if ctype == "p2p" else "group", 1 if ctx.get("limited") else 0,
              len(q_model or ""), len(final or ""), time.time() - t0, 1 if a else 0, 1 if partial else 0)
@@ -940,6 +984,109 @@ def handle(ev):
         if not (sent and prog.recall_status()):
             prog.mark_done_after_reply("（时间到了，已先给部分结果）" if partial else "")
     except Exception as e: log.warning("progress mark_done error (ignored): %s", e)
+
+def recover_inflight():
+    """上次进程被杀掉时，还停在 received 的消息重新处理。没有正文的无法重放，记成已结束。"""
+    with DBL:
+        rows = DB.execute("select mid, event from seen where status='received'").fetchall()
+    for mid, blob in rows:
+        if not blob:
+            log.info("drop inflight without event %s", mid); mark_answered(mid); continue
+        try: ev = json.loads(blob)
+        except Exception:
+            log.info("drop inflight bad event %s", mid); mark_answered(mid); continue
+        if not isinstance(ev, dict):
+            mark_answered(mid); continue
+        ev["_replay"] = True
+        log.info("replay inflight %s", mid)
+        try: handle(ev)
+        except Exception:
+            log.exception("replay failed %s", mid); mark_answered(mid)
+
+def _msg_ts(m):
+    raw = m.get("create_time") if isinstance(m, dict) else None
+    if raw is None and isinstance(m, dict): raw = m.get("create_time_ms")
+    if raw is None: return None
+    s = str(raw).strip()
+    if s.isdigit():
+        n = int(s)
+        return n / 1000.0 if n > 10_000_000_000 else float(n)
+    try: return datetime.datetime.fromisoformat(s).timestamp()
+    except Exception: return None
+
+def _catchup_settings():
+    c = CFG.get("catchup")
+    if c is False: c = {"enabled": False}
+    if not isinstance(c, dict): c = {}
+    def num(key, default):
+        try: return int(c.get(key, default))
+        except (TypeError, ValueError): return default
+    return {"enabled": bool(c.get("enabled", True)), "overlap_sec": max(0, num("overlap_sec", 300)), "max_messages": max(1, num("max_messages", 20))}
+
+def event_from_listed(chat_id, m):
+    """把 chat-messages-list 的一条收成 handle 能吃的事件。没有消息编号的跳过。"""
+    if not isinstance(m, dict): return None
+    mid = m.get("message_id") or m.get("id")
+    if not mid: return None
+    sender = m.get("sender") if isinstance(m.get("sender"), dict) else {}
+    content = m.get("content") if m.get("content") is not None else ""
+    if isinstance(content, dict):
+        content = content.get("text") or json.dumps(content, ensure_ascii=False)
+    elif isinstance(content, str) and content[:1] == "{":
+        try:
+            parsed = json.loads(content)
+            if isinstance(parsed, dict) and isinstance(parsed.get("text"), str): content = parsed["text"]
+        except Exception: pass
+    if not isinstance(content, str): content = str(content)
+    return {"message_id": str(mid), "chat_id": m.get("chat_id") or chat_id, "chat_type": m.get("chat_type") or "group",
+            "message_type": m.get("message_type") or m.get("msg_type") or "text",
+            "sender_id": m.get("sender_id") or sender.get("id") or sender.get("open_id") or "?",
+            "sender_type": m.get("sender_type") or sender.get("sender_type") or "user",
+            "content": content, "mentions": m.get("mentions") or [],
+            "root_id": m.get("root_id") or "", "parent_id": m.get("parent_id") or "", "thread_id": m.get("thread_id") or ""}
+
+def catch_up_mentions():
+    """停机期间 @ 了机器人、本地又没答过的消息，启动时补上，并标明是延迟回复。"""
+    cfg = _catchup_settings()
+    if not cfg["enabled"]: return
+    if DRY and os.environ.get("AGENTBOT_CATCHUP") != "1": return
+    try: hb = int(open(os.path.join(STATE, "heartbeat")).read().strip())
+    except Exception: hb = 0
+    if hb <= 0:
+        log.info("catchup skip: no previous heartbeat"); return
+    start_ts = hb - cfg["overlap_sec"]
+    start = datetime.datetime.fromtimestamp(start_ts).astimezone().isoformat(timespec="seconds")
+    chats = static_chat_ids()
+    if chats is None: chats = [r["chat_id"] for r in all_chats() if r.get("status") == "admitted"]
+    n = 0
+    for cid in chats or []:
+        if n >= cfg["max_messages"]: break
+        try:
+            j = TOOLS.lark("history", ["im", "+chat-messages-list", "--chat-id", cid, "--start", start,
+                                       "--page-size", "50", "--page-limit", "2", "--no-reactions"])
+        except ToolError as e:
+            log.info("catchup list failed %s: %s", cid, e.user_msg); continue
+        msgs = (j.get("data") or {}).get("messages") or []
+        def _key(m):
+            ts = _msg_ts(m); return (0, ts) if ts is not None else (1, 0)
+        for m in sorted(msgs, key=_key):
+            if n >= cfg["max_messages"]: break
+            ts = _msg_ts(m)
+            if ts is not None and ts < start_ts: continue
+            ev = event_from_listed(cid, m)
+            if not ev or not is_for_me(ev): continue
+            if (ev.get("sender_type") or "") in ("app", "bot"): continue
+            if ev.get("sender_id") and ev.get("sender_id") == CFG.get("bot_open_id"): continue
+            with DBL:
+                row = DB.execute("select status from seen where mid=?", (ev["message_id"],)).fetchone()
+            if row: continue
+            ev["_late"] = True
+            log.info("catchup %s", ev["message_id"]); n += 1
+            try: handle(ev)
+            except Exception: log.exception("catchup failed %s", ev["message_id"])
+
+def startup_recover():
+    recover_inflight(); catch_up_mentions()
 
 def heartbeat():
     while True:
@@ -994,6 +1141,7 @@ def main():
         acquire_lock(); log.info("lock-test holding %ss", LOCK_TEST or 30); time.sleep(float(LOCK_TEST or 30)); return
     log.info("chats %s", describe_chats())
     if DRY:
+        startup_recover()
         src = _opt("--dry-run"); f = open(src, encoding="utf-8-sig") if src else sys.stdin; ths = []
         for line in f:
             line = line.strip()
@@ -1003,7 +1151,7 @@ def main():
             else: ingest(obj)
         for t in ths: t.join()
         log.info("dry-run finished peak_active=%d max_concurrency=%d", _peak, MAXC); return
-    check_conflicts(); acquire_lock(); threading.Thread(target=heartbeat, daemon=True).start()
+    check_conflicts(); acquire_lock(); startup_recover(); threading.Thread(target=heartbeat, daemon=True).start()
     log.info("starting %s (features=%s)", CFG["name"], json.dumps(FEAT, ensure_ascii=False))
     if static_chat_ids() is not None: record_static_chats()
     if auto_join_active(): sync_joined_chats()

@@ -13,6 +13,7 @@
   },
   "conflict_pidfiles": [],
   "reply_in_thread": true,
+  "catchup": {"enabled": true, "overlap_sec": 300, "max_messages": 20},
   "max_concurrency": 2,
   "max_queue": 4,
   "rate_limit": {

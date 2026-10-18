@@ -1,5 +1,5 @@
 # 离线测试（不连飞书、不调 cursor-agent）：python3 tests/run_tests.py
-import hashlib, json, os, re, subprocess, sys, tempfile, sqlite3, shutil, zipfile
+import datetime, hashlib, json, os, re, subprocess, sys, tempfile, sqlite3, shutil, time, zipfile
 FW = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 T = tempfile.mkdtemp(prefix="agentbot_t_"); os.makedirs(os.path.join(T, "kb"))
 # 配置模板：AGENTBOT_TEST_CFG 指定；否则用 agents/example.json（占位符配置，测试会改写到临时目录）
@@ -1510,6 +1510,75 @@ ps = prompts(o)
 check("附件正文超过 max_chars 时分段截取",
       ps and "【开头】" in ps[0] and "【结尾】" in ps[0] and "全文约" in ps[0] and "头" in ps[0] and ps[0].count("中") < 400, ps[0][-500:] if ps else o)
 json.dump(_saved_fake, open(FP, "w", encoding="utf-8"), ensure_ascii=False)
+
+# ---------- 重启不丢正在处理的消息、停机补答、确认码持久化 ----------
+def _bot_py(src, extra_env=None):
+    env = dict(os.environ, AGENTBOT_FAKE_AGENT="0", AGENTBOT_FAKE_LARK=FP, CFG=CP)
+    for k, v in (extra_env or {}).items():
+        if v is None: env.pop(k, None)
+        else: env[k] = v
+    r = subprocess.run([sys.executable, "-c", src], cwd=FW, capture_output=True, text=True, encoding="utf-8", env=env, timeout=60)
+    return (r.stdout or "") + (r.stderr or "")
+_empty = os.path.join(T, "empty_recover.jsonl"); open(_empty, "w", encoding="utf-8").write("")
+_inflight_ev = ev("inflight1", "停机前没答完的问题")
+_rec_src = r'''
+import json, os, sys
+sys.argv = ["agentbot.py", os.environ["CFG"], "--dry-run", os.environ["EMPTY"]]
+import agentbot
+ev = json.loads(os.environ["EV"])
+agentbot.DB.execute("delete from seen where mid=?", (ev["message_id"],))
+agentbot.DB.execute("insert into seen(mid, ts, status, event, attempts) values(?,?,?,?,?)",
+                    (ev["message_id"], 1, "received", json.dumps(ev, ensure_ascii=False), int(os.environ.get("ATTEMPTS", "0"))))
+agentbot.DB.commit()
+agentbot.recover_inflight()
+agentbot.recover_inflight()
+row = agentbot.DB.execute("select status from seen where mid=?", (ev["message_id"],)).fetchone()
+print("STATUS", row[0] if row else None)
+'''
+o = _bot_py(_rec_src, {"EMPTY": _empty, "EV": json.dumps(_inflight_ev, ensure_ascii=False), "ATTEMPTS": "0"})
+check("重启补答：received 的消息会再答，并标明延迟回复，且只答一次",
+      o.count("[dry-run] reply inflight1") == 1 and "（延迟回复）" in o and "STATUS answered" in o and "停机前没答完" in o, o)
+o = _bot_py(_rec_src, {"EMPTY": _empty, "EV": json.dumps(ev("inflight2", "第二次仍失败"), ensure_ascii=False), "ATTEMPTS": "1"})
+check("重启补答：已经重试过仍失败的消息放弃，不再回复",
+      "reply inflight2" not in o and "give up inflight inflight2" in o and "STATUS answered" in o, o)
+_now = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
+_late_fake = dict(_saved_fake)
+_late_fake["im +chat-messages-list"] = {"ok": True, "data": {"messages": [
+    {"message_id": "late_skip", "content": "没有点名", "msg_type": "text", "create_time": _now,
+     "sender": {"id": "user_sender", "sender_type": "user"}},
+    {"message_id": "late_old", "content": "@" + BN + " 太早的消息", "msg_type": "text", "create_time": "2000-01-01T00:00:00",
+     "sender": {"id": "user_sender", "sender_type": "user"}, "mentions": M},
+    {"message_id": "late_ok", "content": "@" + BN + " 停机期间的问题", "msg_type": "text", "create_time": _now,
+     "sender": {"id": "user_sender", "sender_type": "user"}, "mentions": M},
+]}}
+_late_fp = os.path.join(T, "late_fake.json"); json.dump(_late_fake, open(_late_fp, "w", encoding="utf-8"), ensure_ascii=False)
+open(os.path.join(T, "state", "heartbeat"), "w", encoding="utf-8").write(str(int(time.time()) - 30))
+_catch_src = r'''
+import os, sys
+sys.argv = ["agentbot.py", os.environ["CFG"], "--dry-run", os.environ["EMPTY"]]
+os.environ["AGENTBOT_CATCHUP"] = "1"
+import agentbot
+agentbot.catch_up_mentions()
+agentbot.catch_up_mentions()
+'''
+o = _bot_py(_catch_src, {"EMPTY": _empty, "AGENTBOT_FAKE_LARK": _late_fp, "AGENTBOT_CATCHUP": "1"})
+check("停机补答：只补窗口内 @ 了机器人且没答过的消息，并去重",
+      o.count("[dry-run] reply late_ok") == 1 and "（延迟回复）" in o and "停机期间的问题" in o
+      and "reply late_skip" not in o and "reply late_old" not in o, o)
+_pw = ev("pw1", '<<FAKE_TOOL>>{"tool":"docs_create","args":{"title":"续写","markdown":"正文"}}<<END>> 建文档', sender_id="user_admin")
+o = run([_pw], name="pw_prop")
+_pw_code = (_re.search(r"确认 (\d{6})", o) or [None, None])[1]
+o2 = run([ev("pw2", "确认 " + (_pw_code or "000000"), sender_id="user_admin")], name="pw_ok")
+check("确认码写入 state.db，新进程里发起人仍能确认并执行",
+      _pw_code and "[fake-lark] docs +create" in o2 and "已完成" in o2 and "docx/NEW" in o2, o2)
+_pw3 = ev("pw3", '<<FAKE_TOOL>>{"tool":"docs_create","args":{"title":"过期","markdown":"x"}}<<END>> 建文档', sender_id="user_admin")
+o = run([_pw3], name="pw_old")
+_old_code = (_re.search(r"确认 (\d{6})", o) or [None, None])[1]
+if _old_code:
+    _pdb = sqlite3.connect(os.path.join(T, "state", "state.db"))
+    _pdb.execute("update pending_writes set ts=? where code=?", (time.time() - 100000, _old_code)); _pdb.commit(); _pdb.close()
+o2 = run([ev("pw4", "确认 " + (_old_code or "000000"), sender_id="user_admin")], name="pw_exp")
+check("过期的确认码在新进程里无效", _old_code and "无效或已过期" in o2 and "docs +create" not in o2.split("reply pw4")[-1], o2)
 
 print("\n%d/%d passed" % (sum(r for _, r in results), len(results))); shutil.rmtree(T, ignore_errors=True)
 sys.exit(0 if all(r for _, r in results) else 1)
