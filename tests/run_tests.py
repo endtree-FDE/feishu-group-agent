@@ -2315,13 +2315,16 @@ check("目录只有标题，客户名和工具标记已处理，不包含正文�
       and "<<TOOL>>" not in _cat and "KB_BODY" not in _cat and "OUTSIDE_KB_SECRET" not in _cat and "leak.md" not in _cat, _cat)
 o = run([ev("kb1", "知识库里有什么"), ev("kb2", "再问一次文件名", root_id="kb1")], name="kb_cat", extra_env={"AGENTBOT_FAKE_DUMP_PROMPT": "1"})
 ps = prompts(o)
-def _before_hist(p):
-    i = p.find("\n\n以下是本话题之前的对话")
-    return p if i < 0 else p[:i]
+def _stable(p):
+    cut = len(p)
+    for m in ("\n\n以下是本话题之前的对话", "\n\n提问："):
+        i = p.find(m)
+        if i != -1: cut = min(cut, i)
+    return p[:cut]
 check("有文件时目录进稳定前缀，两次提问逐字相同，正文不在目录里",
-      len(ps) >= 2 and "知识库目录" in ps[0] and "notes/cutoff.md" in ps[0] and "KB_BODY" not in ps[0]
-      and "某客户" in ps[0] and "杭州某某科技有限公司" not in ps[0]
-      and _before_hist(ps[0]) == _before_hist(ps[1]), ps[0] if ps else o)
+      len(ps) >= 2 and "知识库目录" in _stable(ps[0]) and "notes/cutoff.md" in _stable(ps[0]) and "KB_BODY" not in ps[0]
+      and "某客户" in _stable(ps[0]) and "杭州某某科技有限公司" not in ps[0]
+      and _stable(ps[0]) == _stable(ps[1]) and "提问：" not in _stable(ps[0]), _stable(ps[0])[-500:] + "\n---\n" + _stable(ps[1])[-500:] if ps else o)
 o = run([ev("kb3", '<<FAKE_TOOL>>{"tool":"kb_read","args":{"path":"notes/cutoff.md"}}<<END>> 读这份')], name="kb_read", extra_env={"AGENTBOT_FAKE_DUMP_PROMPT": "1"})
 ps = prompts(o)
 _chunk = ""
