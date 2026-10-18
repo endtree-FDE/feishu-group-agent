@@ -252,5 +252,82 @@ r2 = _g.handle("确认清空 000000" if code != "000000" else "确认清空 1111
 r3 = _g.handle("确认清空 %s" % code, dict(cx, user="user_other"))
 r4 = _g.handle("确认清空 %s" % code, cx); r5 = _g.handle("确认清空 %s" % code, cx)
 check("/忘记全部：要确认码；错码、别人、重复使用都不清空；本人正确确认后清空", code and "没有清空" in r2 and "只有写入白名单" in r3 and r4.startswith("已清空本群记忆（1 条）") and "没有清空" in r5 and not os.path.exists(os.path.join(T, "memory", "groups", C4, "GROUP.md")), "\n".join([r1, r2, r3, r4, r5]))
+
+# ---------- 技能层：目录注入 + skill_read（默认关闭）----------
+import skills as _sk
+os.environ["AGENTBOT_FAKE_DUMP_PROMPT"] = "1"
+def skcfg(name, budget=800, memory_on=False, enabled=True, directory="skills"):
+    c = json.loads(json.dumps(cfg))
+    c["skills"] = {"enabled": enabled, "dir": directory, "index_budget_chars": budget}
+    if memory_on: c.setdefault("memory", {})["enabled"] = True
+    pth = os.path.join(T, name + ".json"); json.dump(c, open(pth, "w", encoding="utf-8"), ensure_ascii=False); return pth
+def write_skill(folder, desc, body, directory="skills", name=None):
+    d = os.path.join(T, directory, folder); os.makedirs(d, exist_ok=True)
+    open(os.path.join(d, "SKILL.md"), "w", encoding="utf-8").write("---\nname: %s\ndescription: %s\n---\n\n%s\n" % (name or folder, desc, body))
+qsame = "今天安排是什么"
+o = run([ev("sk0", qsame)], name="sk_before"); p_before = prompts(o)[0]
+write_skill("meeting-minutes", "整理会议纪要。用户要纪要、结论或待办时使用。只组织文字，不写入。", "# 整理会议纪要\n\n没有的信息写「未提及」。正文标记BODY_MEETING。\n")
+write_skill("progress-table", "查团队进度表。用户问进度、负责人、截止或状态时使用。只读，不改表。", "# 查进度表\n\n表里没有的项写「表里没有」。正文标记BODY_PROGRESS。\n")
+o = run([ev("sk1", qsame)], name="sk_off"); p_off = prompts(o)[0]
+check("技能关闭：有技能文件也不注入，提示词与没有技能时逐字相同", p_before == p_off and "技能目录" not in p_off and "BODY_PROGRESS" not in p_off and "progress-table" not in p_off, p_off)
+o = run([ev("sk2", '<<FAKE_TOOL>>{"tool":"skill_read","name":"progress-table"}<<END>> 读技能')], name="sk_off_read")
+check("技能关闭：skill_read 当未知工具，不返回正文", "未知工具" in o and "BODY_PROGRESS" not in o and "Traceback" not in o, o)
+put_profile(CH, "# 群档案：测试群\n【成员与分工】小李：负责测试（档案标记AAA）\n")
+ON = skcfg("sk_on", memory_on=True)
+o = run([ev("sk3", "进度如何"), ev("sk4", "再问一次进度", root_id="sk3")], name="sk_on", cfg_path=ON)
+ps = prompts(o)
+def sk_prefix(p): return p.split("以下是本话题之前的对话")[0].split("提问：")[0]
+check("目录注入：工具说明之后、群档案之前，一行一个技能，首轮不含正文",
+      len(ps) == 2 and ps[0].index("可用工具") < ps[0].index("技能目录") < ps[0].index("档案标记AAA") < ps[0].index("提问：")
+      and "meeting-minutes：整理会议纪要" in ps[0] and "progress-table：查团队进度表" in ps[0]
+      and ps[0].index("meeting-minutes：") < ps[0].index("progress-table：")
+      and "BODY_PROGRESS" not in ps[0] and "BODY_MEETING" not in ps[0], ps[0] if ps else o)
+check("技能目录是稳定前缀：话题里两次提问，目录及之前逐字相同", len(ps) == 2 and sk_prefix(ps[0]) == sk_prefix(ps[1]) and "技能目录" in sk_prefix(ps[0]), o)
+write_skill("long-alpha", "甲" * 80 + "MARKER_ALPHA_END", "# 长技能甲\n\n步骤。\n", directory="skills_long")
+write_skill("long-beta", "乙" * 80 + "MARKER_BETA_END", "# 长技能乙\n\n步骤。\n", directory="skills_long")
+_budget = len(_sk.CATALOG_HEADER) + 1 + 30 + 1 + len(_sk.TRUNC_NOTE)
+o = run([ev("sk5", "看目录")], name="sk_budget", cfg_path=skcfg("sk_budget", budget=_budget, directory="skills_long"))
+ps = prompts(o); block = _sk.SkillSet({"skills": {"enabled": True, "dir": "skills_long", "index_budget_chars": _budget}, "redact_file": "redact.txt"}, T).prompt_block()
+check("预算截断：目录不超过预算，排不下的技能不出现",
+      ps and block and len(block) <= _budget and block in ps[0] and _sk.TRUNC_NOTE in block
+      and "long-alpha" in block and "MARKER_ALPHA_END" not in block and "MARKER_BETA_END" not in block and "long-beta" not in ps[0], block + "\n" + (ps[0] if ps else o))
+write_skill("redact-demo", "测试脱敏。用户提到这份演练技能时使用。", "# 脱敏演练\n\n这里提到杭州某某科技有限公司，电话 13812345678。\n正文标记SKILLBODY。\n")
+o = run([ev("sk6", '<<FAKE_TOOL>>{"tool":"skill_read","name":"redact-demo"}<<END>> 按技能说')], name="sk_read", cfg_path=ON)
+ps = prompts(o)
+chunk = ""
+if len(ps) >= 2 and "工具结果（skill_read）" in ps[1]:
+    chunk = ps[1].split("工具结果（skill_read）", 1)[1].split("提问：", 1)[0]
+check("skill_read：返回正文且不含 YAML 头，客户名和手机号已脱敏",
+      "SKILLBODY" in chunk and "name: redact-demo" not in chunk and "SKILLBODY" not in ps[0]
+      and "杭州某某科技有限公司" not in ps[1] and "13812345678" not in ps[1]
+      and "某客户" in chunk and "手机号已隐藏" in chunk, o)
+o = run([ev("sk7", '<<FAKE_TOOL>>{"tool":"skill_read","name":"no-such-skill"}<<END>> 读一个没有的')], name="sk_miss", cfg_path=ON)
+check("skill_read：没有这个技能", "没有这个技能" in o and "Traceback" not in o and "SKILLBODY" not in o, o)
+open(os.path.join(T, "OUTSIDE_SECRET.txt"), "w", encoding="utf-8").write("OUTSIDE_SECRET_MARKER\n")
+_ss = _sk.SkillSet({"skills": {"enabled": True, "dir": "skills"}, "redact_file": "redact.txt"}, T)
+_bad_names = ["../OUTSIDE_SECRET.txt", "..", "progress-table/../../OUTSIDE_SECRET.txt", "progress-table\\..\\secret",
+              "/etc/passwd", "C:/Windows/system.ini", "progress-table/SKILL.md", "", "Not-A-Name"]
+_unit_ok, _unit_msg = True, ""
+for _n in _bad_names:
+    try: _got = _ss.read(_n)
+    except _sk.SkillError as _e: _got = str(_e)
+    if "OUTSIDE_SECRET_MARKER" in (_got or "") or (_n and "技能名字不合法" not in _got and "没有给出技能名字" not in _got):
+        _unit_ok, _unit_msg = False, "%r -> %s" % (_n, _got); break
+o = run([ev("sk8", '<<FAKE_TOOL>>{"tool":"skill_read","name":"../../OUTSIDE_SECRET.txt"}<<END>> 读外面')], name="sk_trav", cfg_path=ON)
+check("路径穿越被拒：不读目录外的文件", _unit_ok and "技能名字不合法" in o and "OUTSIDE_SECRET_MARKER" not in o and "Traceback" not in o, _unit_msg + "\n" + o)
+write_skill("ok-skill", "合法的示例技能，用来检查数量。", "# 好\n\n步骤。\n", directory="skills_check")
+write_skill("BadName", "这个名字有大写，不合法。", "# 坏例子\n\n步骤。\n", directory="skills_check", name="BadName")
+_cr = subprocess.run([sys.executable, os.path.join(FW, "agentbot.py"), skcfg("sk_check", directory="skills_check"), "--check"], capture_output=True, text=True, encoding="utf-8", timeout=60)
+_co = (_cr.stdout or "") + (_cr.stderr or "")
+check("--check：列出技能数量，并报告格式不合法的技能", "skills enabled=True 数量=1 不合法=1" in _co and "FAIL skill BadName" in _co and "小写" in _co, _co)
+_repo = _sk.SkillSet({"skills": {"enabled": True, "dir": "skills"}}, FW)
+_by = {s.name: s for s in _repo.valid}
+_rb = _repo.read("progress-table") if "progress-table" in _by else ""
+_mb = _repo.read("meeting-minutes") if "meeting-minutes" in _by else ""
+check("仓库示例技能格式合法：查进度表、整理会议纪要",
+      [s.name for s in _repo.valid] == ["meeting-minutes", "progress-table"] and not _repo.invalid
+      and "base_read" in _rb and "表里没有" in _rb and "name: progress-table" not in _rb
+      and "未提及" in _mb and "不写入" in _mb and "name: meeting-minutes" not in _mb, _repo.status() + _rb[:200] + _mb[:200])
+os.environ.pop("AGENTBOT_FAKE_DUMP_PROMPT", None)
 print("\n%d/%d passed" % (sum(r for _, r in results), len(results))); shutil.rmtree(T, ignore_errors=True)
 sys.exit(0 if all(r for _, r in results) else 1)
