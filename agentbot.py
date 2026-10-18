@@ -1423,6 +1423,8 @@ def self_check():
         print("HINT chats.admit=open：别人第一次 @ 就会认群并回答。不想这样请改成 confirm 或 whitelist。")
     sks = TOOLS.skills
     p("skills", not sks.invalid, sks.status())
+    if sks.missing_only:
+        print("HINT skills.only 里这些名字在技能目录中没有：" + "、".join(sks.missing_only))
     for bad in sks.invalid:
         print("FAIL skill %s %s" % (bad.folder, bad.reason)); ok = False
     if "--probe" in ARGS:

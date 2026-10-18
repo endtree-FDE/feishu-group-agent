@@ -303,11 +303,12 @@ check("/忘记全部：要确认码；错码、别人、重复使用都不清空
 # ---------- 技能层：目录注入 + skill_read（默认关闭）----------
 import skills as _sk
 os.environ["AGENTBOT_FAKE_DUMP_PROMPT"] = "1"
-def skcfg(name, budget=800, memory_on=False, enabled=True, directory="skills", preload=None, preload_budget=None):
+def skcfg(name, budget=800, memory_on=False, enabled=True, directory="skills", preload=None, preload_budget=None, only=None):
     c = json.loads(json.dumps(cfg))
     c["skills"] = {"enabled": enabled, "dir": directory, "index_budget_chars": budget}
     if preload is not None: c["skills"]["preload"] = preload
     if preload_budget is not None: c["skills"]["preload_budget_chars"] = preload_budget
+    if only is not None: c["skills"]["only"] = only
     if memory_on: c.setdefault("memory", {})["enabled"] = True
     pth = os.path.join(T, name + ".json"); json.dump(c, open(pth, "w", encoding="utf-8"), ensure_ascii=False); return pth
 def write_skill(folder, desc, body, directory="skills", name=None, triggers=None):
@@ -370,6 +371,29 @@ write_skill("BadName", "这个名字有大写，不合法。", "# 坏例子\n\n�
 _cr = subprocess.run([sys.executable, os.path.join(FW, "agentbot.py"), skcfg("sk_check", directory="skills_check"), "--check"], capture_output=True, text=True, encoding="utf-8", timeout=60)
 _co = (_cr.stdout or "") + (_cr.stderr or "")
 check("--check：列出技能数量，并报告格式不合法的技能", "skills enabled=True 数量=1 不合法=1" in _co and "FAIL skill BadName" in _co and "小写" in _co, _co)
+write_skill("progress-table", "查团队进度表。", "# 查进度表\n\n正文标记ONLY_PROG。\n", directory="skills_only", triggers=["进度表"])
+write_skill("meeting-minutes", "整理会议纪要。", "# 整理会议纪要\n\n正文标记ONLY_MEET。\n", directory="skills_only", triggers=["会议纪要"])
+_only_all = _sk.SkillSet({"skills": {"enabled": True, "dir": "skills_only", "only": []}, "redact_file": "redact.txt"}, T)
+_only_one = _sk.SkillSet({"skills": {"enabled": True, "dir": "skills_only", "only": ["meeting-minutes"]}, "redact_file": "redact.txt"}, T)
+check("skills.only 为空时两个技能都在，写了名单就只留点名的",
+      [s.name for s in _only_all.valid] == ["meeting-minutes", "progress-table"] and not _only_all.skipped
+      and [s.name for s in _only_one.valid] == ["meeting-minutes"] and [s.name for s in _only_one.skipped] == ["progress-table"]
+      and _only_one.missing_only == [], _only_one.status())
+o = run([ev("sko1", "看一下进度表"),
+         ev("sko2", '<<FAKE_TOOL>>{"tool":"skill_read","name":"progress-table"}<<END>> 读进度'),
+         ev("sko3", '<<FAKE_TOOL>>{"tool":"skill_read","name":"meeting-minutes"}<<END>> 读纪要')],
+        name="sk_only", cfg_path=skcfg("sk_only", directory="skills_only", only=["meeting-minutes"]))
+ps = prompts(o)
+check("skills.only 点名之后，目录、预放和 skill_read 都只认这几个",
+      ps and "meeting-minutes：整理会议纪要" in ps[0] and "progress-table" not in ps[0]
+      and "ONLY_PROG" not in ps[0] and _sk.PRELOAD_MARK not in ps[0]
+      and "没有这个技能" in o and "ONLY_PROG" not in o and "ONLY_MEET" in o, o)
+_only_chk = subprocess.run([sys.executable, os.path.join(FW, "agentbot.py"), skcfg("sk_only_chk", directory="skills_only", only=["no-such-skill"]), "--check"],
+                           capture_output=True, text=True, encoding="utf-8", timeout=60)
+_only_out = (_only_chk.stdout or "") + (_only_chk.stderr or "")
+check("skills.only 写了不存在的名字时 --check 只提示，不因此把技能判失败",
+      "HINT skills.only" in _only_out and "no-such-skill" in _only_out
+      and "skills enabled=True 数量=0 未选用=2 未找到=1" in _only_out and "FAIL skill" not in _only_out, _only_out)
 _repo = _sk.SkillSet({"skills": {"enabled": True, "dir": "skills"}}, FW)
 _by = {s.name: s for s in _repo.valid}
 _rb = _repo.read("progress-table") if "progress-table" in _by else ""

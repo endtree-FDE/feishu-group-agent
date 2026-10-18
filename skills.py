@@ -1,7 +1,8 @@
 # 技能层：每个技能一个文件夹，里面一份 SKILL.md（agentskills.io：YAML 头含 name、description，正文是步骤）。
 # 配置（默认关闭）：
-#   "skills": {"enabled": false, "dir": "skills", "index_budget_chars": 800,
+#   "skills": {"enabled": false, "dir": "skills", "only": [], "index_budget_chars": 800,
 #              "preload": true, "preload_budget_chars": 3000}
+# only 不写或空列表：合法技能全部选用。非空才收窄目录、预放和 skill_read。
 # 关闭时 prompt_block() 和 preload_block() 都返回空字符串，调用方不往提示词里加任何东西。
 # 打开后：启动时扫描目录，提示词里只放「名字：描述」。
 # YAML 头可以选填 triggers（一组关键词）。本题命中时，preload_block() 把得分最高的那一份正文
@@ -119,6 +120,23 @@ def _parse_yaml_block(lines):
         data[key] = _unquote(val)
         i += 1
     return data, None
+
+
+def _only_list(raw):
+    """skills.only：缺省、空列表、false 都表示「目录里合法的全部选用」。
+    非空列表（或一个名字字符串）才收窄。非法形状当成没写，避免旧配置被误伤。"""
+    if raw is None or raw is False or raw == "":
+        return None
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, list):
+        return None
+    out = []
+    for item in raw:
+        s = str(item).strip()
+        if s and s not in out:
+            out.append(s)
+    return out or None
 
 
 def _trigger_list(raw):
@@ -246,8 +264,11 @@ class SkillSet:
             self.preload_budget = 3000
         self.root = os.path.join(base, self.dir_name)
         self.names = guard.load_names(os.path.join(base, cfg.get("redact_file", "redact.txt")))
+        self.only = _only_list(s.get("only"))
         self.valid = []
         self.invalid = []
+        self.skipped = []
+        self.missing_only = []
         self._by_name = {}
         self._scan()
 
@@ -286,9 +307,34 @@ class SkillSet:
             sk = Skill(str(data.get("name")).strip(), str(data.get("description")).strip(), md, _trigger_list(data.get("triggers")))
             self.valid.append(sk)
             self._by_name[sk.name] = sk
+        self._apply_only()
+
+    def _apply_only(self):
+        """非空 only 才收窄。没被点名的合法技能不进目录，也不能 skill_read。"""
+        if not self.only:
+            return
+        want = set(self.only)
+        kept, skipped = [], []
+        for sk in self.valid:
+            if sk.name in want:
+                kept.append(sk)
+            else:
+                skipped.append(sk)
+        self.valid = kept
+        self.skipped = skipped
+        self._by_name = {sk.name: sk for sk in kept}
+        invalid_names = {p.folder for p in self.invalid}
+        found = {sk.name for sk in kept}
+        self.missing_only = [n for n in self.only if n not in found and n not in invalid_names]
 
     def status(self):
-        extra = "" if not self.invalid else " 不合法=%d" % len(self.invalid)
+        extra = ""
+        if self.invalid:
+            extra += " 不合法=%d" % len(self.invalid)
+        if self.skipped:
+            extra += " 未选用=%d" % len(self.skipped)
+        if self.missing_only:
+            extra += " 未找到=%d" % len(self.missing_only)
         return "enabled=%s 数量=%d%s" % (self.enabled, len(self.valid), extra)
 
     def prompt_block(self):
