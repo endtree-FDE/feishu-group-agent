@@ -1302,6 +1302,15 @@ o = run([_p2s], name="sec_stranger", cfg_path=_st_path)
 o2 = run([_p2a], name="sec_stranger_admin", cfg_path=_st_path)
 check("open_to_all：不在名单里的人不能调用飞书工具", "不能使用飞书工具" in o and "drive +search" not in o and "agent start stool" in o, o)
 check("open_to_all：写入白名单里的人仍可调用工具", "不能使用飞书工具" not in o2 and ("drive +search" in o2 or "这项权限未开" in o2), o2)
+o = run([ev("gread", '<<FAKE_TOOL>>{"tool":"history","args":{}}<<END>> 最近聊了什么', sender_id="user_member"),
+         ev("gdoc", '<<FAKE_TOOL>>{"tool":"docs_search","args":{"query":"进度"}}<<END>> 找文档', sender_id="user_member"),
+         ev("gcal", '<<FAKE_TOOL>>{"tool":"calendar_read","args":{}}<<END>> 看日历', sender_id="user_member"),
+         ev("gwrite", '<<FAKE_TOOL>>{"tool":"docs_create","args":{"title":"周报","markdown":"内容"}}<<END>> 建文档', sender_id="user_member")],
+        name="sec_group_read", cfg_path=_st_path)
+check("已认群里不在白名单的成员仍可使用只读工具，写入仍被拒绝",
+      "不能使用飞书工具" not in o and "[fake-lark] im +chat-messages-list" in o
+      and "[fake-lark] drive +search" in o and "[fake-lark] calendar +agenda" in o
+      and "不在写入白名单" in o and "docs +create" not in o, o)
 
 o = run([joined("oc_forge", "user_stranger"), joined("oc_forge", "user_admin"), ev("fg1", "被抬升了吗", chat_id="oc_forge")],
         name="sec_forge", cfg_path=acfg("sec_forge", admit="whitelist"))

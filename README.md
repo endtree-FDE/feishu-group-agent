@@ -60,7 +60,7 @@ flowchart LR
 python tests/run_tests.py
 ```
 
-一共 207 项，全部通过就可以。
+一共 208 项，全部通过就可以。
 
 从零接到飞书：看 [docs/新建智能体.md](docs/新建智能体.md)。顺序是创建企业自建应用、申请权限、在你自己的电脑上初始化 lark-cli、复制配置、启动。
 
@@ -120,7 +120,7 @@ python tests/run_tests.py
 | `agents/CONFIG.md` | 每一项怎么填 |
 | `redact.example.txt` | 空的客户名名单样子，复制成 `redact.txt` 再用 |
 | `scripts/` | Windows 上的启动、停止、看门狗、计划任务 |
-| `tests/run_tests.py` | 离线测试，207 项 |
+| `tests/run_tests.py` | 离线测试，208 项 |
 | `docs/` | 给人看的说明和架构图 |
 | `SKILL.md` | 给帮忙操作的 AI 助手看的步骤 |
 

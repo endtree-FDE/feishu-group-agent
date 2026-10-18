@@ -392,7 +392,8 @@ def clean_q(t):
     for n in CFG.get("bot_names", []): t = re.sub("@" + re.escape(n) + r"\S*", "", t)
     return t.strip()
 def p2p_limited(uid, ctype):
-    """open_to_all 且不在私聊名单、也不在写入白名单时，只能聊天，不能用飞书工具。名单里的人不受影响。"""
+    """只限制私聊。已认群里的成员 @ 机器人仍可使用只读工具；写入另走白名单和确认码。
+    open_to_all 且不在私聊名单、也不在写入白名单时，私聊只能聊天，不能用飞书工具。"""
     if ctype != "p2p": return False
     pc = CFG.get("p2p") or {}
     if not isinstance(pc, dict) or not pc.get("open_to_all"): return False
