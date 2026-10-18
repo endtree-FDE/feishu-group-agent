@@ -1509,6 +1509,158 @@ o = run([dict(p2p, message_id="long1", message_type="file", content="[文件] �
 ps = prompts(o)
 check("附件正文超过 max_chars 时分段截取",
       ps and "【开头】" in ps[0] and "【结尾】" in ps[0] and "全文约" in ps[0] and "头" in ps[0] and ps[0].count("中") < 400, ps[0][-500:] if ps else o)
+
+def _limits(**kw):
+    base = _tools.attachment_limits(cfg)
+    base.update(kw)
+    return base
+_note = os.path.join(T, "note.md"); open(_note, "w", encoding="utf-8").write("# 报名\n截止 10 月 30 日\n")
+_py = os.path.join(T, "main.py"); open(_py, "w", encoding="utf-8").write("print('截止日')\n")
+_csv = os.path.join(T, "rows.csv"); open(_csv, "w", encoding="utf-8").write("姓名,截止\n小李,10月30日\n")
+_js = os.path.join(T, "pack.json"); open(_js, "w", encoding="utf-8").write('{"deadline":"10月30日"}\n')
+_got = _tools.inspect_download(_note, _limits())
+check("txt/md 按原文读出", _got["lines"] and "报名" in _got["lines"][0] and "10 月 30 日" in _got["lines"][0] and not _got["images"], _got)
+_got = _tools.inspect_download(_py, _limits())
+check("代码文件标成代码并读出正文", _got["lines"] and "（代码）" in _got["lines"][0] and "截止日" in _got["lines"][0], _got)
+_got = _tools.inspect_download(_csv, _limits())
+check("csv 当文本读出", _got["lines"] and "小李" in _got["lines"][0] and "10月30日" in _got["lines"][0], _got)
+_got = _tools.inspect_download(_js, _limits())
+check("json 当文本读出", _got["lines"] and "deadline" in _got["lines"][0], _got)
+for _old, _want in (("旧表.xls", "xlsx"), ("旧稿.ppt", "pptx")):
+    _p = os.path.join(T, _old); open(_p, "wb").write(b"\xd0\xcf\x11\xe0")
+    _got = _tools.inspect_download(_p, _limits())
+    check("旧版 %s 提示另存为新格式" % _old, _got["lines"] and "另存为" in _got["lines"][0] and _want in _got["lines"][0], _got)
+_mp3 = os.path.join(T, "talk.mp3"); open(_mp3, "wb").write(b"ID3")
+_mp4 = os.path.join(T, "demo.mp4"); open(_mp4, "wb").write(b"\x00\x00\x00\x18ftyp")
+check("音频只说明不能听", "音频" in _tools.inspect_download(_mp3, _limits())["lines"][0] and "不能听" in _tools.inspect_download(_mp3, _limits())["lines"][0])
+check("视频只说明不能看", "视频" in _tools.inspect_download(_mp4, _limits())["lines"][0] and "不能看" in _tools.inspect_download(_mp4, _limits())["lines"][0])
+_png = os.path.join(T, "shot.png")
+open(_png, "wb").write(b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
+_img = _tools.inspect_download(_png, _limits(), vision=True)
+check("图片交给识图，不说类型不支持", _img["images"] and _img["images"][0]["path"] == _png and not any("暂不支持" in x for x in _img["lines"]))
+_img_off = _tools.inspect_download(_png, _limits(), vision=False)
+check("关掉识图时图片有明确说明", _img_off["lines"] and "识图没打开" in _img_off["lines"][0] and not _img_off["images"], _img_off)
+_bmp_ext, _bmp = _tools._viewable_image({"/Width": 1, "/Height": 1, "/BitsPerComponent": 8, "/ColorSpace": "/DeviceRGB", "/Filter": "/FlateDecode"}, bytes([255, 0, 0]))
+check("没有 Pillow 时，未压缩的扫描图像素可以包成 BMP", _bmp_ext == ".bmp" and _bmp[:2] == b"BM", _bmp[:8] if _bmp else None)
+check("zip 路径拒绝穿越、绝对路径和盘符",
+      _tools.zip_rel_parts("../secret.txt") is None and _tools.zip_rel_parts("/etc/passwd") is None
+      and _tools.zip_rel_parts("C:/Windows/a.txt") is None and _tools.zip_rel_parts("ok/readme.md") == ["ok", "readme.md"])
+_real_pdf = _tools.load_pdf_reader
+_tools.load_pdf_reader = lambda: None
+try:
+    _bare = os.path.join(T, "bare.pdf"); open(_bare, "wb").write(b"%PDF-1.1\n")
+    _miss = _tools.inspect_download(_bare, _limits())
+finally:
+    _tools.load_pdf_reader = _real_pdf
+check("没装 pypdf 时说明要安装，而不是报错", _miss["lines"] and "pypdf" in _miss["lines"][0] and "pip install" in _miss["lines"][0], _miss)
+_pdf_text = _pdf_scan = _pdf_blank = None
+try:
+    from pypdf import PdfWriter as _PdfWriter
+except ImportError:
+    _PdfWriter = None
+if _PdfWriter:
+    from pypdf import PdfWriter
+    from pypdf.generic import DecodedStreamObject, NameObject, DictionaryObject, NumberObject, StreamObject
+    def _text_pdf(path, lines):
+        w = PdfWriter()
+        font = DictionaryObject({NameObject("/Type"): NameObject("/Font"), NameObject("/Subtype"): NameObject("/Type1"), NameObject("/BaseFont"): NameObject("/Helvetica")})
+        font_ref = w._add_object(font)
+        for line in lines:
+            w.add_blank_page(width=400, height=200)
+            page = w.pages[-1]
+            page[NameObject("/Resources")] = DictionaryObject({NameObject("/Font"): DictionaryObject({NameObject("/F1"): font_ref})})
+            content = DecodedStreamObject(); content.set_data(("BT /F1 12 Tf 36 100 Td (%s) Tj ET" % line).encode("ascii"))
+            page[NameObject("/Contents")] = w._add_object(content)
+        w.write(path)
+    _pdf_text = os.path.join(T, "deadline.pdf"); _text_pdf(_pdf_text, ["deadline October thirty", "second page body"])
+    _got = _tools.inspect_download(_pdf_text, _limits())
+    check("PDF 按页抽出文字", _got["lines"] and "【第 1 页】" in _got["lines"][0] and "【第 2 页】" in _got["lines"][0]
+          and "deadline October thirty" in _got["lines"][0] and "second page body" in _got["lines"][0] and "共 2 页" in _got["lines"][0], _got)
+    _jpeg = __import__("base64").b64decode("/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=")
+    _pdf_scan = os.path.join(T, "scan.pdf")
+    _w = PdfWriter(); _w.add_blank_page(width=200, height=200); _page = _w.pages[0]
+    _img = StreamObject(); _img._data = _jpeg
+    _img.update({NameObject("/Type"): NameObject("/XObject"), NameObject("/Subtype"): NameObject("/Image"),
+                 NameObject("/Width"): NumberObject(1), NameObject("/Height"): NumberObject(1),
+                 NameObject("/ColorSpace"): NameObject("/DeviceRGB"), NameObject("/BitsPerComponent"): NumberObject(8),
+                 NameObject("/Filter"): NameObject("/DCTDecode"), NameObject("/Length"): NumberObject(len(_jpeg))})
+    _page[NameObject("/Resources")] = DictionaryObject({NameObject("/XObject"): DictionaryObject({NameObject("/Im1"): _w._add_object(_img)})})
+    _content = DecodedStreamObject(); _content.set_data(b"q 100 0 0 100 20 20 cm /Im1 Do Q")
+    _page[NameObject("/Contents")] = _w._add_object(_content); _w.write(_pdf_scan)
+    _got = _tools.inspect_download(_pdf_scan, _limits(), vision=True)
+    check("扫描 PDF 无文字时抽出内嵌 JPG", _got["lines"] and "没有文字" in _got["lines"][0] and "已抽出" in _got["lines"][0]
+          and _got["images"] and _got["images"][0]["path"].endswith(".jpg") and open(_got["images"][0]["path"], "rb").read()[:3] == b"\xff\xd8\xff", _got)
+    _pdf_blank = os.path.join(T, "blank.pdf")
+    _bw = PdfWriter(); _bw.add_blank_page(width=200, height=200); _bw.write(_pdf_blank)
+    _got = _tools.inspect_download(_pdf_blank, _limits(), vision=True)
+    check("空白 PDF 提示导出成图片", _got["lines"] and "导出成 PNG" in _got["lines"][0] and not _got["images"], _got)
+    _bad_pdf = os.path.join(T, "bad.pdf"); open(_bad_pdf, "wb").write(b"this is not a pdf")
+    _got = _tools.inspect_download(_bad_pdf, _limits())
+    check("损坏的 PDF 说明打不开", _got["lines"] and "打不开" in _got["lines"][0], _got)
+_zip_path = os.path.join(T, "bundle.zip")
+_nested = os.path.join(T, "inner.zip")
+with zipfile.ZipFile(_nested, "w") as _z:
+    _z.writestr("hidden.txt", "不应展开的内层正文")
+with zipfile.ZipFile(_zip_path, "w") as _z:
+    _z.writestr("ok/readme.md", "报名截止 10 月 30 日")
+    _z.writestr("src/main.py", "print('zipcode')\n")
+    _z.writestr("../secret.txt", "TOPSECRET")
+    _z.writestr("/etc/passwd", "root")
+    _z.writestr("clip.mp3", b"ID3fake")
+    _z.writestr("inner.zip", open(_nested, "rb").read())
+_secret_out = os.path.join(T, "secret.txt")
+if os.path.exists(_secret_out): os.remove(_secret_out)
+_got = _tools.inspect_download(_zip_path, _limits())
+_blob = "\n".join(_got["lines"])
+check("zip 列出目录并读出其中的文本和代码", "readme.md" in _blob and "报名截止" in _blob and "main.py" in _blob and "zipcode" in _blob and "（代码）" in _blob, _blob)
+check("zip 拒绝路径穿越和绝对路径", "TOPSECRET" not in _blob and "路径不安全" in _blob and not os.path.exists(_secret_out), _blob)
+check("zip 里的音频有说明，内层压缩包不再展开", "不能听" in _blob and "内层不再展开" in _blob and "不应展开的内层正文" not in _blob, _blob)
+_bomb = os.path.join(T, "bomb.zip")
+with zipfile.ZipFile(_bomb, "w", compression=zipfile.ZIP_DEFLATED) as _z:
+    _z.writestr("bomb.txt", b"A" * 300000)
+_got = _tools.inspect_download(_bomb, _limits(zip_max_ratio=5))
+check("压缩比异常的成员被跳过", _got["lines"] and "压缩比异常" in _got["lines"][0] and "AAA" not in "\n".join(_got["lines"]), _got)
+_many = os.path.join(T, "many.zip")
+with zipfile.ZipFile(_many, "w") as _z:
+    for _i in range(6): _z.writestr("f%d.txt" % _i, "文件%d" % _i)
+_got = _tools.inspect_download(_many, _limits(zip_max_files=3, zip_max_read=2))
+_blob = "\n".join(_got["lines"])
+check("zip 限制列出数量和读取数量", "没有列出" in _blob and "没有读取" in _blob and _blob.count("文件") >= 2, _blob)
+
+_stage_file("txt1", "file_note.md", src=_note)
+_with_mget('{"file_key":"file_note","file_name":"说明.md"}')
+o = run([dict(p2p, message_id="txt1", message_type="file", content="[文件] 看说明")], name="txt_att", extra_env={"AGENTBOT_FAKE_DUMP_PROMPT": "1"})
+ps = prompts(o)
+check("md 附件正文进入提示词", ps and "说明.md" in ps[0] and "10 月 30 日" in ps[0] and "类型暂不支持" not in ps[0], ps[0] if ps else o)
+if _pdf_text:
+    _stage_file("pdf1", "file_deadline.pdf", src=_pdf_text)
+    _with_mget('{"file_key":"file_deadline","file_name":"报名.pdf"}')
+    o = run([dict(p2p, message_id="pdf1", message_type="file", content="[文件] 看 pdf")], name="pdf_att", extra_env={"AGENTBOT_FAKE_DUMP_PROMPT": "1"})
+    ps = prompts(o)
+    check("PDF 附件按页进入提示词", ps and "报名.pdf" in ps[0] and "【第 1 页】" in ps[0] and "deadline October thirty" in ps[0], ps[0] if ps else o)
+if _pdf_scan:
+    _stage_file("scan1", "file_scan.pdf", src=_pdf_scan)
+    _with_mget('{"file_key":"file_scan","file_name":"扫描.pdf"}')
+    o = run([dict(p2p, message_id="scan1", message_type="file", content="[文件] 看扫描件")], name="scan_att", extra_env={"AGENTBOT_FAKE_DUMP_PROMPT": "1"})
+    ps = prompts(o)
+    check("扫描 PDF 的图片路径交给模型",
+          bool(ps) and "扫描.pdf" in ps[0] and ".attach/" in ps[0] and "第 1 页的图片" in ps[0] and ".jpg" in ps[0] and "请查看" in ps[0],
+          ps[0] if ps else o)
+_stage_file("png1", "file_shot.png", src=_png)
+_with_mget('{"file_key":"file_shot","file_name":"截图.png"}', msg_type="image")
+o = run([dict(p2p, message_id="png1", message_type="image", content="[图片]")], name="png_att", extra_env={"AGENTBOT_FAKE_DUMP_PROMPT": "1"})
+ps = prompts(o)
+check("图片附件仍放进工作区给模型看", ps and "用户发来一张图片" in ps[0] and ".attach/" in ps[0] and "截图.png" in ps[0], ps[0] if ps else o)
+_stage_file("vid1", "file_demo.mp4", src=_mp4)
+_with_mget('{"file_key":"file_demo","file_name":"演示.mp4"}')
+o = run([dict(p2p, message_id="vid1", message_type="file", content="[文件] 看视频")], name="vid_att", extra_env={"AGENTBOT_FAKE_DUMP_PROMPT": "1"})
+ps = prompts(o)
+check("视频附件说明不能看，而不是类型暂不支持", ps and "演示.mp4" in ps[0] and "视频" in ps[0] and "不能看" in ps[0] and "类型暂不支持" not in ps[0], ps[0] if ps else o)
+_stage_file("zip1", "file_bundle.zip", src=_zip_path)
+_with_mget('{"file_key":"file_bundle","file_name":"材料.zip"}')
+o = run([dict(p2p, message_id="zip1", message_type="file", content="[文件] 看压缩包")], name="zip_att", extra_env={"AGENTBOT_FAKE_DUMP_PROMPT": "1"})
+ps = prompts(o)
+check("zip 附件的目录和正文进入提示词", ps and "材料.zip" in ps[0] and "报名截止" in ps[0] and "路径不安全" in ps[0] and "TOPSECRET" not in ps[0], ps[0] if ps else o)
 json.dump(_saved_fake, open(FP, "w", encoding="utf-8"), ensure_ascii=False)
 
 # ---------- 重启不丢正在处理的消息、停机补答、确认码持久化 ----------

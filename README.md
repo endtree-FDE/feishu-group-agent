@@ -54,7 +54,7 @@ flowchart LR
 
 ## 快速开始
 
-需要 Windows 和 Python 3.12 才能真正连上飞书。离线测试在其他系统上也可以跑，不需要先装别的 Python 包，也不需要联网。看 PDF 附件时才需要另外安装 `pypdf`。Word（`.docx`）和 PPT（`.pptx`）用标准库读取。Excel（`.xlsx`）在装了 `openpyxl` 时读取，没装也不会影响启动。
+需要 Windows 和 Python 3.12 才能真正连上飞书。离线测试在其他系统上也可以跑，不需要先装别的 Python 包，也不需要联网。看 PDF 附件时才需要另外安装 `pypdf`（纯 Python）。Word（`.docx`）、PPT（`.pptx`）、文本、代码、zip 和图片用标准库读取。Excel（`.xlsx`）在装了 `openpyxl` 时读取。没装这些包也不会影响启动，只是对应的附件会说明读不了。
 
 ```text
 python tests/run_tests.py

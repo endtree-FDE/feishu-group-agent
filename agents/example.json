@@ -78,7 +78,7 @@
       "table_id": "REPLACE_TABLE_ID",
       "search_fields": []
     },
-    "attachment": {"enabled": true, "max_mb": 20, "max_chars": 20000},
+    "attachment": {"enabled": true, "max_mb": 20, "max_chars": 20000, "zip_max_files": 30, "zip_max_read": 8, "zip_max_mb": 40, "pdf_max_pages": 20, "pdf_scan_pages": 3},
     "docs_create": {"enabled": true},
     "docs_append": {"enabled": true},
     "calendar_create": {"enabled": true},
