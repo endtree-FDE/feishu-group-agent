@@ -101,10 +101,14 @@ def history(sess):
 def remember(sess, role, text):
     with DBL: DB.execute("insert into turns values(?,?,?,?)", (sess, time.time(), role, text[:2000])); DB.commit()
 _PROVIDER = None
+_PROVIDER_LOCK = threading.Lock()
 def get_provider():
+    # 两题同时进来时，不加锁会各建一个实现，各自再拉起一个常驻进程。
     global _PROVIDER
     if _PROVIDER is None:
-        _PROVIDER = providers.create(CFG, log, KB)
+        with _PROVIDER_LOCK:
+            if _PROVIDER is None:
+                _PROVIDER = providers.create(CFG, log, KB)
     return _PROVIDER
 def forget(sess):
     with DBL: DB.execute("delete from turns where sess=?", (sess,)); DB.commit()

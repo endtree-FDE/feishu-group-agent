@@ -688,7 +688,56 @@ check("mode=oneshot 的 --check 不启动 ACP", "FAIL acp" not in _co and "OK   
 o, tr, rc = run_acp([ev("par%d" % i, "并行%d" % i) for i in range(2)], "acp_par", ACP_CFG, args=("--parallel",))
 ids, news = new_ids(tr)
 check("常驻进程上两题并行仍各有会话，并发上限沿用原来的设置",
-      rc == 0 and "常驻答案" in block(o, "par0") and "常驻答案" in block(o, "par1") and len(news) == 2 and "Traceback" not in o, o + str(ids))
+      rc == 0 and "常驻答案" in block(o, "par0") and "常驻答案" in block(o, "par1") and len(news) == 2 and "Traceback" not in o and o.count("acp spawn") == 1, o + str(ids))
+_race_cfg = json.loads(json.dumps(cfg)); _race_cfg["model_provider"] = "cursor"
+_race_p = os.path.join(T, "race_pool.json"); json.dump(_race_cfg, open(_race_p, "w", encoding="utf-8"), ensure_ascii=False)
+_race_src = r'''
+import sys, threading, time, runpy, traceback
+sys.path.insert(0, %r)
+sys.argv = ["agentbot.py", %r]
+g = runpy.run_path(%r, run_name="lib")
+import acp_client
+nlock = threading.Lock()
+count = {"n": 0}
+class SlowPool:
+    def __init__(self, *a, **k):
+        with nlock:
+            count["n"] += 1
+        time.sleep(0.2)
+    def close(self):
+        pass
+acp_client.Pool = SlowPool
+bar = threading.Barrier(8)
+providers, pools, errs = [], [], []
+plock = threading.Lock()
+def work():
+    try:
+        bar.wait()
+        p = g["get_provider"]()
+        pool = p.pool()
+        with plock:
+            providers.append(p)
+            pools.append(pool)
+    except Exception:
+        errs.append(traceback.format_exc())
+ths = [threading.Thread(target=work) for _ in range(8)]
+for t in ths: t.start()
+for t in ths: t.join()
+same_p = len(providers) == 8 and len(set(id(x) for x in providers)) == 1
+same_pool = len(pools) == 8 and len(set(id(x) for x in pools)) == 1
+print("POOL_COUNT", count["n"], "END")
+print("SAME_PROVIDER", same_p)
+print("SAME_POOL", same_pool)
+print("ERRS", len(errs), "END")
+if errs: print(errs[0])
+if not (count["n"] == 1 and same_p and same_pool and not errs):
+    sys.exit(1)
+''' % (FW, _race_p, os.path.join(FW, "agentbot.py"))
+_race_env = dict(os.environ); _race_env.pop("AGENTBOT_FAKE_AGENT", None); _race_env.pop("AGENTBOT_FAKE_DUMP_PROMPT", None)
+_rr = subprocess.run([sys.executable, "-c", _race_src], cwd=FW, capture_output=True, text=True, encoding="utf-8", env=_race_env, timeout=30)
+o = (_rr.stdout or "") + (_rr.stderr or "")
+check("并发懒初始化：8 个线程同时取 provider 和 pool，只构造一次且是同一个对象",
+      _rr.returncode == 0 and "POOL_COUNT 1 END" in o and "SAME_PROVIDER True" in o and "SAME_POOL True" in o and "ERRS 0 END" in o, o)
 
 # ---------- OpenAI 兼容接口（本地假服务；不连接真的模型）----------
 import fake_openai_server as _oas
