@@ -61,6 +61,24 @@ db = sqlite3.connect(os.path.join(T, "state", "state.db")); n = db.execute("sele
 check("话题记忆：同 root_id 归入同一会话", n == 4 and ("sess=" + _sess) in o.split("Q m7")[1], o)
 o = run([ev("m8", "/new", root_id="m6")], name="new"); n = db.execute("select count(*) from turns where sess=?", (_sess,)).fetchone()[0]
 check("/new 清空话题记忆", n == 0 and "已清空" in o, o)
+o = run([ev("stat1", "/状态"), ev("stat2", "状态怎么样")], name="status_on")
+_stat = o.split("[dry-run] reply stat1: ", 1)[-1].split("[dry-run]", 1)[0]
+check("/状态 不调用模型，也不打印路径和编号",
+      "agent start stat1" not in o and "不调用模型" in _stat and "模型接口：cursor" in _stat
+      and "长期记忆：关" in _stat and "技能：关" in _stat and "确认码" in _stat
+      and "agent start stat2" in o and T not in _stat and "REPLACE_" not in _stat and CH not in _stat, _stat + "\n" + o[-800:])
+def _status_off(name):
+    c = json.loads(json.dumps(cfg)); c["commands"] = {"status": False}
+    pth = os.path.join(T, name + ".json"); json.dump(c, open(pth, "w", encoding="utf-8"), ensure_ascii=False); return pth
+o = run([ev("stat3", "状态"), ev("stat4", "/status")], name="status_off", cfg_path=_status_off("status_off"))
+check("commands.status 为 false 时，「状态」仍交给模型",
+      "agent start stat3" in o and "agent start stat4" in o and "不调用模型" not in o, o)
+def _status_default(name):
+    c = json.loads(json.dumps(cfg)); c.pop("commands", None)
+    pth = os.path.join(T, name + ".json"); json.dump(c, open(pth, "w", encoding="utf-8"), ensure_ascii=False); return pth
+o = run([ev("stat5", "/状态")], name="status_default", cfg_path=_status_default("status_default"))
+check("旧配置没写 commands.status 时，/状态 仍然不调用模型",
+      "agent start stat5" not in o and "不调用模型" in o and "模型接口：cursor" in o, o)
 p2p = {"message_id": "p1", "chat_id": "chat_p2p1", "chat_type": "p2p", "message_type": "text", "sender_id": "user_anyone", "sender_type": "user", "content": "私聊不用 at"}
 o = run([p2p], name="p2p"); check("私聊无需 @ 也回复（白名单内）", "reply p1" in o and "sess=p2p:chat_p2p1" in o, o)
 o = run([dict(p2p, message_id="p2", content='<<FAKE_TOOL>>{"tool":"history","args":{}}<<END>> 群里聊了啥')], name="p2phist")
