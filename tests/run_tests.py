@@ -499,5 +499,81 @@ ids, news = new_ids(tr)
 check("常驻进程上两题并行仍各有会话，并发上限沿用原来的设置",
       rc == 0 and "常驻答案" in block(o, "par0") and "常驻答案" in block(o, "par1") and len(news) == 2 and "Traceback" not in o, o + str(ids))
 
+# ---------- OpenAI 兼容接口（本地假服务；不连接真的模型）----------
+import fake_openai_server as _oas
+_oa = _oas.serve()
+_OA_URL = "http://127.0.0.1:%d/v1" % _oa.server_address[1]
+_OA_SECRET = "unit-secret-value"
+def ocfg(name, model="oa-model", **agent):
+    c = json.loads(json.dumps(cfg))
+    c["model_provider"] = "openai_compat"
+    c["agent"].update({"model": model, "base_url": _OA_URL, "api_key_env": "UNIT_OPENAI_KEY",
+                       "network_retries": 0, "stall_sec": 30, "max_runtime_sec": 60, "max_chars": 3500})
+    c["agent"].update(agent)
+    pth = os.path.join(T, name + ".json"); json.dump(c, open(pth, "w", encoding="utf-8"), ensure_ascii=False); return pth
+def run_oa(events, name, cfg_path, retries_env=None, progress=False):
+    if progress:
+        c = json.load(open(cfg_path, encoding="utf-8"))
+        c["progress"] = {"enabled": True, "mode": "card", "card_interval_sec": 1, "reaction": "OnIt", "done_reaction": "DONE",
+                         "status_message": True, "fast_interval_sec": 1, "fast_phase_sec": 120, "slow_interval_sec": 60,
+                         "min_gap_sec": 0, "max_edits": 17, "thinking_panel": True, "thinking_chars": 1200}
+        json.dump(c, open(cfg_path, "w", encoding="utf-8"), ensure_ascii=False)
+    p = os.path.join(T, name + ".jsonl")
+    open(p, "w", encoding="utf-8").write("\n".join(json.dumps({"event": e}, ensure_ascii=False) for e in events) + "\n")
+    env = dict(os.environ, AGENTBOT_FAKE_LARK=FP, UNIT_OPENAI_KEY=_OA_SECRET)
+    env.pop("AGENTBOT_FAKE_AGENT", None); env.pop("AGENTBOT_FAKE_DUMP_PROMPT", None)
+    r = subprocess.run([sys.executable, os.path.join(FW, "agentbot.py"), cfg_path, "--dry-run", p], capture_output=True, text=True, encoding="utf-8", env=env, timeout=90)
+    return (r.stdout or "") + (r.stderr or ""), r.returncode
+def oa_hits(model):
+    return [h for h in _oa.hits if h.get("model") == model]
+o, rc = run_oa([ev("oa1", "普通问题")], "oa_stream", ocfg("oa_stream"))
+check("openai_compat：流式文字拼成最终答案", "流式答案甲" in block(o, "oa1") and "model provider openai_compat" in o and _OA_SECRET not in o, o)
+o, rc = run_oa([ev("oa2", "<<OA_REASON>> 想一想")], "oa_reason", ocfg("oa_reason"), progress=True)
+check("openai_compat：reasoning_content 进思考进度，正文单独作答",
+      "推理后的答案" in block(o, "oa2") and "整理答案结构" in o and "reasoning_content" not in block(o, "oa2"), o)
+o, rc = run_oa([ev("oa3", "<<OA_TOOL>> 最近聊了什么")], "oa_tool", ocfg("oa_tool"))
+check("openai_compat：工具回合仍走 <<TOOL>> 和白名单",
+      "tool call history" in o and "[fake-lark] im +chat-messages-list" in o and "根据工具结果：周五交报名" in block(o, "oa3") and "<<TOOL>>" not in block(o, "oa3"), o)
+write_skill("progress-table", "查团队进度表。", "# 查进度表\n\n正文标记BODY_PROGRESS。\n", directory="skills_oa")
+_skc = json.load(open(ocfg("oa_skill"), encoding="utf-8"))
+_skc["skills"] = {"enabled": True, "dir": "skills_oa", "index_budget_chars": 800}
+json.dump(_skc, open(os.path.join(T, "oa_skill.json"), "w", encoding="utf-8"), ensure_ascii=False)
+o, rc = run_oa([ev("oa4", "<<OA_SKILL>> 按技能说")], "oa_skill", os.path.join(T, "oa_skill.json"))
+check("openai_compat：skill_read 仍可用，正文经过脱敏路径",
+      "tool call skill_read" in o and "按技能回答：BODY_PROGRESS" in block(o, "oa4") and "name: progress-table" not in block(o, "oa4"), o)
+o, rc = run_oa([ev("oa5", "<<OA_STALL>> 卡住")], "oa_stall", ocfg("oa_stall", stall_sec=2, max_runtime_sec=30))
+b = block(o, "oa5")
+check("openai_compat：stall_sec 超时返回已写出的部分并脱敏",
+      "openai_compat stopped: stall" in o and "已经写出的部分：先看第一步" in b and "（时间到了，先给部分结果）" in b
+      and "杭州某某科技有限公司" not in b and "某客户" in b, o)
+_before = len(oa_hits("deny-auth"))
+o, rc = run_oa([ev("oa6", "不该带上密钥")], "oa_401", ocfg("oa_401", model="deny-auth", network_retries=2))
+check("openai_compat：401 不重试，日志和回复里没有密钥",
+      "openai_compat http=401" in o and "抱歉，这次没能生成回答" in block(o, "oa6") and _OA_SECRET not in o
+      and len(oa_hits("deny-auth")) == _before + 1 and "unit-secret-value" not in open(os.path.join(T, "oa_401.json"), encoding="utf-8").read(), o)
+_before = len(oa_hits("flaky-net"))
+o, rc = run_oa([ev("oa7", "请重试")], "oa_retry", ocfg("oa_retry", model="flaky-net", network_retries=1))
+check("openai_compat：网络错误按 network_retries 重试后再答",
+      "重试成功的答案" in block(o, "oa7") and "openai_compat network" in o and len(oa_hits("flaky-net")) == _before + 2 and _OA_SECRET not in o, o)
+_miss = dict(os.environ); _miss.pop("UNIT_OPENAI_KEY", None); _miss.pop("AGENTBOT_FAKE_AGENT", None)
+_cr = subprocess.run([sys.executable, os.path.join(FW, "agentbot.py"), ocfg("oa_miss"), "--check"], capture_output=True, text=True, encoding="utf-8", env=_miss, timeout=30)
+_co = (_cr.stdout or "") + (_cr.stderr or "")
+check("--check：openai_compat 缺环境变量时报名字、不发请求",
+      _cr.returncode != 0 and "FAIL openai_compat" in _co and "UNIT_OPENAI_KEY" in _co and "未设置" in _co and "OK   cursor-agent" not in _co, _co)
+_ok = dict(os.environ, UNIT_OPENAI_KEY=_OA_SECRET); _ok.pop("AGENTBOT_FAKE_AGENT", None)
+_cr = subprocess.run([sys.executable, os.path.join(FW, "agentbot.py"), ocfg("oa_ok"), "--check"], capture_output=True, text=True, encoding="utf-8", env=_ok, timeout=30)
+_co = (_cr.stdout or "") + (_cr.stderr or "")
+check("--check：openai_compat 环境变量已设置并发短请求，输出不含密钥",
+      "OK   openai_compat" in _co and "已设置" in _co and _OA_SECRET not in _co and "FAIL openai_compat" not in _co and "OK   cursor-agent" not in _co, _co)
+_cr = subprocess.run([sys.executable, os.path.join(FW, "agentbot.py"), ocfg("oa_bad", model="deny-auth"), "--check"], capture_output=True, text=True, encoding="utf-8", env=_ok, timeout=30)
+_co = (_cr.stdout or "") + (_cr.stderr or "")
+check("--check：短请求 401 时失败且不含密钥", _cr.returncode != 0 and "FAIL openai_compat" in _co and "401" in _co and _OA_SECRET not in _co, _co)
+_old = json.loads(json.dumps(cfg)); _old.pop("model_provider", None)
+_oldp = os.path.join(T, "old_provider.json"); json.dump(_old, open(_oldp, "w", encoding="utf-8"), ensure_ascii=False)
+o = run([ev("old1", "旧配置这一题")], name="old_provider", cfg_path=_oldp, stream=True)
+check("没写 model_provider 的旧配置仍走 cursor 一次性进程", "普通回答" in block(o, "old1") and "model provider cursor" in o and "openai_compat" not in o, o)
+try: _oa.shutdown()
+except Exception: pass
+
 print("\n%d/%d passed" % (sum(r for _, r in results), len(results))); shutil.rmtree(T, ignore_errors=True)
 sys.exit(0 if all(r for _, r in results) else 1)

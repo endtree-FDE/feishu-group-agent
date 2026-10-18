@@ -3,14 +3,15 @@
 #   --dry-run [文件]   从 UTF-8 JSONL 文件（省略则 stdin）读事件，不调用飞书（回复打印到日志；工具默认只打印命令）
 #   --parallel         dry-run 时每条事件一个线程（测并发）
 #   --lock-test N      只拿单实例锁并保持 N 秒（不启动 consumer）
-#   --check            自检：配置、目录、cursor-agent、lark-cli，可选探测权限（--probe），不启动 consumer
-#   环境变量 AGENTBOT_FAKE_AGENT=秒：用 sleep 代替 cursor-agent（仅测试）
+#   --check            自检：配置、目录、当前模型接口、lark-cli，可选探测权限（--probe），不启动 consumer
+#   环境变量 AGENTBOT_FAKE_AGENT=秒：用 sleep 代替模型（仅测试，优先于 model_provider）
 #   环境变量 AGENTBOT_AGENT_CMD='["python","fake.py"]'：替换 cursor-agent 可执行文件（仅测试，用来模拟 stream-json 或 ACP）
-# 模型名字来自配置 agent.model；没写时用 DEFAULT_MODEL。登录和额度是运行这台电脑的人自己的 Cursor 账号，程序里不写账号。
-import json, os, re, subprocess, sys, time, glob, logging, collections, threading, sqlite3, hashlib, atexit, shutil, datetime
+# 模型从哪来看配置 model_provider，没写就是 cursor。cursor 的登录和额度是运行这台电脑的人自己的账号，程序里不写账号。
+import json, os, re, subprocess, sys, time, logging, collections, threading, sqlite3, hashlib, atexit, shutil, datetime
 
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
-import acp_client, guard, memory
+import guard, memory, providers
+from providers.base import PartialText
 from tools import Tools, ToolError, TOOL_DOC, READ_TOOLS, WRITE_TOOLS, run_capture
 
 CFG_PATH = sys.argv[1]; ARGS = sys.argv[2:]
@@ -19,7 +20,6 @@ def _opt(name):
     i = ARGS.index(name); nxt = ARGS[i + 1] if i + 1 < len(ARGS) else ""
     return nxt if nxt and not nxt.startswith("--") else ""
 DRY = _opt("--dry-run") is not None; PARALLEL = "--parallel" in ARGS; LOCK_TEST = _opt("--lock-test"); CHECK = "--check" in ARGS
-FAKE = os.environ.get("AGENTBOT_FAKE_AGENT")
 CFG = json.load(open(CFG_PATH, encoding="utf-8-sig"))
 if not CFG.get("bot_open_id") and not DRY:
     sys.stderr.write("配置缺少 bot_open_id：请用户本人确认机器人 open_id 后填写；拒绝启动\n"); sys.exit(2)
@@ -77,12 +77,6 @@ def lark_exe():
         exe = os.path.join(os.environ["APPDATA"], "npm", "node_modules", "@larksuite", "cli", "bin", "lark-cli.exe")
         return [exe] if os.path.isfile(exe) else [os.path.join(os.environ["APPDATA"], "npm", "lark-cli.cmd")]
     return ["lark-cli"]
-def agent_cmd():
-    if os.name != "nt": return ["cursor-agent"]
-    root = os.path.join(os.environ["LOCALAPPDATA"], "cursor-agent", "versions")
-    vs = [d for d in glob.glob(os.path.join(root, "*")) if os.path.isfile(os.path.join(d, "node.exe")) and os.path.isfile(os.path.join(d, "index.js"))]
-    v = sorted(vs, key=os.path.getmtime)[-1]  # 跳过正在下载、不完整的新版本目录
-    return [os.path.join(v, "node.exe"), os.path.join(v, "index.js")]
 TOOLS = Tools(CFG, BASE, lark_exe, log, dry=DRY)
 
 # ---------- 状态 ----------
@@ -106,12 +100,16 @@ def history(sess):
     return rows[::-1]
 def remember(sess, role, text):
     with DBL: DB.execute("insert into turns values(?,?,?,?)", (sess, time.time(), role, text[:2000])); DB.commit()
-ACP = None  # 常驻 ACP 进程，mode=acp 时才创建
+_PROVIDER = None
+def get_provider():
+    global _PROVIDER
+    if _PROVIDER is None:
+        _PROVIDER = providers.create(CFG, log, KB)
+    return _PROVIDER
 def forget(sess):
     with DBL: DB.execute("delete from turns where sess=?", (sess,)); DB.commit()
-    if ACP is not None:
-        try: ACP.drop(sess)
-        except Exception as e: log.warning("acp drop %s: %s", sess, e)
+    try: get_provider().drop(sess)
+    except Exception as e: log.warning("acp drop %s: %s", sess, e)
 
 # ---------- 限流 + 并发 ----------
 RL = CFG.get("rate_limit", {}); RLL = threading.Lock(); last_user = {}; hour_hits = collections.deque()
@@ -138,188 +136,10 @@ def clean_q(t):
     return t.strip()
 
 # ---------- agent ----------
-# 只是模型名字。谁的 Cursor 账号、剩多少额度，由这台电脑上执行过 cursor-agent login 的人决定。
-DEFAULT_MODEL = "grok-4.7-high-fast"
-
-class PartialText(str):
-    """cursor-agent 卡死/超过防卡死上限被终止时，已经输出的那部分文本（可能为空）"""
-    pass
-
-class AgentStream:
-    """解析 cursor-agent --output-format stream-json --stream-partial-output，还原出与 --output-format text 完全相同的最终文本。
-    text 模式只输出「最后一次工具调用开始之后」的助手文本；result 事件里的 result 含工具调用前的开场白，不能直接用。
-    partial 模式下每个增量一条 assistant 事件（带 timestamp_ms、无 model_call_id）；工具调用前（带 model_call_id）
-    和结束时（无 timestamp_ms）各有一条汇总冲刷事件，要跳过，否则文本会重复。"""
-    def __init__(self, on_stage=None):
-        self.all = ""; self.cur = ""; self.prefix_len = 0; self.pending = None; self.seg = ""
-        self.result = None; self.events = 0; self.tools = 0; self.on_stage = on_stage
-    def _stage(self, txt):
-        if self.on_stage and txt:
-            try: self.on_stage(txt)
-            except Exception: pass
-    def _add(self, t): self.all += t; self.cur += t; self.seg += t
-    def _resolve(self, boundary):
-        if self.pending is None: return
-        t = self.pending; self.pending = None
-        if not boundary: self._add(t)
-    def feed(self, line):
-        line = (line or "").strip()
-        if not line.startswith("{"): return
-        try: e = json.loads(line)
-        except Exception: return
-        if not isinstance(e, dict): return
-        self.events += 1; typ = e.get("type"); sub = e.get("subtype")
-        if typ == "assistant":
-            parts = (e.get("message") or {}).get("content") or []
-            t = "".join(p.get("text", "") for p in parts if isinstance(p, dict) and p.get("type") == "text")
-            if "model_call_id" in e or "timestamp_ms" not in e:  # 汇总冲刷
-                self._resolve(True); self.seg = ""; return
-            self._resolve(False)
-            if self.seg and t == self.seg: self.pending = t  # 可能是冲刷，等下一条事件再定
-            else: self._add(t)
-            if self.tools: self._stage("正在整理答案…")
-            return
-        boundary = (typ == "tool_call" and sub == "started") or typ in ("retry", "interaction_query", "result")
-        self._resolve(boundary)
-        if boundary: self.seg = ""
-        if typ == "tool_call" and sub == "started":
-            self.tools += 1; self.cur = ""; self.prefix_len = len(self.all)
-            self._stage(self.describe_tool(e.get("tool_call") or {}))
-        elif typ == "retry" and sub == "starting" and not e.get("is_resume"):
-            self.cur = ""; self.all = ""; self.prefix_len = 0  # 与 text 模式一致：非续传重试清空已输出文本
-        elif typ == "thinking":
-            if self.on_stage:
-                try: self.on_stage(None, think=e.get("text") or "", end=(sub == "completed"))
-                except Exception: pass
-            if not self.cur: self._stage("正在思考…")
-        elif typ == "result":
-            self.result = e
-    @staticmethod
-    def describe_tool(tc):
-        k = next((x for x in tc if str(x).endswith("ToolCall")), "")
-        args = (tc.get(k) or {}).get("args") or {}
-        if k == "readToolCall":
-            p = str(args.get("path") or args.get("targetFile") or "")
-            name = os.path.splitext(os.path.basename(p.replace("\\", "/")))[0]
-            return ("正在读《%s》…" % name) if name else "正在读资料…"
-        if k in ("globToolCall", "grepToolCall", "lsToolCall", "semSearchToolCall", "codebaseSearchToolCall"): return "正在查知识库…"
-        if k in ("webSearchToolCall", "webFetchToolCall"): return "正在查网上资料…"
-        return "正在查资料…"
-    def final_text(self):
-        self._resolve(True)
-        if self.result is not None:
-            r = self.result.get("result") or ""; pre = self.all[:self.prefix_len]
-            if r.startswith(pre): return r[self.prefix_len:]
-        return self.cur
-    def partial_text(self):
-        self._resolve(True); return self.cur
-
-def kill_tree(p):
-    try:
-        if os.name == "nt": subprocess.run(["taskkill", "/T", "/F", "/PID", str(p.pid)], capture_output=True, timeout=30)
-        else: p.kill()
-    except Exception as e: log.warning("kill_tree %s: %s", p.pid, e)
-
-def stream_agent(cmd, on_stage=None):
-    """流式跑 cursor-agent。正常流程不设作答时限；只有 stall_sec 秒没有任何新输出（卡死）或总时长超过 max_runtime_sec（防卡死上限）才终止。
-    返回 (rc, final_text_or_None, stderr, stalled_reason, stream)"""
-    import queue
-    a = CFG.get("agent", {})
-    max_rt = float(a.get("max_runtime_sec", 1800)); stall = float(a.get("stall_sec", 300))
-    p = subprocess.Popen(cmd, cwd=KB, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                         text=True, encoding="utf-8", errors="replace", bufsize=1)
-    q = queue.Queue(); err = []
-    def rd():
-        try:
-            for line in p.stdout: q.put(line)
-        finally: q.put(None)
-    threading.Thread(target=rd, daemon=True).start()
-    threading.Thread(target=lambda: err.extend(p.stderr), daemon=True).start()
-    st = AgentStream(on_stage); t0 = last = time.time(); why = ""
-    while True:
-        try: line = q.get(timeout=1)
-        except Exception: line = ""
-        now = time.time()
-        if line is None: break
-        if line: last = now; st.feed(line)
-        if now - last > stall: why = "stall %.0fs no output" % (now - last)
-        elif now - t0 > max_rt: why = "max_runtime %.0fs" % max_rt
-        if why: kill_tree(p); break
-    try: rc = p.wait(timeout=30)
-    except Exception: rc = -1
-    time.sleep(0.2)
-    if why: return rc, None, "".join(err), why, st
-    return rc, st.final_text(), "".join(err), "", st
-
-def agent_transport(a=None):
-    """oneshot：每题一个 -p 进程（默认，和以前一样）。acp：常驻进程。旧配置里的 ask/plan 仍是一次性。"""
-    m = str((a if a is not None else CFG.get("agent", {})).get("mode") or "").strip().lower()
-    return "acp" if m == "acp" else "oneshot"
-
-def oneshot_cli_mode(a):
-    """交给 cursor-agent --mode 的只读/计划模式。oneshot 和 acp 这两个新值都固定用 ask。"""
-    m = str((a or {}).get("mode") or "ask").strip().lower()
-    return m if m in ("ask", "plan") else "ask"
-
-def agent_base_cmd():
-    return json.loads(os.environ["AGENTBOT_AGENT_CMD"]) if os.environ.get("AGENTBOT_AGENT_CMD") else agent_cmd()
-
-def build_acp_cmd():
-    """cursor-agent --model … --mode ask acp。--model / --mode / --trust 是全局参数，写在子命令 acp 前面。"""
-    a = CFG.get("agent", {})
-    cmd = list(agent_base_cmd())
-    model = (a.get("model") or "").strip() or DEFAULT_MODEL
-    cmd += ["--model", model, "--mode", "ask", "--trust", "--workspace", KB, "acp"]
-    return cmd
-
-def acp_pool():
-    global ACP
-    if ACP is None:
-        a = dict(CFG.get("agent") or {})
-        if not (a.get("model") or "").strip():
-            a["model"] = DEFAULT_MODEL
-        ACP = acp_client.Pool(build_acp_cmd, a, KB, log)
-        atexit.register(ACP.close)
-    return ACP
-
-def run_agent_oneshot(prompt, on_stage=None):
-    a = CFG.get("agent", {})
-    base_cmd = agent_base_cmd()
-    model_id = (a.get("model") or "").strip() or DEFAULT_MODEL
-    # 先用配置里的模型；失败后再去掉模型参数重试（有的账号暂时用不了指定模型）
-    tries = [model_id] + [None] * int(a.get("network_retries", 2))
-    cli_mode = oneshot_cli_mode(a)
-    for i, model in enumerate(tries):
-        cmd = base_cmd + ["-p", "--mode", cli_mode, "--output-format", "stream-json", "--stream-partial-output", "--trust"]
-        if model: cmd += ["--model", model]
-        cmd += ["--workspace", KB, prompt]
-        rc, out, err, why, st = stream_agent(cmd, on_stage)
-        if why:
-            part = st.partial_text().strip()
-            log.error("agent stopped: %s events=%d partial_chars=%d", why, st.events, len(part))
-            return PartialText(part[: a.get("max_chars", 3500)])
-        out = (out or "").strip()
-        if rc == 0 and out: return out[: a.get("max_chars", 3500)]
-        log.error("agent rc=%s model=%s events=%d err=%s", rc, model, st.events, (err or "")[:300])
-        time.sleep(10 * (i + 1) if re.search(r"network|socket|TLS|ECONN|ETIMEDOUT|aborted", err or "", re.I) else 3)
-    return None
-
+# 模型调用在 providers/。工具、技能、记忆、脱敏仍在这一层，三种模型都走这里。
 def run_agent(prompt, on_stage=None, sess=None):
-    a = CFG.get("agent", {})
-    if FAKE:
-        if on_stage: on_stage("正在思考…")
-        time.sleep(float(FAKE))
-        if os.environ.get("AGENTBOT_FAKE_DUMP_PROMPT"): log.info("fake prompt: %s", json.dumps(prompt, ensure_ascii=False))  # 仅测试：检查 prompt 拼装
-        m = re.search(r"<<FAKE_TOOL>>(\{.*?\})<<END>>", prompt)
-        if m and "工具结果（" not in prompt: return "<<TOOL>>" + m.group(1)
-        return "[fake] " + prompt.rsplit("提问：", 1)[-1][:200]
-    if agent_transport(a) == "acp":
-        try:
-            out = acp_pool().ask(sess or "default", prompt, on_stage)
-            return (out or "")[: a.get("max_chars", 3500)] or None
-        except acp_client.AcpFail as e:
-            log.error("acp fallback: %s", e)
-    return run_agent_oneshot(prompt, on_stage)
+    return get_provider().complete(prompt, sess, on_stage)
+
 
 def build_prompt(q, sess, ctx, extra=""):
     parts = [CFG["system_prompt"]]
@@ -703,7 +523,8 @@ def handle(ev):
                 except ToolError as e:
                     log.info("attachment degraded: %s %s", e.user_msg, e.detail[:200])
                     if mtype != "text": extra = "（附件读取失败：%s。请如实告诉提问者。）" % e.user_msg
-            def hook(stage, think=None, end=False):
+            def hook(stage, think=None, end=False, text=None):
+                # text 是回答的文字片段，由模型层拼成最终答案，不刷进进度卡片
                 if think is not None: prog.add_thinking(think, end)
                 elif stage: prog.set_stage(stage)
             a = answer(q, sess, ctx, extra, on_stage=hook)
@@ -739,8 +560,8 @@ def self_check():
     def p(name, good, info=""):
         nonlocal ok; ok &= bool(good); print("%s %s %s" % ("OK  " if good else "FAIL", name, info))
     p("kb dir", os.path.isdir(KB), KB)
-    try: p("cursor-agent", os.path.exists(agent_cmd()[-1]) or os.name != "nt", agent_cmd()[-1])
-    except Exception as e: p("cursor-agent", False, str(e))
+    for _n, _good, _info in get_provider().check_items():
+        p(_n, _good, _info)
     p("lark-cli", shutil.which(lark_exe()[0]) or os.path.exists(lark_exe()[0]), lark_exe()[0])
     p("redact names", True, "%d 个（%s）" % (len(REDACT_NAMES), CFG.get("redact_file", "redact.txt")))
     w = CFG.get("write", {}); p("write whitelist", True, "users=%s" % list((w.get("allowed_users") or {}).values()))
@@ -749,11 +570,6 @@ def self_check():
     p("skills", not sks.invalid, sks.status())
     for bad in sks.invalid:
         print("FAIL skill %s %s" % (bad.folder, bad.reason)); ok = False
-    if agent_transport() == "acp":
-        try:
-            p("acp", True, acp_client.probe(build_acp_cmd(), KB, log))
-        except Exception as e:
-            p("acp", False, str(e))
     if "--probe" in ARGS:
         try:
             for k, (good, scope, err) in probe_progress().items():

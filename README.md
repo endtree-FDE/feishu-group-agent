@@ -8,7 +8,7 @@
 
 每个群可以记自己的事：说「记一下」就记下，说「/记忆」就查看，说「/忘记」就删掉。
 
-模型默认是 `grok-4.7-high-fast`，写在配置里，可以改。登录和额度用的是这台电脑上 `cursor-agent login` 的那个账号，模板里不写任何人的账号。
+默认用这台电脑上的 Cursor（模型名默认 `grok-4.7-high-fast`，额度算 `cursor-agent login` 的那个账号）。也可以换成你自己的模型账号（DeepSeek、通义千问、Kimi、智谱、xAI、OpenAI，或本机 Ollama）。密钥放在环境变量里，不写进配置。见 [docs/模型接口.md](docs/模型接口.md)。
 
 ## 它能做什么
 
@@ -21,7 +21,8 @@
 - 同一个应用只跑一个进程；看门狗发现卡住会在本机重启，不往群里说话。
 - 知识库可以定时收进来，先放待审区，你点头才换上。
 - 技能（默认关着）：提示词里只放一行目录。模型要用时再读那份步骤。见 [docs/技能.md](docs/技能.md)。
-- 常驻模式（默认关着）：`agent.mode` 写成 `acp` 后，Cursor 只启动一次。不改的话仍是每题一个进程。见 [docs/常驻模式.md](docs/常驻模式.md)。
+- 常驻模式（默认关着）：`agent.mode` 写成 `acp` 后，Cursor 只启动一次。不改的话仍是每题一个进程。见 [docs/常驻模式.md](docs/常驻模式.md)。只对 Cursor 这一路有用。
+- 模型可以换成你自己的账号：配置里写 `model_provider` 为 `openai_compat`，密钥放在环境变量。没写这一项时，仍是 Cursor。见 [docs/模型接口.md](docs/模型接口.md)。
 
 ## 在自己电脑上先检查
 
@@ -31,7 +32,7 @@
 python tests/run_tests.py
 ```
 
-一共 99 项，全部通过就可以。看 PDF 附件时才需要另外安装 `pypdf`。
+一共 110 项，全部通过就可以。看 PDF 附件时才需要另外安装 `pypdf`。
 
 从零开始：看 [docs/新建智能体.md](docs/新建智能体.md)。
 
@@ -44,7 +45,8 @@ python tests/run_tests.py
 | 文件 | 作用 |
 |---|---|
 | `agentbot.py` | 主程序：收消息、决定回不回、叫模型、回复 |
-| `acp_client.py` | 可选的常驻进程。默认不用，`agent.mode` 为 `acp` 才启动 |
+| `providers/` | 模型接口。默认 `cursor`；`openai_compat` 接你自己的账号；`fake` 只给测试用 |
+| `acp_client.py` | 可选的常驻进程。默认不用，Cursor 且 `agent.mode` 为 `acp` 才启动 |
 | `tools.py` | 动飞书的手：只读，以及要确认码的写入 |
 | `guard.py` | 打码和话题红线 |
 | `memory.py` | 每个群一份长期记忆 |
@@ -56,7 +58,7 @@ python tests/run_tests.py
 | `agents/CONFIG.md` | 每一项怎么填 |
 | `redact.example.txt` | 空的客户名名单样子，复制成 `redact.txt` 再用 |
 | `scripts/` | Windows 上的启动、停止、看门狗、计划任务 |
-| `tests/run_tests.py` | 离线测试，99 项 |
+| `tests/run_tests.py` | 离线测试，110 项 |
 | `tests/fake_acp_agent.py` | 测试用的假常驻服务，不是真的 cursor-agent |
 | `docs/` | 给人看的说明和架构图。技能怎么写见 `docs/技能.md` |
 | `SKILL.md` | 给帮忙操作的 AI 助手看的步骤 |

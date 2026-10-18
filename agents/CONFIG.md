@@ -8,7 +8,7 @@
 2. 「小助手」「小李」只是例子，改成你的机器人名字和同事的称呼。
 3. **不要**在这个文件里写应用密钥（App Secret）。密钥只在你自己电脑上、运行初始化命令时输入一次，见 `docs/新建智能体.md`。
 
-模型名字写在 `agent.model`。默认是 `grok-4.7-high-fast`。思考用的是**这台电脑上**已经执行过 `cursor-agent login` 的那个 Cursor 账号和额度。配置里不写账号，也不要写别人的账号。
+默认走这台电脑上的 Cursor：模型名字写在 `agent.model`，默认是 `grok-4.7-high-fast`，额度算已经执行过 `cursor-agent login` 的那个账号。要换成自己的模型账号，把 `model_provider` 写成 `openai_compat`，密钥放在环境变量里。配置里不写账号，也不要写别人的账号。见 [docs/模型接口.md](../docs/模型接口.md)。
 
 下面按文件里的顺序说明每一项。
 
@@ -80,24 +80,39 @@
 
 建议先保持 `false`，把要用的人写进 `allow_open_ids`。
 
+## 用哪一家模型 model_provider
+
+放在配置最外层，和 `agent` 并列。**不写这一项时就是 `cursor`，和旧配置一样。**
+
+| 值 | 意思 |
+|---|---|
+| `cursor` | 用这台电脑上的 Cursor。默认。 |
+| `openai_compat` | 用你自己的 OpenAI 兼容账号。密钥不写在这里。见 [docs/模型接口.md](../docs/模型接口.md)。 |
+| `fake` | 只给离线测试用。正常不要写。 |
+
 ## 模型 agent
 
 | 键 | 填什么 |
 |---|---|
-| `mode` | `oneshot`（默认）：每题新开一个进程，和以前一样。旧配置里的 `ask`、`plan` 也还是每题一个进程，并把这个值传给 `--mode`。只有写成 `acp` 才改成常驻进程，见 [docs/常驻模式.md](../docs/常驻模式.md)。常驻时程序固定加 `--mode ask`，模型不能改电脑上的文件。 |
-| `model` | 模型名字。默认 `grok-4.7-high-fast`。改成你的 Cursor 账号里能用的名字即可。不写这一项时，程序也用这个默认值。一次性模式下，如果这个模型暂时不能用，程序会自动去掉模型名字再试一次。 |
-| `network_retries` | 一次性模式失败后再试几次。默认 `2`。常驻模式不用这项。 |
-| `max_runtime_sec` | 一道题最长多久（秒）。默认 `1800`（30 分钟）。到点就停。一次性模式尽量把已经写出的部分发出去；常驻模式这一题改走一次性进程。 |
-| `stall_sec` | 多少秒完全没有新输出，就当成卡住。默认 `300`。常驻模式下，卡住的这一题同样改走一次性进程。 |
+| `mode` | `oneshot`（默认）：每题新开一个进程，和以前一样。旧配置里的 `ask`、`plan` 也还是每题一个进程，并把这个值传给 `--mode`。只有写成 `acp` 才改成常驻进程，见 [docs/常驻模式.md](../docs/常驻模式.md)。常驻只在 `model_provider` 为 `cursor` 时有用。常驻时程序固定加 `--mode ask`，模型不能改电脑上的文件。 |
+| `model` | 模型名字。Cursor 默认 `grok-4.7-high-fast`。不写这一项时，Cursor 也用这个默认值。一次性模式下，如果这个模型暂时不能用，程序会自动去掉模型名字再试一次。`openai_compat` 时写成那一家控制台里的名字，必填。 |
+| `base_url` | 只给 `openai_compat` 用。OpenAI 兼容地址，不要带密钥。例子见 [docs/模型接口.md](../docs/模型接口.md)。 |
+| `api_key_env` | 只给 `openai_compat` 用。环境变量的**名字**，例如 `DEEPSEEK_API_KEY`。不要把密钥写在这里。 |
+| `network_retries` | 失败后再试几次。默认 `2`。Cursor 的常驻模式不用这项。`openai_compat` 只在网络中断或 408/429/5xx 时重试，401 不重试。 |
+| `max_runtime_sec` | 一道题最长多久（秒）。默认 `1800`（30 分钟）。到点就停。Cursor 一次性模式尽量把已经写出的部分发出去；常驻模式这一题改走一次性进程。`openai_compat` 也把已经写出的部分发出去。 |
+| `stall_sec` | 多少秒完全没有新输出，就当成卡住。默认 `300`。Cursor 常驻模式下，卡住的这一题改走一次性进程。`openai_compat` 同样把已经写出的部分发出去。 |
 | `max_chars` | 回答最多保留多少字。默认 `3500`。 |
 | `acp_max_sessions` | 常驻时最多保留几个话题会话。默认 `8`。超出就丢掉最久没人问的那个。只在 `mode` 为 `acp` 时有用。 |
 | `acp_idle_sec` | 一个话题多久没人问，就丢掉这个会话。默认 `1800`（30 分钟）。下一问重新开会话。 |
 
 写飞书仍然只走 `<<TOOL>>`、白名单和 6 位确认码。常驻进程里如果模型要改文件，权限请求一律拒绝。
 
-`python agentbot.py agents/<名字>.json --check`：`mode` 为 `acp` 时会真的启动一次常驻进程，做 initialize 握手。成功是 `OK   acp`，失败是 `FAIL acp` 加原因。
+`python agentbot.py agents/<名字>.json --check` 按 `model_provider` 检查：
 
-这里没有账号、没有密码、没有密钥。额度算在运行 `cursor-agent login` 的那个人头上。
+- `cursor` 且 `mode` 为 `acp`：真的启动一次常驻进程，做 initialize 握手。成功是 `OK   acp`，失败是 `FAIL acp` 加原因。
+- `openai_compat`：看环境变量在不在（只报变量名，不打印值），再发一个很短的流式请求。成功是 `OK   openai_compat`。
+
+配置文件里没有账号、没有密码、没有密钥。`api_key_env` 只是变量名。Cursor 的额度算在运行 `cursor-agent login` 的那个人头上。`openai_compat` 的额度算在那个环境变量对应的账号上。
 
 ## 脱敏和红线
 
