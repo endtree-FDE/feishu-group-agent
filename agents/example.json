@@ -34,6 +34,8 @@
     "enabled": false,
     "dir": "memory",
     "profile_budget_chars": 1500,
+    "recall": true,
+    "recall_budget_chars": 400,
     "max_fact_chars": 300,
     "scope": "topic",
     "max_turns": 6,

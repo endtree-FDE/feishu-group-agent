@@ -32,7 +32,7 @@
 - **验收：** 正常回答会追加一行，里面没有问题原文。`observability.journal` 为 `false` 时不写。不写这一项时默认写。已有的 `metric` 行还在。
 - **不做：** 不把日志送到外部服务。
 
-### 3. 长期记忆按本群问题召回被截掉的事实
+### 3. 长期记忆按本群问题召回被截掉的事实（本轮草稿）
 
 - **目标：** 群档案超过字数预算时，本题若命中被截掉的事实，把那几条（已脱敏、仍在预算内）补进会变的部分。别的群的账本不读。
 - **参考：** [mem0](https://github.com/mem0ai/mem0) 的检索、[OpenClaw 记忆](https://docs.openclaw.ai/concepts/memory)、[Letta memory blocks](https://docs.letta.com/v1-sdk/memory/memory-blocks)。
