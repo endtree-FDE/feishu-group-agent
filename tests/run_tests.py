@@ -1302,6 +1302,15 @@ o = run([_p2s], name="sec_stranger", cfg_path=_st_path)
 o2 = run([_p2a], name="sec_stranger_admin", cfg_path=_st_path)
 check("open_to_all：不在名单里的人不能调用飞书工具", "不能使用飞书工具" in o and "drive +search" not in o and "agent start stool" in o, o)
 check("open_to_all：写入白名单里的人仍可调用工具", "不能使用飞书工具" not in o2 and ("drive +search" in o2 or "这项权限未开" in o2), o2)
+o = run([ev("gread", '<<FAKE_TOOL>>{"tool":"history","args":{}}<<END>> 最近聊了什么', sender_id="user_member"),
+         ev("gdoc", '<<FAKE_TOOL>>{"tool":"docs_search","args":{"query":"进度"}}<<END>> 找文档', sender_id="user_member"),
+         ev("gcal", '<<FAKE_TOOL>>{"tool":"calendar_read","args":{}}<<END>> 看日历', sender_id="user_member"),
+         ev("gwrite", '<<FAKE_TOOL>>{"tool":"docs_create","args":{"title":"周报","markdown":"内容"}}<<END>> 建文档', sender_id="user_member")],
+        name="sec_group_read", cfg_path=_st_path)
+check("已认群里不在白名单的成员仍可使用只读工具，写入仍被拒绝",
+      "不能使用飞书工具" not in o and "[fake-lark] im +chat-messages-list" in o
+      and "[fake-lark] drive +search" in o and "[fake-lark] calendar +agenda" in o
+      and "不在写入白名单" in o and "docs +create" not in o, o)
 
 o = run([joined("oc_forge", "user_stranger"), joined("oc_forge", "user_admin"), ev("fg1", "被抬升了吗", chat_id="oc_forge")],
         name="sec_forge", cfg_path=acfg("sec_forge", admit="whitelist"))
@@ -1349,6 +1358,56 @@ check("知识库压缩包：.. 和盘符路径不会写到目录外",
       "escape.md" not in _staged and "evil.md" not in _staged and "ok.md" in _staged
       and not os.path.isfile(os.path.join(T, "escape.md")) and "跳过可疑路径" in open(os.path.join(_slip, "kb_staging", sorted(os.listdir(os.path.join(_slip, "kb_staging")))[0], "_REPORT.md"), encoding="utf-8").read(),
       _slip_txt + str(_staged))
+
+# ---------- 长回复分片、上下文预算、危险配置提示、指标 ----------
+def _chunk_cfg(name, n):
+    c = json.loads(json.dumps(cfg)); c.setdefault("agent", {})["reply_chunk_chars"] = n
+    pth = os.path.join(T, name + ".json"); json.dump(c, open(pth, "w", encoding="utf-8"), ensure_ascii=False); return pth
+_long_body = "甲" * 80
+o = run([ev("ck1", "<<FAKE_REPLY>>" + _long_body + "<<END>> 请原文返回")], name="chunk_on", cfg_path=_chunk_cfg("chunk_on", 30))
+check("长回答按字数拆成多条，每段都带序号",
+      o.count("[dry-run] reply ck1") == 3 and "（1/3）" in o and "（2/3）" in o and "（3/3）" in o and o.count("甲") >= 80, o)
+o = run([ev("ck2", "<<FAKE_REPLY>>" + _long_body + "<<END>> 不拆")], name="chunk_off", cfg_path=_chunk_cfg("chunk_off", 0))
+check("reply_chunk_chars=0 时超长回答仍是一条", o.count("[dry-run] reply ck2") == 1 and "（1/" not in o, o)
+_ml = [ln for ln in o.splitlines() if "metric kind=answer" in ln]
+check("指标只记长度和耗时，不写问题原文",
+      len(_ml) == 1 and "in_chars=" in _ml[0] and "out_chars=" in _ml[0] and "不拆" not in _ml[0] and "FAKE_REPLY" not in _ml[0], _ml)
+def _bud_cfg(name, n):
+    c = json.loads(json.dumps(cfg)); c.setdefault("memory", {})["context_budget_chars"] = n; c["memory"]["max_turns"] = 6
+    pth = os.path.join(T, name + ".json"); json.dump(c, open(pth, "w", encoding="utf-8"), ensure_ascii=False); return pth
+_old_q, _mid_q = "OLDTOKEN_" + ("甲" * 40), "MIDTOKEN_" + ("乙" * 40)
+o = run([ev("hbud1", _old_q), ev("hbud2", _mid_q, root_id="hbud1"), ev("hbud3", "最新问题", root_id="hbud1")],
+        name="hist_budget", cfg_path=_bud_cfg("hist_budget", 30), extra_env={"AGENTBOT_FAKE_DUMP_PROMPT": "1"})
+ps = prompts(o)
+check("上下文超过字数预算时丢掉最旧的一轮",
+      len(ps) >= 3 and "MIDTOKEN_" in ps[2] and "OLDTOKEN_" not in ps[2], ps[2] if len(ps) >= 3 else o)
+o = run([ev("hbud0a", _old_q), ev("hbud0b", _mid_q, root_id="hbud0a"), ev("hbud0c", "最新问题", root_id="hbud0a")],
+        name="hist_budget0", cfg_path=_bud_cfg("hist_budget0", 0), extra_env={"AGENTBOT_FAKE_DUMP_PROMPT": "1"})
+ps = prompts(o)
+check("context_budget_chars=0 时只按轮数保留",
+      len(ps) >= 3 and "OLDTOKEN_" in ps[2] and "MIDTOKEN_" in ps[2], ps[2] if len(ps) >= 3 else o)
+_hc = json.loads(json.dumps(cfg)); _hc["p2p"] = {"allow_open_ids": [], "open_to_all": True}
+_hc["chat_ids"] = [CH]; _hc["chats"] = {"auto_join": False, "admit": "confirm", "inviter_open_ids": []}
+_hcp = os.path.join(T, "hint_p2p.json"); json.dump(_hc, open(_hcp, "w", encoding="utf-8"), ensure_ascii=False)
+_co = subprocess.run([sys.executable, os.path.join(FW, "agentbot.py"), _hcp, "--check"], capture_output=True, text=True, encoding="utf-8", timeout=30)
+_co = (_co.stdout or "") + (_co.stderr or "")
+check("--check：私聊对所有人开放且名单为空时提示", "HINT p2p.open_to_all" in _co and "知识库" in _co, _co)
+_co = subprocess.run([sys.executable, os.path.join(FW, "agentbot.py"), acfg("hint_admit_open", admit="open"), "--check"],
+                     capture_output=True, text=True, encoding="utf-8", timeout=30)
+_co = (_co.stdout or "") + (_co.stderr or "")
+check("--check：自动认群且 admit=open 时提示", "HINT chats.admit=open" in _co, _co)
+_keys = subprocess.run([sys.executable, "-c", """
+import os, sys
+sys.argv = ['agentbot.py', os.environ['CFG']]
+import agentbot
+print('ONE', agentbot.reply_key('m', 0, 1))
+print('A', agentbot.reply_key('m', 0, 2))
+print('B', agentbot.reply_key('m', 1, 2))
+print('N', len(agentbot.split_reply('甲' * 10)))
+"""], cwd=FW, capture_output=True, text=True, encoding="utf-8", env=dict(os.environ, CFG=CP), timeout=30)
+_ko = (_keys.stdout or "") + (_keys.stderr or "")
+check("不拆的回复仍用原来的幂等键，拆开后每段一个键",
+      "ONE re_m" in _ko and "A re_m_0" in _ko and "B re_m_1" in _ko and "N 1" in _ko, _ko)
 
 print("\n%d/%d passed" % (sum(r for _, r in results), len(results))); shutil.rmtree(T, ignore_errors=True)
 sys.exit(0 if all(r for _, r in results) else 1)
