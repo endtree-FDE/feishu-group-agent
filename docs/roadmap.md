@@ -101,17 +101,17 @@
 - **参考：** [GitHub 开源指南里的贡献文档](https://docs.github.com/en/communities/setting-up-your-project-for-healthy-contributions)。
 - **验收：** 文档写明：Python 3.12、`python tests/run_tests.py` 必须全过、不提交填好的配置和密钥、新行为要补测试。代码规范写成仓库里已经在用的写法（紧凑的 Python，注释说明为什么），并有一个不强迫全库重排的检查能在 CI 里通过。不把现有默认开关改成开。
 
-### 11. SECURITY.md
+### 11. SECURITY.md（本轮草稿）
 
 - **目标：** 别人知道往哪私下报告漏洞，以及哪些文件不能公开。
-- **现状：** [SECURITY.md](../SECURITY.md) 已有私人通报链接和禁止提交的清单。它写着「没有单独的版本号分支」。有了版本号之后要改成「安全修复以最新发布版和 `main` 为准」。
+- **现状：** [SECURITY.md](../SECURITY.md) 已有私人通报链接和禁止提交的清单。版本政策已改成：还没有 Release 时以 `main` 为准，有了 Release 之后以最新 Release 和 `main` 为准。
 - **参考：** [GitHub 安全政策](https://docs.github.com/en/code-security/getting-started/adding-a-security-policy-to-your-repository)。
 - **验收：** 中英都说明：不要在公开 Issue 里贴密钥和飞书编号；给出私人通报入口；列出不提交的路径。版本政策与当时是否已发布一致。
 
-### 12. CHANGELOG、版本号和 Release
+### 12. CHANGELOG、版本号和 Release（本轮草稿）
 
 - **目标：** 每次对用户可见的改动有一条记录，打标签就能下载。
-- **现状：** 没有 `CHANGELOG.md`，也没有 GitHub Release。`acp_client.py` 里给协议用的 `clientInfo` 版本字符串不是对外发布号。
+- **现状：** 根目录有 `VERSION`（`0.4.0-dev`）和 `CHANGELOG.md` 的未发布节。还没有 GitHub Release。程序不读这两个文件。`acp_client.py` 里给协议用的 `clientInfo` 版本字符串仍不是对外发布号。
 - **参考：** [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)、[语义化版本](https://semver.org/lang/zh-CN/)、[GitHub Releases](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)。
 - **验收：** 仓库根有 `CHANGELOG.md`，至少有一个未发布或已发布的版本节。有一处单一版本号（例如 `VERSION` 文件），和 changelog、Release 标签一致。缺这个文件时，程序行为与现在相同。Release 说明不包含密钥和真实编号。
 
