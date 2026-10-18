@@ -145,6 +145,59 @@ def on_perm(msg, wait):
     finish(req_id, sid, "已拒绝权限请求" if rejected else "权限被允许")
 
 
+def _model_arg():
+    if "--model" in sys.argv:
+        i = sys.argv.index("--model")
+        if i + 1 < len(sys.argv):
+            return sys.argv[i + 1]
+    return "grok-4.7-high-fast"
+
+
+def config_options():
+    """session/new 里的模型配置项。用 AGENTBOT_ACP_CONFIG_CASE 切换形状，默认和原来一样。"""
+    case = os.environ.get("AGENTBOT_ACP_CONFIG_CASE") or ""
+    model = _model_arg()
+    if case == "none":
+        return []
+    if case == "empty":
+        return [{
+            "id": "model", "name": "Model", "category": "model", "type": "select",
+            "currentValue": "auto", "options": [],
+        }]
+    if case == "same":
+        return [{
+            "id": "model", "name": "Model", "category": "model", "type": "select",
+            "currentValue": model,
+            "options": [{"value": model, "name": "grok"}],
+        }]
+    if case == "unlisted":
+        return [{
+            "id": "model", "name": "Model", "category": "model", "type": "select",
+            "currentValue": "other-model",
+            "options": [{"value": "other-model", "name": "Other"}],
+        }]
+    if case == "grouped":
+        return [{
+            "configId": "cursor_model", "name": "Model", "category": "model", "type": "select",
+            "currentValue": "auto",
+            "options": [{
+                "group": "recommended", "name": "Recommended",
+                "options": [{"value": "model-value-id", "name": model}],
+            }],
+        }]
+    if case == "invalid":
+        return [{
+            "id": "model", "name": "Model", "category": "model", "type": "select",
+            "currentValue": "auto",
+            "options": [{"value": model, "name": "grok"}],
+        }]
+    return [{
+        "id": "model", "name": "Model", "category": "model", "type": "select",
+        "currentValue": "auto",
+        "options": [{"value": "grok-4.7-high-fast", "name": "grok"}],
+    }]
+
+
 def serve():
     if os.environ.get("AGENTBOT_ACP_FAIL_INIT"):
         os._exit(2)
@@ -189,16 +242,15 @@ def serve():
                         {"id": "ask", "name": "Ask"},
                     ],
                 },
-                "configOptions": [{
-                    "id": "model", "name": "Model", "category": "model", "type": "select",
-                    "currentValue": "auto",
-                    "options": [{"value": "grok-4.7-high-fast", "name": "grok"}],
-                }],
+                "configOptions": config_options(),
             }})
         elif method == "session/set_mode":
             send({"jsonrpc": "2.0", "id": mid, "result": {}})
         elif method == "session/set_config_option":
-            send({"jsonrpc": "2.0", "id": mid, "result": {"configOptions": []}})
+            if os.environ.get("AGENTBOT_ACP_CONFIG_CASE") == "invalid":
+                send({"jsonrpc": "2.0", "id": mid, "error": {"code": -32602, "message": "Invalid params"}})
+            else:
+                send({"jsonrpc": "2.0", "id": mid, "result": {"configOptions": []}})
         elif method == "session/cancel":
             pass
         elif method == "session/prompt":

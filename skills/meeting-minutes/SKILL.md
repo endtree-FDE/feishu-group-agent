@@ -1,6 +1,7 @@
 ---
 name: meeting-minutes
 description: 把讨论整理成会议纪要。用户要纪要、结论或待办时使用。只组织文字，不写入飞书。
+triggers: [会议纪要, 纪要, 待办, 会议记录]
 ---
 
 # 整理会议纪要

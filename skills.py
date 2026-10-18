@@ -1,14 +1,21 @@
 # 技能层：每个技能一个文件夹，里面一份 SKILL.md（agentskills.io：YAML 头含 name、description，正文是步骤）。
 # 配置（默认关闭）：
-#   "skills": {"enabled": false, "dir": "skills", "index_budget_chars": 800}
-# 关闭时 prompt_block() 返回空字符串，调用方不往提示词里加任何东西。
-# 打开后：启动时扫描目录，提示词里只放「名字：描述」；正文由 tools.skill_read 按需读取。
+#   "skills": {"enabled": false, "dir": "skills", "index_budget_chars": 800,
+#              "preload": true, "preload_budget_chars": 3000}
+# 关闭时 prompt_block() 和 preload_block() 都返回空字符串，调用方不往提示词里加任何东西。
+# 打开后：启动时扫描目录，提示词里只放「名字：描述」。
+# YAML 头可以选填 triggers（一组关键词）。本题命中时，preload_block() 把得分最高的那一份正文
+# （脱敏后，不超过 preload_budget_chars）交给调用方，放进会变的部分。没命中仍由 tools.skill_read 按需读取。
+# preload 默认 true，只有 enabled 为 true 时才生效。
 import os, re
 import guard
 
 # 这段连同每一行目录一起算进 index_budget_chars，保证注入的整块不超过预算。
 CATALOG_HEADER = '技能目录（要用某个技能的步骤时，只输出一行：<<TOOL>>{"tool":"skill_read","name":"名字"}）：'
 TRUNC_NOTE = "（技能较多，已按字数预算截断）"
+# 预放块从这一句开头。acp_client.PRELOAD_MARK 必须相同，档案快照才不会把这段冻进去。
+PRELOAD_MARK = "本次预放技能"
+PRELOAD_NOTE = "（技能说明较长，已按字数预算截断）"
 # 小写字母、数字、短横线；不能以短横线开头或结尾，也不能连续短横线。最长 64。
 _NAME_RX = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _BODY_LIMIT = 8000
@@ -24,8 +31,9 @@ class SkillProblem:
 
 
 class Skill:
-    def __init__(self, name, description, path):
+    def __init__(self, name, description, path, triggers=None):
         self.name, self.description, self.path = name, description, path
+        self.triggers = list(triggers or [])
 
     @property
     def line(self):
@@ -51,8 +59,25 @@ def _name_ok(name):
     return isinstance(name, str) and 1 <= len(name) <= 64 and _NAME_RX.match(name) is not None
 
 
+def _unquote(val):
+    val = (val or "").strip()
+    if len(val) >= 2 and val[0] == val[-1] and val[0] in "\"'":
+        return val[1:-1]
+    return val
+
+
+def _inline_list(val):
+    """[a, b] 这种一行列表。不是列表就返回 None。"""
+    if not (isinstance(val, str) and val.startswith("[") and val.endswith("]")):
+        return None
+    inner = val[1:-1].strip()
+    if not inner:
+        return []
+    return [_unquote(p) for p in inner.split(",") if p.strip()]
+
+
 def _parse_yaml_block(lines):
-    """只解析技能头里用到的扁平 YAML：key: value，以及 > / | 折叠块。不引入 PyYAML。"""
+    """只解析技能头里用到的扁平 YAML：key: value、一行或缩进列表，以及 > / | 折叠块。不引入 PyYAML。"""
     data = {}
     i, n = 0, len(lines)
     while i < n:
@@ -81,13 +106,55 @@ def _parse_yaml_block(lines):
                 if lines[i].strip():
                     block.append(lines[i].strip())
                 i += 1
-            data[key] = " ".join(block)
+            if block and all(x.startswith("- ") for x in block):
+                data[key] = [_unquote(x[2:]) for x in block if x[2:].strip()]
+            else:
+                data[key] = " ".join(block)
             continue
-        if len(val) >= 2 and val[0] == val[-1] and val[0] in "\"'":
-            val = val[1:-1]
-        data[key] = val
+        inline = _inline_list(val)
+        if inline is not None:
+            data[key] = inline
+            i += 1
+            continue
+        data[key] = _unquote(val)
         i += 1
     return data, None
+
+
+def _trigger_list(raw):
+    """triggers 选填。列表、或单个字符串，都收成去重后的关键词。别的形状当没有。"""
+    if raw is None or raw == "":
+        return []
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for item in raw:
+        s = str(item).strip()
+        if s and s not in out:
+            out.append(s)
+    return out
+
+
+def _trigger_score(question, triggers):
+    """命中的关键词长度相加。更长的词分更高；一个都没对上就是 0。"""
+    q = question or ""
+    score = 0
+    for t in triggers or ():
+        if t and t in q:
+            score += len(t)
+    return score
+
+
+def _clip_preload(text, budget):
+    """正文（含截断说明）不超过预算。放得下就原样返回。"""
+    if len(text) <= budget:
+        return text
+    note = "\n" + PRELOAD_NOTE
+    if len(note) >= budget:
+        return note[-budget:]
+    return text[:budget - len(note)].rstrip() + note
 
 
 def parse_skill(text):
@@ -169,6 +236,14 @@ class SkillSet:
             self.budget = 800
         if self.budget <= 0:
             self.budget = 800
+        # 预放默认开，但只有 enabled 为 true 时 preload_block 才会返回正文
+        self.preload = bool(s.get("preload", True))
+        try:
+            self.preload_budget = int(s.get("preload_budget_chars", 3000))
+        except (TypeError, ValueError):
+            self.preload_budget = 3000
+        if self.preload_budget <= 0:
+            self.preload_budget = 3000
         self.root = os.path.join(base, self.dir_name)
         self.names = guard.load_names(os.path.join(base, cfg.get("redact_file", "redact.txt")))
         self.valid = []
@@ -208,7 +283,7 @@ class SkillSet:
             if reason:
                 self.invalid.append(SkillProblem(folder, reason))
                 continue
-            sk = Skill(str(data.get("name")).strip(), str(data.get("description")).strip(), md)
+            sk = Skill(str(data.get("name")).strip(), str(data.get("description")).strip(), md, _trigger_list(data.get("triggers")))
             self.valid.append(sk)
             self._by_name[sk.name] = sk
 
@@ -222,8 +297,8 @@ class SkillSet:
             return ""
         return _fit(CATALOG_HEADER, [s.line for s in self.valid], self.budget)
 
-    def read(self, name):
-        """只返回 SKILL.md 正文（去掉 YAML 头），并脱敏。名字必须在本次启动扫到的目录里。"""
+    def _load_body(self, name):
+        """正文（去掉 YAML 头）并脱敏。名字必须在本次启动扫到的目录里。"""
         if name is None or str(name).strip() == "":
             raise SkillError("没有给出技能名字")
         name = str(name).strip()
@@ -242,7 +317,36 @@ class SkillSet:
         data, body, err = parse_skill(raw)
         if err or not body or str(data.get("name") or "").strip() != name:
             raise SkillError("这份技能格式不对")
-        text = guard.redact(body.strip(), self.names)
+        return guard.redact(body.strip(), self.names)
+
+    def read(self, name):
+        """只返回 SKILL.md 正文（去掉 YAML 头），并脱敏。名字必须在本次启动扫到的目录里。"""
+        text = self._load_body(name)
         if len(text) > _BODY_LIMIT:
             text = text[:_BODY_LIMIT].rstrip() + "\n（技能说明较长，已截断）"
         return text
+
+    def pick_preload(self, question):
+        """命中触发词时返回得分最高的技能。没有、或预放没开，返回 None。得分相同取目录里靠前的。"""
+        if not self.enabled or not self.preload or not self.valid:
+            return None
+        best, best_score = None, 0
+        for sk in self.valid:
+            score = _trigger_score(question, sk.triggers)
+            if score > best_score:
+                best, best_score = sk, score
+        return best
+
+    def preload_block(self, question):
+        """给本题可变部分的预放正文。关闭、未开启预放、没命中时返回空字符串。最多一份。"""
+        sk = self.pick_preload(question)
+        if not sk:
+            return ""
+        try:
+            text = self._load_body(sk.name)
+        except SkillError:
+            return ""
+        if not text.strip():
+            return ""
+        text = _clip_preload(text, self.preload_budget)
+        return "%s（%s，按这些步骤回答，不必再读取这份技能）：\n%s" % (PRELOAD_MARK, sk.name, text)

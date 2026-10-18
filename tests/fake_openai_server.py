@@ -62,7 +62,7 @@ class Handler(BaseHTTPRequestHandler):
         messages = body.get("messages") or []
         content = "\n".join((m.get("content") or "") for m in messages if isinstance(m, dict) and isinstance(m.get("content"), str))
         auth = self.headers.get("Authorization") or ""
-        self.server.hits.append({"model": model, "auth": auth, "ping": content.strip() == "ping"})
+        self.server.hits.append({"model": model, "auth": auth, "ping": content.strip() == "ping", "content": content})
         if model == "deny-auth":
             self._json(401, {"error": {"message": "invalid api key", "echo": auth}})
             return

@@ -12,9 +12,12 @@
 import json, os, subprocess, threading, time
 
 PROFILE_MARK = "以下是本群的长期档案"
+# 和 skills.PRELOAD_MARK 是同一句。预放正文会变，快照必须在这句之前结束。
+PRELOAD_MARK = "本次预放技能"
 # 档案块后面可能紧挨的下一段。用来整段替换，避免档案正文里的空行把块拆碎。
 _PROFILE_NEXT = (
     "\n\n以下是本话题之前的对话",
+    "\n\n本次预放技能",
     "\n\n提问：",
     "\n\n工具结果",
     "\n\n（附件",
@@ -94,6 +97,75 @@ def apply_snapshot(prompt, snapshot):
     start, end = loc
     cut = start - 2 if start >= 2 and prompt[start - 2:start] == "\n\n" else start
     return prompt[:cut] + prompt[end:]
+
+
+def _config_id(opt):
+    """配置项的标识。请求里的 configId 用返回里的 configId，没有再退回 id。都不填就不调用。"""
+    for key in ("configId", "id"):
+        val = opt.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+    return ""
+
+
+def _select_values(options):
+    """扁平列表或分组里的可选值。没有 value 的组只往下展开。"""
+    found = []
+    if not isinstance(options, list):
+        return found
+    for item in options:
+        if not isinstance(item, dict):
+            continue
+        val = item.get("value")
+        if isinstance(val, str) and val.strip():
+            found.append(item)
+            continue
+        nested = item.get("options")
+        if isinstance(nested, list):
+            found.extend(_select_values(nested))
+    return found
+
+
+def _model_set_params(created, model):
+    """需要调用 session/set_config_option 时返回 (configId, value)，否则 None。
+
+    只在 session/new 的结果里确实有带可选值的模型项，并且当前值与配置不一致时才返回。
+    value 用可选值里的 value，不用配置里的原文去猜。对不上就跳过，避免 Invalid params。
+    """
+    model = (model or "").strip()
+    if not model or not isinstance(created, dict):
+        return None
+    for opt in created.get("configOptions") or []:
+        if not isinstance(opt, dict):
+            continue
+        cid = _config_id(opt)
+        if not cid:
+            continue
+        if opt.get("category") != "model" and cid != "model":
+            continue
+        if opt.get("type") not in (None, "", "select"):
+            continue
+        values = _select_values(opt.get("options"))
+        if not values:
+            continue
+        chosen = None
+        for item in values:
+            val = item.get("value")
+            name = item.get("name")
+            if isinstance(val, str) and val.strip() == model:
+                chosen = val
+                break
+            if isinstance(name, str) and name.strip() == model and isinstance(val, str) and val.strip():
+                chosen = val
+                break
+        if not chosen:
+            continue
+        current = opt.get("currentValue")
+        cur = current.strip() if isinstance(current, str) else current
+        if cur == chosen.strip() or cur == model:
+            return None
+        return cid, chosen
+    return None
 
 
 def _describe_tool(upd):
@@ -550,19 +622,17 @@ class Pool:
                 self._rpc("session/set_mode", {"sessionId": sid, "modeId": "ask"}, timeout=20)
             except AcpFail as e:
                 self.log.warning("acp set_mode: %s", e)
-        if not self.model or not isinstance(created, dict):
+        params = _model_set_params(created, self.model)
+        if not params:
             return
-        for opt in created.get("configOptions") or []:
-            if not isinstance(opt, dict):
-                continue
-            if opt.get("category") == "model" or opt.get("id") == "model":
-                try:
-                    self._rpc("session/set_config_option", {
-                        "sessionId": sid, "configId": opt.get("id") or "model", "value": self.model,
-                    }, timeout=20)
-                except AcpFail as e:
-                    self.log.warning("acp set_model: %s", e)
-                break
+        cid, value = params
+        try:
+            self._rpc("session/set_config_option", {
+                "sessionId": sid, "configId": cid, "value": value,
+            }, timeout=20)
+        except AcpFail as e:
+            # 模型已经由启动参数 --model 钉住。设配置项失败不影响这一题。
+            self.log.debug("acp set_model: %s", e)
 
     def _get_or_create(self, key, prompt):
         """返回 (session, created, prompt)。新建时冻结档案；复用时换回快照。"""
