@@ -1496,6 +1496,22 @@ o = run([ev("hbud1", _old_q), ev("hbud2", _mid_q, root_id="hbud1"), ev("hbud3", 
 ps = prompts(o)
 check("上下文超过字数预算时丢掉最旧的一轮",
       len(ps) >= 3 and "MIDTOKEN_" in ps[2] and "OLDTOKEN_" not in ps[2], ps[2] if len(ps) >= 3 else o)
+check("超预算时提示词注明省略了几条，被丢掉的原文不在里面",
+      len(ps) >= 3 and "已按字数预算省略" in ps[2] and "OLDTOKEN_" not in ps[2] and "本地记录还在" in ps[2], ps[2] if len(ps) >= 3 else o)
+def _bud_cfg_note(name, n, note):
+    c = json.loads(json.dumps(cfg)); c.setdefault("memory", {})["context_budget_chars"] = n; c["memory"]["max_turns"] = 6
+    c["memory"]["trim_note"] = note
+    pth = os.path.join(T, name + ".json"); json.dump(c, open(pth, "w", encoding="utf-8"), ensure_ascii=False); return pth
+o = run([ev("hbud4", _old_q), ev("hbud5", _mid_q, root_id="hbud4"), ev("hbud6", "最新问题", root_id="hbud4")],
+        name="hist_budget_silent", cfg_path=_bud_cfg_note("hist_budget_silent", 30, False), extra_env={"AGENTBOT_FAKE_DUMP_PROMPT": "1"})
+ps = prompts(o)
+check("trim_note 为 false 时仍丢掉旧对话，但不再写省略说明",
+      len(ps) >= 3 and "OLDTOKEN_" not in ps[2] and "已按字数预算省略" not in ps[2] and "MIDTOKEN_" in ps[2], ps[2] if len(ps) >= 3 else o)
+o = run([ev("hbud7", "短问题甲"), ev("hbud8", "短问题乙", root_id="hbud7")],
+        name="hist_budget_short", cfg_path=_bud_cfg("hist_budget_short", 8000), extra_env={"AGENTBOT_FAKE_DUMP_PROMPT": "1"})
+ps = prompts(o)
+check("没超过字数预算时不写省略说明",
+      len(ps) >= 2 and "短问题甲" in ps[1] and "已按字数预算省略" not in ps[1], ps[1] if len(ps) >= 2 else o)
 o = run([ev("hbud0a", _old_q), ev("hbud0b", _mid_q, root_id="hbud0a"), ev("hbud0c", "最新问题", root_id="hbud0a")],
         name="hist_budget0", cfg_path=_bud_cfg("hist_budget0", 0), extra_env={"AGENTBOT_FAKE_DUMP_PROMPT": "1"})
 ps = prompts(o)

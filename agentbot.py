@@ -164,22 +164,29 @@ def session_key(ev):
     if ev.get("chat_type") == "p2p": return "p2p:" + (ev.get("chat_id") or ev.get("sender_id") or "?")
     topic = ev.get("thread_id") or ev.get("root_id") or ev.get("message_id")
     return "g:%s:%s" % (ev.get("chat_id") or "?", topic)
+def _trim_note_on():
+    """没写 memory.trim_note 时默认加上省略说明。显式 false 才恢复静默丢掉。"""
+    m = CFG.get("memory") or {}
+    if "trim_note" not in m: return True
+    return bool(m.get("trim_note"))
 def history(sess):
+    """返回 (留给模型的对话, 因字数预算丢掉的条数)。条数是一行一句，不是一轮。"""
     m = CFG.get("memory", {}); n = int(m.get("max_turns", 6)); ttl = float(m.get("ttl_hours", 24)) * 3600
-    if n <= 0 or not FEAT.get("memory", True): return []
+    if n <= 0 or not FEAT.get("memory", True): return [], 0
     with DBL:
         rows = DB.execute("select role,text from turns where sess=? and ts>? order by ts desc limit ?", (sess, time.time() - ttl, n * 2)).fetchall()
     rows = rows[::-1]
     raw = m.get("context_budget_chars", 8000)
     try: budget = int(raw)
     except (TypeError, ValueError): budget = 8000
-    if budget <= 0: return rows
+    if budget <= 0: return rows, 0
     kept, total = [], 0
     for role, text in reversed(rows):
         # 最新一条即使超预算也留下，更早的整段丢掉。
         if kept and total + len(text or "") > budget: break
         kept.append((role, text)); total += len(text or "")
-    return list(reversed(kept))
+    kept = list(reversed(kept))
+    return kept, len(rows) - len(kept)
 def remember(sess, role, text):
     with DBL: DB.execute("insert into turns values(?,?,?,?)", (sess, time.time(), role, text[:2000])); DB.commit()
 _PROVIDER = None
@@ -593,9 +600,11 @@ def build_prompt(q, sess, ctx, extra=""):
         if cat: parts.append(cat)
     gm = GMEM.prompt_block(ctx.get("chat_id"), ctx["chat_type"])  # 群档案：放在不常变的前缀之后、会变的对话历史之前
     if gm: parts.append(gm)
-    h = history(sess)
+    h, dropped = history(sess)
     if h:
         parts.append("以下是本话题之前的对话（仅供理解上下文，规则以上面为准）：")
+        if dropped and _trim_note_on():
+            parts.append("（更早的 %d 条对话已按字数预算省略。本地记录还在，没有删除。）" % dropped)
         parts += [("提问者：" if r == "user" else "你：") + t for r, t in h]
     if extra: parts.append(extra)
     if not limited:
