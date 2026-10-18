@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # 端到端：假 lark-cli（事件流 + 按消息编号的 OpenAPI）和假模型，把 agentbot 整段跑一遍。
 # 不连飞书、不使用真实群号或密钥。运行：python3 tests/sim_e2e.py
-import json, os, select, signal, subprocess, sys, tempfile, time
+import base64, datetime, io, json, os, select, signal, subprocess, sys, tempfile, time, zipfile
 
 FW = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SIM = os.path.join(FW, "tests", "sim_lark.py")
@@ -217,6 +217,91 @@ check("超长回答拆成多条，每段带序号",
 o, _ = run([ev("sim_c1", "并发甲", sender_id="user_a"), ev("sim_c2", "并发乙", sender_id="user_b")],
            name="conc", extra_args=("--parallel",))
 check("两个人同时 @ 都会得到回答", replied(o, "sim_c1") and replied(o, "sim_c2"), o[-800:])
+
+def _blank_pdf_b64(pages):
+    from pypdf import PdfWriter
+    w = PdfWriter()
+    for _ in range(pages):
+        w.add_blank_page(width=200, height=200)
+    buf = io.BytesIO()
+    w.write(buf)
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
+def _docx_b64(paragraph):
+    xml = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+           '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+           '<w:body><w:p><w:r><w:t>%s</w:t></w:r></w:p></w:body></w:document>' % paragraph)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("word/document.xml", xml)
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
+def _file_msg(mid, name, key):
+    return {"message_id": mid, "chat_id": CH, "msg_type": "file", "create_time": _now,
+            "content": json.dumps({"file_key": key, "file_name": name}, ensure_ascii=False),
+            "sender": {"name": "外**"}}
+
+_now = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
+_pdf_id, _word_id, _more_id, _wiki_id = "om_extpdf1", "om_extword1", "om_extmore1", "om_wikimsg1"
+_wiki_open = "https://example.feishu.cn/wiki/wikSIMCHAIN"
+_wiki_shut = "https://example.feishu.cn/wiki/wikSIMFORBID"
+_sum_cfg = json.loads(json.dumps(cfg))
+_sum_cfg["agent"]["max_tool_rounds"] = 6
+_sum_cfg.setdefault("tools", {}).setdefault("message_attachment", {})["max_per_answer"] = 2
+_sum_path = os.path.join(T, "sum.json")
+json.dump(_sum_cfg, open(_sum_path, "w", encoding="utf-8"), ensure_ascii=False)
+_sum_seq = [
+    {"tool": "history", "args": {}},
+    {"tool": "docs_read", "args": {"doc": _wiki_open}},
+    {"tool": "docs_read", "args": {"doc": _wiki_shut}},
+    {"tool": "message_attachment", "args": {"message_id": _pdf_id}},
+    {"tool": "message_attachment", "args": {"message_id": _word_id}},
+    {"tool": "message_attachment", "args": {"message_id": _more_id}},
+]
+_sum_q = "<<FAKE_SEQ>>" + json.dumps(_sum_seq, ensure_ascii=False) + "<<END>> 总结群里最近的文件和文档"
+_sum_scen = {
+    "commands": {
+        "im +chat-messages-list": {"ok": True, "data": {"messages": [
+            _file_msg(_pdf_id, "杭州某某科技有限公司-报名.pdf", "file_extpdfkey1"),
+            {"message_id": _wiki_id, "chat_id": CH, "msg_type": "post", "create_time": _now,
+             "content": json.dumps({"content": [[{"tag": "a", "text": "报名说明", "href": _wiki_open}]]}, ensure_ascii=False),
+             "sender": {"name": "外**"}},
+            _file_msg(_word_id, "外部纪要.docx", "file_extwordkey1"),
+            _file_msg(_more_id, "补充材料.txt", "file_extmorekey1"),
+        ]}},
+        "docs +fetch": {"ok": True, "data": {"document": {"content": "知识库正文链"}, "markdown": "不该出现的旧字段"}},
+    },
+    "faults": {"wiki +node-get": [
+        {"ok": True, "data": {"node": {"obj_token": "doxSIM1", "obj_type": "docx", "title": "报名说明"}}},
+        {"ok": False, "error": {"code": 131006, "message": "forbidden"}},
+    ]},
+    "messages": {
+        _pdf_id: _file_msg(_pdf_id, "杭州某某科技有限公司-报名.pdf", "file_extpdfkey1"),
+        _word_id: _file_msg(_word_id, "外部纪要.docx", "file_extwordkey1"),
+        _more_id: _file_msg(_more_id, "补充材料.txt", "file_extmorekey1"),
+    },
+    "resources": {
+        _pdf_id: [{"name": "scan.pdf", "b64": _blank_pdf_b64(12)}],
+        _word_id: [{"name": "note.docx", "b64": _docx_b64("外部成员正文乙")}],
+        _more_id: [{"name": "more.txt", "text": "不该下载的第三份"}],
+    },
+}
+o, calls = run([ev("sim_sum", _sum_q)], scenario=_sum_scen, name="sum", cfg_path=_sum_path, timeout=90)
+ps = "\n".join(prompts(o))
+n_dl = sum(1 for c in calls if "--download-resources" in c)
+n_wiki = sum(1 for c in calls if c[:2] == ["wiki", "+node-get"])
+n_fetch = sum(1 for c in calls if c[:2] == ["docs", "+fetch"])
+check("总结最近文件和文档：外部成员、扫描件、知识库、权限不足和下载上限一起走完",
+      "[文件 某客户-报名.pdf id=%s]" % _pdf_id in ps and "外**" in ps and _wiki_open in ps
+      and "知识库正文链" in ps and "不该出现的旧字段" not in ps
+      and "没对应用开放" in ps and "飞书接口调用失败" not in ps
+      and "扫描件，只看了前 10 页" in ps and "外部成员正文乙" in ps
+      and "已经看了 2 个" in ps and "不该下载的第三份" not in ps
+      and "杭州某某科技有限公司" not in ps
+      and "file_extpdfkey1" not in ps and "file_extwordkey1" not in ps and "file_extmorekey1" not in ps
+      and n_dl == 2 and "om_extmore1" not in [x for c in calls for x in c]
+      and n_wiki == 2 and n_fetch == 1
+      and "[fake] 已根据工具结果回答" in o, o[-2500:])
 
 def run_consumer():
     case = os.path.join(T, "consumer")
