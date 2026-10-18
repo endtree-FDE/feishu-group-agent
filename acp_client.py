@@ -131,14 +131,24 @@ class _Turn:
         self.staged_answer = False
         self.saw_thought = False
 
-    def _emit(self, stage=None, think=None, end=False):
+    def _emit(self, stage=None, think=None, end=False, text=None):
         if not self.on_stage:
             return
         try:
-            if think is not None:
+            if text is not None:
+                self.on_stage(None, text=text)
+            elif think is not None:
                 self.on_stage(None, think=think, end=end)
             elif stage:
                 self.on_stage(stage)
+        except TypeError:
+            try:
+                if think is not None:
+                    self.on_stage(None, think=think, end=end)
+                elif stage:
+                    self.on_stage(stage)
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -158,6 +168,7 @@ class _Turn:
             if not t:
                 return
             self.cur += t
+            self._emit(text=t)
             if self.tools and not self.staged_answer:
                 self.staged_answer = True
                 self._emit("正在整理答案…")
