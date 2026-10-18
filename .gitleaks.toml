@@ -1,0 +1,12 @@
+title = "feishu-group-agent"
+
+[extend]
+useDefault = true
+
+# 只放行占位符和测试里的虚构号码。发现真实密钥时不要把原文加进这个名单。
+[allowlist]
+description = "placeholders and the fictional phone used in tests"
+regexes = [
+  '''REPLACE_[A-Za-z0-9_]+''',
+  '''13812345678''',
+]

@@ -150,10 +150,10 @@
 - **参考：** [docs/模型接口.md](模型接口.md)、[openJiuwen 赛题报道](https://caijing.chinadaily.com.cn/a/202607/20/WS6a5dd2a3a310d709c2fbe862.html)、[职场赛题](https://competitions.atomgit.com/competition/2079523455267733506)、[量化赛题](https://competitions.atomgit.com/competition/2079794808848314369)、[论文赛题](https://competitions.atomgit.com/competition/2079803553561747457)。赛题要接的是 openJiuwen / JiuwenSwarm 这一类运行时，模型名由参赛者自己配。
 - **验收：** 不写新的平台配置时，飞书入口和现有两种模型与现在相同。文档说明怎样接另一种 OpenAI 兼容模型，以及平台接口要守住的边界：白名单、确认码、脱敏、不主动发消息。仓库不收录比赛密钥、账号或赛题数据。默认不自动切换到第二家模型（那是第 8 项，默认关）。
 
-### 18. 自动化密钥扫描
+### 18. 自动化密钥扫描（本轮草稿）
 
 - **目标：** 每次推送都扫一遍工作区和提交，发现像密钥的字符串就让检查失败。
-- **现状：** 没有 gitleaks 或同类配置。`.gitignore` 已排除填好的配置、`redact.txt`、`.env`、记忆和日志。
+- **现状：** CI 用 gitleaks 8.28.0 扫描提交，配置在 `.gitleaks.toml`。`python checks/history_scan.py` 再按账号、群号、open_id、密钥和客户名查全部历史，只打印打码结果。`.gitignore` 已排除填好的配置、`redact.txt`、`.env`、记忆和日志。
 - **参考：** [gitleaks](https://github.com/gitleaks/gitleaks)。
 - **验收：** CI 里有一次密钥扫描。`agents/example.json` 的 `REPLACE_` 占位和测试里的虚构客户名不会被判失败。扫描告警里的原文不写进仓库。这一项不代替下面的公开前人工复查。
 
@@ -161,7 +161,7 @@
 
 这一节只规定怎么查、怎么报告。查到了也不改写 Git 历史：不用 `git filter-repo`，不 rebase，不 amend 旧提交。要删历史里的真实数据，必须由维护者另作决定。
 
-公开之前，对 `git rev-list --all` 里的每一个提交再查一遍，至少包括：
+公开之前再运行一次 `python checks/history_scan.py`（CI 的 secret scan 作业每次推送也会跑）。它覆盖 `git rev-list --all` 里的每一个提交，至少包括：
 
 - 飞书 `ou_` open_id、`on_` union_id、较长的 `oc_` 群号、`cli_` 应用编号、`om_` 消息编号
 - App Secret、`sk-` 密钥、私钥、云厂商访问密钥、带真实口令的赋值

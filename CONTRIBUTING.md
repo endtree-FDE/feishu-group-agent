@@ -32,7 +32,7 @@ python checks/lint.py
 
 沿用所在文件已经在用的写法：4 个空格缩进，短语句可以写在同一行。注释说明为什么这样，而不是把代码再翻译一遍。不要为了风格把整个文件重新排版。用户能看到的说明用完整的句子。
 
-GitHub Actions 会在 Windows 和 Linux 上跑上面的 lint 和测试。工作流不访问飞书，也不读取密钥。
+GitHub Actions 会在 Windows 和 Linux 上跑上面的 lint 和测试。同一工作流里还会跑 gitleaks，以及 `python checks/history_scan.py`。这个扫描只报告打码后的种类，不改写 Git 历史。工作流不访问飞书，也不读取密钥。
 
 ## 不要提交的文件
 
@@ -58,4 +58,4 @@ GitHub Actions 会在 Windows 和 Linux 上跑上面的 lint 和测试。工作�
 
 ## English
 
-Run `python checks/lint.py` and `python tests/run_tests.py`. Keep every check passing. The test count is printed at the end; do not hard-code it in docs. Match the compact 4-space style of the file you edit, and do not reformat unrelated lines. Do not commit secrets, filled-in `agents/*.json`, `redact.txt`, `memory/`, `logs/`, or real knowledge-base files. Contributions are licensed under Apache-2.0.
+Run `python checks/lint.py`, `python checks/history_scan.py`, and `python tests/run_tests.py`. Keep every check passing. The history scan only prints redacted categories and does not rewrite git history. The test count is printed at the end; do not hard-code it in docs. Match the compact 4-space style of the file you edit, and do not reformat unrelated lines. Do not commit secrets, filled-in `agents/*.json`, `redact.txt`, `memory/`, `logs/`, or real knowledge-base files. Contributions are licensed under Apache-2.0.
