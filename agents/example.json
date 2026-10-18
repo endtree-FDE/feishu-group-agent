@@ -59,6 +59,7 @@
     "scope": "topic",
     "max_turns": 6,
     "context_budget_chars": 8000,
+    "trim_note": true,
     "ttl_hours": 24,
     "per_user": false
   },
