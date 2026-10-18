@@ -2039,6 +2039,25 @@ _ps = prompts(o)
 check("第一次回复文件（文件就是话题根）仍会下载并把正文交给模型",
       _ps and "im +messages-mget" in o and "常见问题.docx" in _ps[0] and "赛程常见问题正文" in _ps[0], _ps[0] if _ps else o)
 json.dump(_saved_fake, open(FP, "w", encoding="utf-8"), ensure_ascii=False)
+_stage_file("om_fileroot2", "file_follow.docx", src=_docx_p)
+_with_mget('{"file_key":"file_followkey","file_name":"常见问题.docx"}')
+o = _dump([ev("om_fileroot2", "这份讲什么", message_type="file", content="@" + BN + " 这份讲什么"),
+           ev("om_filefol2", "再说一下重点", root_id="om_fileroot2", parent_id="om_fileroot2", thread_id="thr_file_other")], "filefol")
+_ps = prompts(o)
+check("话题根是文件时，接着发文字仍看得到正文，且不再下载一次",
+      len(_ps) == 2 and "赛程常见问题正文" in _ps[0] and "赛程常见问题正文" in _ps[1]
+      and o.count("[fake-lark] im +messages-mget") == 1 and "file_followkey" not in "\n".join(_ps), o[-1500:])
+_xchat = dict(_saved_fake)
+_xchat["im +messages-mget"] = {"ok": True, "data": {"messages": [{
+    "message_id": "om_otherquote", "chat_id": "chat_other", "msg_type": "file",
+    "content": json.dumps({"file_key": "file_otherkey9", "file_name": "秘密.docx"}, ensure_ascii=False)}]}}
+json.dump(_xchat, open(FP, "w", encoding="utf-8"), ensure_ascii=False)
+_stage_file("om_otherquote", "secret.txt", data="别的群正文丙".encode("utf-8"))
+o = _dump([ev("om_xquote1", "看这句引用", reply_to="om_otherquote", parent_id="om_otherquote")], "xquote")
+_ps = prompts(o)
+check("引用别的会话里的文件会说明只能读当前会话，正文不进提示词",
+      _ps and "只能读取当前会话里的附件" in _ps[0] and "别的群正文丙" not in _ps[0] and "file_otherkey9" not in _ps[0], _ps[0] if _ps else o)
+json.dump(_saved_fake, open(FP, "w", encoding="utf-8"), ensure_ascii=False)
 _stage_file("post1", "pic.png", data=b"\x89PNG\r\n\x1a\n")
 _with_mget(json.dumps({"title": "", "content": [[{"tag": "text", "text": "帖子正文乙"}, {"tag": "img", "image_key": "img_x"}]]}, ensure_ascii=False), "post")
 o = _dump([ev("post1", "看这条帖子", message_type="post")], "postmsg")

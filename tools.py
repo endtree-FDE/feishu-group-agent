@@ -535,6 +535,11 @@ class Tools:
             files.append(p)
         msgs = (j.get("data") or {}).get("messages") or []
         msg = msgs[0] if msgs else {}
+        got = _msg_chat(msg)
+        want = str((ctx or {}).get("chat_id") or "")
+        if got and want and got != want:
+            shutil.rmtree(d, ignore_errors=True)
+            raise ToolError("只能读取当前会话里的附件")
         files = apply_original_names(files, msg)
         self.audit(kind="read", tool="attachment", user=ctx["user"], chat=ctx["chat_id"], ok=True, n=len(files))
         return d, files, (msg.get("msg_type") or msg.get("message_type") or ""), msg

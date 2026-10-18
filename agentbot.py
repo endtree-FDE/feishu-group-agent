@@ -89,6 +89,7 @@ with DBL:
     DB.execute("create index if not exists turns_sess on turns(sess, ts)")
     DB.execute("create table if not exists chats(chat_id text primary key, name text, status text, source text, inviter text, ts real, updated real)")
     DB.execute("create table if not exists threads(root text primary key, chat_id text, initiator text, ts real)")
+    DB.execute("create table if not exists att_text(mid text primary key, body text, ts real)")
     _seen_cols = {r[1] for r in DB.execute("pragma table_info(seen)")}
     # 旧库只有 mid/ts，那些行视为已经答过，避免升级后把历史消息再答一遍。
     if "status" not in _seen_cols: DB.execute("alter table seen add column status text default 'answered'")
@@ -230,18 +231,32 @@ def _thread_followup_ok(ev, uid):
     if who == "initiator": return uid == _thread_initiator(root)
     return uid == _thread_initiator(root) or is_admin(uid)
 _OWN_CONTEXT = ("image", "file", "post", "media", "merge_forward", "interactive", "card")
+def _save_att_text(mid, text):
+    """记住这条消息已经抽出的附件正文。话题里接着问纯文字时不再下载一次。"""
+    text = (text or "").strip()
+    if not mid or not text: return
+    with DBL:
+        DB.execute("insert or replace into att_text(mid, body, ts) values(?,?,?)", (str(mid)[:120], text[:8000], time.time()))
+        DB.commit()
+def _load_att_text(mid):
+    if not mid: return ""
+    with DBL:
+        row = DB.execute("select body from att_text where mid=?", (str(mid)[:120],)).fetchone()
+    return row[0] if row and row[0] else ""
 def _context_targets(ev, sess, mtype, mid):
-    """自己这条若带图片或转发就取；引用别人的也取。话题里接着问纯文字、且父消息就是话题根时不再重复取。"""
+    """自己这条若带图片或转发就取；引用别人的也取。话题里接着问纯文字、且父消息就是话题根时不再重复取。
+    返回 (要下载的消息, 改用缓存的消息)。"""
     parent = str(ev.get("parent_id") or "")
     reply_to = str(ev.get("reply_to") or "")
-    root = str(ev.get("thread_id") or ev.get("root_id") or "")
-    out = []
+    root = _topic_id(ev)
+    out, skipped = [], []
     if mtype in _OWN_CONTEXT: out.append(mid)
     quote = reply_to or parent
     if quote and quote != mid and quote not in out:
         skip = (not reply_to) and parent and root and parent == root and mtype == "text" and _bot_answered(sess)
-        if not skip: out.append(quote)
-    return out
+        if skip: skipped.append(quote)
+        else: out.append(quote)
+    return out, skipped
 
 # ---------- 哪些群可以回答 ----------
 # chat_ids 写了非空列表：只回答这些群，和以前一样（即使同时开了 auto_join 也忽略它）。
@@ -700,7 +715,9 @@ def _load_context(targets, ctx, mid):
         for src in targets:
             text, cleanup = attachment_context(src, ctx, label=("这条消息" if src == mid else "被引用的消息"))
             if cleanup: cleanups.append(cleanup)
-            if text: parts.append(text)
+            if text:
+                parts.append(text)
+                _save_att_text(src, text)
     except Exception:
         for c in cleanups:
             try: c()
@@ -1055,7 +1072,8 @@ def _handle_claimed(ev, mid, ctype, uid):
         elif why == "user": reply(mid, (CFG.get("texts") or {}).get("wait") or "请稍等一下，我处理完上一条就回复你。")
         return
     # 本条若是图片、富文本或转发，取它自己；回复或引用了别的消息时，把那段原文也带上。
-    targets = _context_targets(ev, sess, mtype, mid)
+    targets, skipped = _context_targets(ev, sess, mtype, mid)
+    cached = [t for t in (_load_att_text(s) for s in skipped) if t]
     if not q and mtype in ("image", "file", "media", "post", "merge_forward"): q = "请看我发的内容，概括要点。"
     if not q: reply(mid, CFG["texts"]["empty"]); return
     with _AL:
@@ -1076,7 +1094,9 @@ def _handle_claimed(ev, mid, ctype, uid):
                 try: extra, cleanup = _load_context(targets, ctx, mid)
                 except ToolError as e:
                     log.info("attachment degraded: %s %s", e.user_msg, e.detail[:200])
-                    if mtype != "text": extra = "（附件读取失败：%s。请如实告诉提问者。）" % e.user_msg
+                    extra = "（附件读取失败：%s。请如实告诉提问者。）" % e.user_msg
+            if cached:
+                extra = ("\n\n".join(cached) + ("\n\n" + extra if extra else "")).strip()
             def hook(stage, think=None, end=False, text=None):
                 # text 是回答的文字片段，由模型层拼成最终答案，不刷进进度卡片
                 if think is not None: prog.add_thinking(think, end)
