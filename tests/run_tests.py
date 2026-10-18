@@ -699,6 +699,11 @@ check("acp_allow_web 关闭时上网搜索和网页一律拒绝",
       rc == 0 and _odec == ["reject-once", "reject-once"]
       and "acp permission allowed" not in o and "why=off" in o and "option=allow-always" not in o
       and "已拒绝权限请求" in block(o, "off1") and "权限被允许" not in block(o, "off1"), o[-1500:] + str(_odec))
+o, tr, rc = run_acp([ev("webfail1", "<<ACP_WEB_FAIL>> 查一下今天的新闻")], "acp_web_fail", ACP_CFG)
+check("上网搜索放行后如果没有正文，回退到一次性回答",
+      rc == 0 and "acp permission allowed" in o and "web_search_fail" in o
+      and "acp fallback: empty response" in o and "一次性回退答案" in block(o, "webfail1")
+      and "权限被允许" not in block(o, "webfail1"), o[-1500:])
 o, tr, rc = run_acp([ev("ac7", "<<ACP_STALL>> 卡住")], "acp_stall", acfg("acp_stall", stall_sec=2, max_runtime_sec=30))
 check("卡住后这一题回退到 -p，不把半截常驻输出当答案",
       "acp fallback: stall" in o and "一次性回退答案" in block(o, "ac7") and "卡住前的片段" not in block(o, "ac7")
