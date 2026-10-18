@@ -94,10 +94,10 @@
 - **参考：** [NoneBot2 README](https://github.com/nonebot/nonebot2)、[OpenClaw](https://github.com/openclaw/openclaw)。
 - **验收：** 中文和英文都覆盖用途、架构图、复制 `agents/example.json` 的快速开始、测试命令、不要提交的文件。测试条数与当时的 `tests/run_tests.py` 一致，或改成「全部通过」而不写会死的数字。不出现真实群号和客户名。
 
-### 10. CONTRIBUTING 和代码规范
+### 10. CONTRIBUTING 和代码规范（本轮草稿）
 
 - **目标：** 贡献者知道怎么跑测试、什么不能提交、代码按什么风格改。
-- **现状：** [CONTRIBUTING.md](../CONTRIBUTING.md) 已有，但测试条数仍写着 178，也没有代码规范。
+- **现状：** [CONTRIBUTING.md](../CONTRIBUTING.md) 写了测试命令、4 空格紧凑风格，以及 `checks/lint.py`。测试条数改为看运行结果，不再写死。
 - **参考：** [GitHub 开源指南里的贡献文档](https://docs.github.com/en/communities/setting-up-your-project-for-healthy-contributions)。
 - **验收：** 文档写明：Python 3.12、`python tests/run_tests.py` 必须全过、不提交填好的配置和密钥、新行为要补测试。代码规范写成仓库里已经在用的写法（紧凑的 Python，注释说明为什么），并有一个不强迫全库重排的检查能在 CI 里通过。不把现有默认开关改成开。
 
@@ -122,10 +122,10 @@
 - **参考：** [Issue 和 PR 模板](https://docs.github.com/en/communities/using-templates-to-encourage-useful-issues-and-pull-requests/about-issue-and-pull-request-templates)。
 - **验收：** 至少有一个 bug 模板、一个功能模板、一个 PR 模板。模板提醒不要粘贴 App Secret、群号、open_id、客户名。不因为加了模板而改变程序行为。
 
-### 14. GitHub Actions：测试和 lint，Windows 与 Linux
+### 14. GitHub Actions：测试和 lint，Windows 与 Linux（本轮草稿）
 
 - **目标：** 每次推送和拉取请求都在 Windows 和 Linux 上跑测试，并跑第 10 项的 lint。
-- **现状：** 没有 `.github/workflows/`。本地测试不需要第三方包，也不需要飞书。
+- **现状：** `.github/workflows/ci.yml` 在 Ubuntu 和 Windows 上跑 `checks/lint.py` 和 `tests/run_tests.py`。`.gitattributes` 把文本固定为 LF。本地测试不需要第三方包，也不需要飞书。
 - **参考：** [GitHub Actions](https://docs.github.com/en/actions)。
 - **验收：** 两个系统都执行 `python tests/run_tests.py`，失败则工作流失败。不在 CI 里访问飞书，不把密钥写进工作流。Windows 上没有 PowerShell 的检查仍只核对脚本源码，和现在的测试一样。
 
