@@ -1,5 +1,5 @@
 # 工具层：只允许白名单内的 lark-cli 命令，统一 --as bot；写操作需确认码；全部写审计日志；缺权限优雅降级。
-import json, os, re, sqlite3, subprocess, time, random, threading, datetime, glob, shutil
+import json, os, re, sqlite3, subprocess, struct, time, random, threading, datetime, glob, shutil, zipfile
 import guard, skills
 
 def run_capture(cmd, cwd=None, timeout=60):
@@ -805,3 +805,432 @@ def office_text(path):
     except Exception:
         return "err", ""
     return "", ""
+
+# 日常附件。文本和代码按原文交给模型；PDF 按页抽文字，扫描页尽量抽出内嵌图片。
+TEXT_EXT = {".txt", ".md", ".csv", ".tsv", ".json", ".log", ".yaml", ".yml", ".xml", ".html", ".htm", ".css", ".ini", ".toml", ".cfg", ".conf", ".rst"}
+CODE_EXT = {".py", ".pyw", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".java", ".go", ".rs", ".c", ".h", ".cpp", ".hpp", ".cc", ".cs", ".rb", ".php", ".sh", ".bash", ".sql", ".vue", ".swift", ".kt", ".kts", ".scala", ".lua", ".pl", ".dart", ".r", ".ipynb"}
+IMG_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
+AUDIO_EXT = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac", ".amr", ".wma", ".opus", ".m4b"}
+VIDEO_EXT = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".wmv", ".flv", ".m4v", ".mpeg", ".mpg"}
+OFFICE_NEW = {".docx", ".pptx", ".xlsx"}
+OFFICE_OLD = {".doc", ".ppt", ".xls"}
+_ATT_DEFAULTS = {"max_mb": 20, "zip_max_files": 30, "zip_max_read": 8, "zip_max_mb": 40, "zip_max_ratio": 80,
+                 "pdf_max_pages": 20, "pdf_scan_pages": 3, "pdf_max_images": 3}
+
+def attachment_limits(cfg=None, max_chars=None):
+    """附件读取上限。配置里没写的项用默认值，旧的 agents/*.json 不用改。"""
+    cfg = cfg or {}
+    att = (cfg.get("tools") or {}).get("attachment") or {}
+    if not isinstance(att, dict): att = {}
+    def num(key, default):
+        try: return int(att.get(key, default))
+        except (TypeError, ValueError): return default
+    if max_chars is None:
+        raw = att.get("max_chars")
+        if raw is None: raw = (cfg.get("agent") or {}).get("body_max_chars", DEFAULT_BODY_CHARS)
+        try: max_chars = int(raw)
+        except (TypeError, ValueError): max_chars = DEFAULT_BODY_CHARS
+    mb = num("max_mb", _ATT_DEFAULTS["max_mb"])
+    return {
+        "max_bytes": max(1, mb) * 1024 * 1024,
+        "max_chars": max_chars,
+        "zip_max_files": max(1, num("zip_max_files", _ATT_DEFAULTS["zip_max_files"])),
+        "zip_max_read": max(1, num("zip_max_read", _ATT_DEFAULTS["zip_max_read"])),
+        "zip_max_bytes": max(1, num("zip_max_mb", _ATT_DEFAULTS["zip_max_mb"])) * 1024 * 1024,
+        "zip_max_ratio": max(10, num("zip_max_ratio", _ATT_DEFAULTS["zip_max_ratio"])),
+        "pdf_max_pages": max(1, num("pdf_max_pages", _ATT_DEFAULTS["pdf_max_pages"])),
+        "pdf_scan_pages": max(0, num("pdf_scan_pages", _ATT_DEFAULTS["pdf_scan_pages"])),
+        "pdf_max_images": max(0, num("pdf_max_images", _ATT_DEFAULTS["pdf_max_images"])),
+    }
+
+def file_kind(ext):
+    ext = (ext or "").lower()
+    if ext in TEXT_EXT: return "文本"
+    if ext in CODE_EXT: return "代码"
+    if ext == ".pdf": return "PDF"
+    if ext == ".docx": return "Word"
+    if ext == ".pptx": return "PPT"
+    if ext == ".xlsx": return "Excel"
+    if ext in IMG_EXT: return "图片"
+    if ext in AUDIO_EXT: return "音频"
+    if ext in VIDEO_EXT: return "视频"
+    if ext == ".doc": return "旧版 Word"
+    if ext == ".xls": return "旧版 Excel"
+    if ext == ".ppt": return "旧版 PPT"
+    if ext == ".zip": return "压缩包"
+    return "其他"
+
+def _size_zh(n):
+    n = int(n or 0)
+    if n < 1024: return "%d B" % n
+    if n < 1024 * 1024: return "%.1f KB" % (n / 1024.0)
+    return "%.1f MB" % (n / 1024.0 / 1024.0)
+
+def _sniff_image(data):
+    if not data: return None
+    if data[:3] == b"\xff\xd8\xff": return ".jpg"
+    if data[:8] == b"\x89PNG\r\n\x1a\n": return ".png"
+    if data[:6] in (b"GIF87a", b"GIF89a"): return ".gif"
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP": return ".webp"
+    if data[:2] == b"BM": return ".bmp"
+    return None
+
+def _filter_names(obj):
+    f = obj.get("/Filter") if hasattr(obj, "get") else None
+    if f is None: return []
+    try: f = f.get_object()
+    except Exception: pass
+    if isinstance(f, (list, tuple)): return [str(x) for x in f]
+    return [str(f)]
+
+def _bmp24(w, h, data, channels):
+    """把未压缩的灰度或 RGB 像素包成 BMP。扫描页的 Flate 图没有 Pillow 时也能交给模型。"""
+    row_stride = (w * 3 + 3) & ~3
+    pixels = bytearray()
+    for y in range(h - 1, -1, -1):
+        row = bytearray()
+        for x in range(w):
+            i = (y * w + x) * channels
+            if channels == 1:
+                g = data[i]; row += bytes((g, g, g))
+            else:
+                row += bytes((data[i + 2], data[i + 1], data[i]))
+        row += b"\x00" * (row_stride - w * 3)
+        pixels += row
+    header_size = 54
+    size = header_size + len(pixels)
+    hdr = struct.pack("<2sIHHI", b"BM", size, 0, 0, header_size)
+    info = struct.pack("<IiiHHIIiiII", 40, w, h, 1, 24, 0, len(pixels), 2835, 2835, 0, 0)
+    return hdr + info + bytes(pixels)
+
+def _viewable_image(obj, data):
+    """返回 (扩展名, 字节)。认不出就 (None, None)。不依赖 Pillow。"""
+    ext = _sniff_image(data)
+    if ext: return ext, data
+    names = [x.split("/")[-1] for x in _filter_names(obj)]
+    if any(n in ("DCTDecode", "JPXDecode", "CCITTFaxDecode", "JBIG2Decode") for n in names):
+        return None, None
+    try:
+        w, h = int(obj.get("/Width") or 0), int(obj.get("/Height") or 0)
+        bpc = int(obj.get("/BitsPerComponent") or 8)
+    except (TypeError, ValueError):
+        return None, None
+    cs = str(obj.get("/ColorSpace") or "")
+    if w < 1 or h < 1 or w > 4000 or h > 4000 or bpc != 8: return None, None
+    channels = 1 if "DeviceGray" in cs else 3 if "DeviceRGB" in cs else 0
+    if not channels: return None, None
+    need = w * h * channels
+    if len(data) < need: return None, None
+    try: return ".bmp", _bmp24(w, h, data[:need], channels)
+    except Exception: return None, None
+
+def _pdf_page_images(page):
+    """抽出这一页里能看的内嵌图。viewable 是 [(ext, bytes)]，opaque 表示还有认不出的图。"""
+    viewable, opaque = [], False
+    try:
+        res = page.get("/Resources")
+        if res is None: return viewable, opaque
+        res = res.get_object()
+        xo = res.get("/XObject")
+        if xo is None: return viewable, opaque
+        xo = xo.get_object()
+    except Exception:
+        return viewable, opaque
+    for ref in xo.values():
+        try:
+            obj = ref.get_object()
+            if str(obj.get("/Subtype")) != "/Image": continue
+            data = obj.get_data() or b""
+        except Exception:
+            opaque = True; continue
+        if len(data) > 15 * 1024 * 1024:
+            opaque = True; continue
+        ext, blob = _viewable_image(obj, data)
+        if ext and blob: viewable.append((ext, blob))
+        else: opaque = True
+    return viewable, opaque
+
+def _pdf_has_text(s):
+    t = re.sub(r"\s+", "", s or "")
+    if re.search(r"[\u4e00-\u9fff]", t): return len(t) >= 2
+    return len(re.sub(r"[^0-9A-Za-z]", "", t)) >= 12
+
+def load_pdf_reader():
+    try:
+        from pypdf import PdfReader
+        return PdfReader
+    except ImportError:
+        return None
+
+def _save_beside(path, filename, data):
+    folder = os.path.join(os.path.dirname(os.path.abspath(path)), "_attimg")
+    os.makedirs(folder, exist_ok=True)
+    dest = os.path.join(folder, filename)
+    stem, ext = os.path.splitext(filename); n = 1
+    while os.path.exists(dest):
+        dest = os.path.join(folder, "%s_%d%s" % (stem, n, ext)); n += 1
+    with open(dest, "wb") as f: f.write(data)
+    return dest
+
+def _read_pdf(path, limits, vision, title):
+    Reader = load_pdf_reader()
+    if Reader is None:
+        return ["%s是 PDF。当前环境没有安装 pypdf，没法按页提取文字。请在运行机器人的电脑上执行 pip install pypdf 后重启，或把内容另存成文本再发。" % title], []
+    try:
+        reader = Reader(path)
+        if getattr(reader, "is_encrypted", False):
+            try: ok = reader.decrypt("")
+            except Exception: ok = 0
+            if not ok: return ["%s是加密的 PDF，打不开。请去掉密码后再发。" % title], []
+        pages = list(reader.pages)
+    except Exception:
+        return ["%s是 PDF，但打不开，文件可能已损坏。" % title], []
+    total = len(pages)
+    if total == 0: return ["%s是 PDF，里面没有页面。" % title], []
+    n = min(total, limits["pdf_max_pages"])
+    blocks, images = [], []
+    img_used, empty_tail = 0, []
+    scan_limit = limits["pdf_scan_pages"]
+    stem = os.path.splitext(os.path.basename(path))[0][:40]
+    shown = os.path.basename(path)
+
+    def flush_tail():
+        if not empty_tail: return
+        if len(empty_tail) == 1:
+            blocks.append("【第 %d 页】\n（这一页没有文字。只对前 %d 页没有文字的扫描页抽图片。）" % (empty_tail[0], scan_limit))
+        else:
+            blocks.append("（第 %d–%d 页没有文字，没有继续抽图片。）" % (empty_tail[0], empty_tail[-1]))
+        empty_tail.clear()
+
+    for i, page in enumerate(pages[:n], 1):
+        try: text = page.extract_text() or ""
+        except Exception: text = ""
+        if _pdf_has_text(text):
+            flush_tail(); blocks.append("【第 %d 页】\n%s" % (i, text.strip())); continue
+        if i > scan_limit:
+            empty_tail.append(i); continue
+        viewable, opaque = _pdf_page_images(page)
+        if not vision:
+            flush_tail()
+            blocks.append("【第 %d 页】\n（这一页没有文字。识图没打开，没法查看扫描页。请打开 features.vision，或把这一页导出成 PNG 或 JPG 再发。）" % i)
+            continue
+        saved = False
+        if viewable and img_used < limits["pdf_max_images"]:
+            ext, blob = viewable[0]
+            fn = safe_download_name("%s_p%d%s" % (stem, i, ext)) or ("page_%d%s" % (i, ext))
+            try: dest = _save_beside(path, fn, blob)
+            except OSError: dest = None
+            if dest:
+                img_used += 1; saved = True
+                images.append({"path": dest, "name": os.path.basename(dest), "hint": "PDF《%s》第 %d 页的图片" % (shown, i)})
+        flush_tail()
+        if saved:
+            blocks.append("【第 %d 页】\n（这一页没有文字，已抽出其中的图片。）" % i)
+        elif viewable:
+            blocks.append("【第 %d 页】\n（这一页没有文字。抽出的图片张数已到上限。）" % i)
+        elif opaque:
+            blocks.append("【第 %d 页】\n（这一页没有文字，页面里的图片不是常见的 JPG、PNG 或 BMP，没法交给模型看。请把这一页导出成 PNG 或 JPG 再发。）" % i)
+        else:
+            blocks.append("【第 %d 页】\n（这一页没有文字，也没有可查看的图片。若是扫描件，请导出成 PNG 或 JPG 再发。）" % i)
+    flush_tail()
+    more = ("，这里只读前 %d 页" % n) if total > n else ""
+    body = clip_body("\n\n".join(blocks), limits["max_chars"])
+    return ["%s（PDF，共 %d 页%s）：\n%s" % (title, total, more, body)], images
+
+def zip_rel_parts(name):
+    """压缩包内的相对路径。绝对路径、盘符和 .. 一律拒绝。"""
+    raw = str(name or "").replace("\\", "/")
+    if "\x00" in raw: return None
+    if raw.startswith("/") or re.match(r"^[A-Za-z]:", raw): return None
+    parts = []
+    for p in raw.split("/"):
+        if p in ("", "."): continue
+        if p == "..": return None
+        clean = re.sub(r"[\x00-\x1f<>:\"|?*]", "", p).strip().strip(".")
+        if not clean or clean in (".", ".."): return None
+        parts.append(clean[:80])
+    if not parts or len(parts) > 12: return None
+    return parts
+
+def _zip_is_link(info):
+    return ((info.external_attr >> 16) & 0o170000) == 0o120000
+
+def _zip_issue(info, limits, used):
+    if _zip_is_link(info): return "link"
+    rel = zip_rel_parts(info.filename)
+    if rel is None: return "path"
+    if info.is_dir() or str(info.filename).endswith("/") or str(info.filename).endswith("\\"): return "dir"
+    size = int(info.file_size or 0)
+    if size > limits["max_bytes"]: return "big"
+    if used + size > limits["zip_max_bytes"]: return "budget"
+    comp = int(info.compress_size or 0)
+    if size > 256 * 1024 and (comp <= 0 or size / float(comp) > limits["zip_max_ratio"]): return "ratio"
+    return None
+
+def _read_capped(zf, info, cap):
+    try:
+        with zf.open(info, "r") as fp: data = fp.read(cap + 1)
+    except Exception:
+        return None
+    if len(data) > cap: return None
+    return data
+
+def _write_under(root, parts, data):
+    os.makedirs(root, exist_ok=True)
+    root_r = os.path.realpath(root)
+    dest = root
+    for p in parts: dest = os.path.join(dest, p)
+    parent = os.path.dirname(dest)
+    os.makedirs(parent, exist_ok=True)
+    try:
+        if os.path.commonpath([root_r, os.path.realpath(parent)]) != root_r: return None
+    except ValueError:
+        return None
+    with open(dest, "wb") as f: f.write(data)
+    try:
+        if os.path.commonpath([root_r, os.path.realpath(dest)]) != root_r:
+            try: os.remove(dest)
+            except OSError: pass
+            return None
+    except ValueError:
+        return None
+    return dest
+
+def _friendly_media(title, kind):
+    if kind == "音频":
+        return "%s是音频，目前不能听里面的内容。请用文字说明要点，或把需要看的画面截成图片再发。" % title
+    if kind == "视频":
+        return "%s是视频，目前不能看里面的画面。请用文字说明要点，或把关键画面截成图片再发。" % title
+    if kind == "旧版 Word":
+        return "%s是旧版 Word（.doc），请另存为 .docx 后再发。" % title
+    if kind == "旧版 Excel":
+        return "%s是旧版 Excel（.xls），请另存为 .xlsx 或 CSV 后再发。" % title
+    if kind == "旧版 PPT":
+        return "%s是旧版 PowerPoint（.ppt），请另存为 .pptx 后再发。" % title
+    return "%s的类型暂不支持识别。" % title
+
+def _read_zip(path, limits, vision, depth, title):
+    if depth >= 1:
+        return ["%s是压缩包，内层不再展开。" % title], []
+    try:
+        zf = zipfile.ZipFile(path)
+    except Exception:
+        return ["%s是压缩包，但打不开，文件可能已损坏。" % title], []
+    lines, images = [], []
+    with zf:
+        infos = zf.infolist()
+        if not infos: return ["%s是空的压缩包。" % title], []
+        listed, readable, used, shown, hidden = [], [], 0, 0, 0
+        for info in infos:
+            if shown >= limits["zip_max_files"]:
+                hidden += 1; continue
+            shown += 1
+            issue = _zip_issue(info, limits, used)
+            rel = zip_rel_parts(info.filename)
+            label = str(info.filename).replace("\\", "/")[:80] or "（空名称）"
+            show = "/".join(rel) if rel else label
+            if issue == "dir":
+                if rel: listed.append("- %s/" % "/".join(rel))
+                continue
+            if issue == "path":
+                listed.append("- %s（路径不安全，已跳过）" % label); continue
+            if issue == "link":
+                listed.append("- %s（链接，已跳过）" % show); continue
+            if issue in ("big", "budget", "ratio"):
+                why = {"big": "单文件超过大小上限", "budget": "解压总体积达到上限", "ratio": "压缩比异常"}[issue]
+                listed.append("- %s（%s，已跳过）" % (show, why)); continue
+            used += int(info.file_size or 0)
+            kind = file_kind(os.path.splitext(rel[-1])[1].lower())
+            listed.append("- %s（%s，%s）" % (show, _size_zh(info.file_size), kind))
+            readable.append((info, rel, kind))
+        extra = ("\n（还有 %d 项没有列出）" % hidden) if hidden else ""
+        lines.append("%s里的文件：\n%s%s" % (title, "\n".join(listed) if listed else "（没有可列出的文件）", extra))
+        out_dir = os.path.join(os.path.dirname(os.path.abspath(path)), "_unz_" + re.sub(r"\W", "", os.path.splitext(os.path.basename(path))[0])[:24])
+        read_n = unread = 0
+        for info, rel, kind in readable:
+            inner_title = "压缩包内《%s》" % "/".join(rel)
+            if kind in ("音频", "视频", "旧版 Word", "旧版 Excel", "旧版 PPT", "其他", "压缩包"):
+                if kind == "压缩包":
+                    lines.append("%s是压缩包，内层不再展开。" % inner_title)
+                elif kind != "其他":
+                    lines.append(_friendly_media(inner_title, kind))
+                continue
+            if read_n >= limits["zip_max_read"]:
+                unread += 1; continue
+            data = _read_capped(zf, info, min(limits["max_bytes"], limits["zip_max_bytes"]))
+            if data is None:
+                lines.append("%s解压后超过上限或无法读取，已跳过。" % inner_title); continue
+            dest = _write_under(out_dir, rel, data)
+            if not dest:
+                lines.append("%s路径不安全，已跳过。" % inner_title); continue
+            inner = inspect_download(dest, limits, vision=vision, depth=depth + 1, display=inner_title)
+            lines.extend(inner["lines"]); images.extend(inner["images"]); read_n += 1
+        if unread: lines.append("（还有 %d 个文件没有读取）" % unread)
+    return lines, images
+
+def _read_text_bytes(path, cap):
+    try:
+        with open(path, "rb") as f: data = f.read(cap + 1)
+    except OSError:
+        return None, "err"
+    if len(data) > cap: return None, "big"
+    if b"\x00" in data[:8192]: return None, "binary"
+    return data.decode("utf-8", errors="replace"), None
+
+def inspect_download(path, limits=None, msg_type="", vision=True, depth=0, display=None):
+    """读一个已下载的文件。返回 {lines, images}。images 里是要交给识图的本地文件。"""
+    limits = limits or attachment_limits()
+    name = os.path.basename(path)
+    title = display or ("附件《%s》" % name)
+    ext = os.path.splitext(name)[1].lower()
+    mt = str(msg_type or "").lower()
+    lines, images = [], []
+    if ext == ".zip" or (not ext and mt == "zip"):
+        zl, zi = _read_zip(path, limits, vision, depth, title)
+        return {"lines": zl, "images": zi}
+    kind = file_kind(ext)
+    if not ext and mt == "audio": kind = "音频"
+    elif not ext and mt in ("media", "video"): kind = "视频"
+    elif not ext and mt in ("image", "sticker"): kind = "图片"
+    if kind in ("音频", "视频", "旧版 Word", "旧版 Excel", "旧版 PPT"):
+        return {"lines": [_friendly_media(title, kind)], "images": []}
+    if kind == "图片" or ext in IMG_EXT:
+        if ext not in IMG_EXT:
+            try:
+                with open(path, "rb") as f: head = f.read(32)
+            except OSError:
+                head = b""
+            if not _sniff_image(head):
+                return {"lines": ["%s是图片，但内容不是常见的 JPG、PNG、GIF、WEBP 或 BMP。" % title], "images": []}
+        if vision:
+            images.append({"path": path, "name": name, "hint": "用户发来一张图片" if not display else title})
+        else:
+            lines.append("%s是图片。识图没打开，没法查看。请打开 features.vision，或把图里的字打成文字再发。" % title)
+        return {"lines": lines, "images": images}
+    if kind == "PDF" or ext == ".pdf":
+        pl, pi = _read_pdf(path, limits, vision, title)
+        return {"lines": pl, "images": pi}
+    if ext in OFFICE_NEW:
+        office_kind, txt = office_text(path)
+        if office_kind == "xlsx" and txt is None:
+            lines.append("%s是 Excel 表格。当前环境没有安装 openpyxl，没法读取。可以把内容另存为 CSV，或安装 openpyxl 后再发。" % title)
+        elif office_kind == "err" or txt is None:
+            lines.append("%s无法解析，文件可能已损坏。" % title)
+        elif not txt:
+            lines.append("%s没有提取到文字。" % title)
+        else:
+            kind_zh = {"docx": "Word", "pptx": "PPT", "xlsx": "Excel"}.get(office_kind, "Office")
+            lines.append("%s（%s 文本）：\n%s" % (title, kind_zh, clip_body(txt, limits["max_chars"])))
+        return {"lines": lines, "images": []}
+    if kind in ("文本", "代码"):
+        text, err = _read_text_bytes(path, limits["max_bytes"])
+        if err == "binary":
+            lines.append("%s不像文本文件，没有读取内容。" % title)
+        elif err:
+            lines.append("%s无法读取。" % title)
+        else:
+            body = clip_body(text, limits["max_chars"])
+            if kind == "代码": lines.append("%s（代码）：\n%s" % (title, body))
+            else: lines.append("%s内容：\n%s" % (title, body))
+        return {"lines": lines, "images": []}
+    return {"lines": ["%s的类型暂不支持识别。" % title], "images": []}
