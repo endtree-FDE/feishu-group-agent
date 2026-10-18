@@ -1614,6 +1614,9 @@ try:
 finally:
     _tools.load_pdf_reader = _real_pdf
 check("没装 pypdf 时说明要安装，而不是报错", _miss["lines"] and "pypdf" in _miss["lines"][0] and "pip install" in _miss["lines"][0], _miss)
+check("pdf_scan_pages 默认 10，配置写成 3 时仍按 3",
+      _tools.attachment_limits({})["pdf_scan_pages"] == 10 and _tools._ATT_DEFAULTS["pdf_scan_pages"] == 10
+      and _tools.attachment_limits({"tools": {"attachment": {"pdf_scan_pages": 3}}})["pdf_scan_pages"] == 3)
 _pdf_text = _pdf_scan = _pdf_blank = None
 try:
     from pypdf import PdfWriter as _PdfWriter
@@ -1655,6 +1658,13 @@ if _PdfWriter:
     _bw = PdfWriter(); _bw.add_blank_page(width=200, height=200); _bw.write(_pdf_blank)
     _got = _tools.inspect_download(_pdf_blank, _limits(), vision=True)
     check("空白 PDF 提示导出成图片", _got["lines"] and "导出成 PNG" in _got["lines"][0] and not _got["images"], _got)
+    _pdf_long = os.path.join(T, "longscan.pdf")
+    _lw = PdfWriter()
+    for _ in range(12): _lw.add_blank_page(width=200, height=200)
+    _lw.write(_pdf_long)
+    _got = _tools.inspect_download(_pdf_long, _tools.attachment_limits({"tools": {"attachment": {"pdf_scan_pages": 10, "pdf_max_pages": 20}}}))
+    _blob = "\n".join(_got["lines"])
+    check("扫描件写明只看了前 10 页", "扫描件，只看了前 10 页" in _blob, _blob[:500])
     _bad_pdf = os.path.join(T, "bad.pdf"); open(_bad_pdf, "wb").write(b"this is not a pdf")
     _got = _tools.inspect_download(_bad_pdf, _limits())
     check("损坏的 PDF 说明打不开", _got["lines"] and "打不开" in _got["lines"][0], _got)
@@ -1804,6 +1814,7 @@ _sp = cfg["system_prompt"]
 check("人设写明联网搜索是自带能力，比赛和截止日期要先搜并给出链接",
       "联网搜索" in _sp and "比赛" in _sp and "1 到 3" in _sp and "读写飞书只能通过下面列出的工具" in _sp and "自带的能力" in _sp, _sp)
 check("工具说明把联网搜索和飞书工具分开", "联网搜索和打开网页是你自带的能力" in _tools.TOOL_DOC and "file_" in _tools.TOOL_DOC)
+check("工具说明要求回答时不要复述消息编号", "不要复述消息编号" in _tools.TOOL_DOC)
 _c_cal = json.loads(json.dumps(cfg))
 for _k in ("calendar_update", "calendar_delete", "calendar_create_batch"): _c_cal["tools"].pop(_k, None)
 _tcal = _tl(_c_cal)
@@ -1857,6 +1868,170 @@ _ht = _th._history({"keyword": "OpenJiuwen"}, _hctx)
 _hall = _th._history({}, _hctx)
 check("群历史关键词不区分大小写，并带上话题回复", "openjiuwen" in _ht.lower() and "回复" in _ht and "丙" not in _ht, _ht)
 check("群历史给图片留占位", "[图片]" in _hall, _hall)
+_file_msg = {"message_id": "om_histfile1", "msg_type": "file", "create_time": "2026-10-16 19:00",
+             "content": json.dumps({"file_key": "file_hist1", "file_name": "杭州某某科技有限公司-报名.pdf"}, ensure_ascii=False),
+             "sender": {"name": "小李"}}
+_file_line = _tools._history_line(_file_msg, _th.names)
+check("历史里的文件带原名和消息编号，文件名先脱敏",
+      "[文件 某客户-报名.pdf id=om_histfile1]" in _file_line and "杭州某某科技有限公司" not in _file_line and "file_hist1" not in _file_line, _file_line)
+_post_msg = {"message_id": "om_histpost1", "msg_type": "post", "sender": {"name": "小王"},
+             "content": json.dumps({"title": "", "content": [[{"tag": "text", "text": "见说明"}, {"tag": "a", "text": "报名说明", "href": "https://example.feishu.cn/wiki/wikHIST1"}, {"tag": "img", "image_key": "img_hist1"}]]}, ensure_ascii=False)}
+_post_line = _tools._history_line(_post_msg, _th.names)
+check("历史里的富文本保留文档链接，并标出图片消息编号",
+      "https://example.feishu.cn/wiki/wikHIST1" in _post_line and "报名说明" in _post_line and "[图片 id=om_histpost1]" in _post_line, _post_line)
+_plain = _tools.doc_plain({"document": {"content": "唯一正文丁", "revision_id": 9}, "markdown": "不该用的旧字段"})
+_old = _tools.doc_plain({"markdown": "旧字段戊"})
+check("文档正文优先 data.document.content，并兼容旧的 markdown",
+      _plain == "唯一正文丁" and "不该用的旧字段" not in _plain and _old == "旧字段戊", _plain)
+_seen_doc = []
+def _doc_fake(argv):
+    _seen_doc.append(list(argv))
+    if argv[:2] == ["wiki", "+node-get"]:
+        return {"ok": True, "data": {"node": {"obj_token": "doxWIKI1", "obj_type": "docx", "title": "报名说明"}}}
+    if argv[:2] == ["docs", "+fetch"]:
+        return {"ok": True, "data": {"document": {"content": "知识库正文乙"}}}
+    return {"ok": False, "error": {"message": "意外命令"}}
+_tdoc = _tl(); _tdoc.fake = _doc_fake
+_dres = _tdoc._docs_read({"doc": "https://example.feishu.cn/wiki/wikHIST1?from=copy"}, _hctx)
+check("知识库链接先取 obj_token 再读正文",
+      "知识库正文乙" in _dres and any(a[:2] == ["wiki", "+node-get"] and "wikHIST1" in a for a in _seen_doc)
+      and any(a[:2] == ["docs", "+fetch"] and "doxWIKI1" in a for a in _seen_doc), _dres + "\n" + str(_seen_doc))
+_seen_doc.clear()
+def _plain_doc_fake(argv):
+    _seen_doc.append(list(argv))
+    if argv[:2] == ["docs", "+fetch"]:
+        return {"ok": True, "data": {"document": {"content": "云文档正文甲"}, "markdown": "旧字段不该用"}}
+    return {"ok": False, "error": {"message": "不应调用 " + " ".join(argv[:2])}}
+_tdoc.fake = _plain_doc_fake
+_pres = _tdoc._docs_read({"doc": "doxPLAIN1"}, _hctx)
+check("普通云文档不查知识库节点，正文用 document.content",
+      "云文档正文甲" in _pres and "旧字段不该用" not in _pres
+      and not any(a[:2] == ["wiki", "+node-get"] for a in _seen_doc)
+      and any(a[:2] == ["docs", "+fetch"] and "doxPLAIN1" in a for a in _seen_doc), _pres + "\n" + str(_seen_doc))
+_seen_doc.clear()
+def _scope_fake(argv):
+    _seen_doc.append(list(argv))
+    return {"ok": False, "error": {"type": "authorization", "subtype": "app_scope_not_applied", "code": 99991672, "message": "access denied"}}
+_tdoc.fake = _scope_fake
+try: _tdoc._docs_read({"doc": "https://example.feishu.cn/wiki/wikHIST1"}, _hctx); _werr = ""
+except _tools.ToolError as _e: _werr = _e.user_msg
+check("知识库缺权限时说明 wiki scope，并且不再去拉正文",
+      "wiki:node:read" in _werr and not any(a[:2] == ["docs", "+fetch"] for a in _seen_doc), _werr)
+_seen_doc.clear()
+def _forbid_fake(argv):
+    _seen_doc.append(list(argv))
+    if argv[:2] == ["wiki", "+node-get"]:
+        return {"ok": False, "error": {"code": 131006, "message": "forbidden"}}
+    return {"ok": False, "error": {"message": "不应读到这里"}}
+_tdoc.fake = _forbid_fake
+try: _tdoc._docs_read({"doc": "wikHIST1"}, _hctx); _ferr = ""
+except _tools.ToolError as _e: _ferr = _e.user_msg
+check("知识库节点没对应用开放时说清楚，不说成接口不可用",
+      "没对应用开放" in _ferr and "飞书接口调用失败" not in _ferr, _ferr)
+_now_ms = str(int(time.time() * 1000))
+_att_calls = []
+def _att_msg(mid, chat, when, name="报名.docx"):
+    return {"message_id": mid, "chat_id": chat, "create_time": when, "msg_type": "file",
+            "content": json.dumps({"file_key": "file_" + mid, "file_name": name}, ensure_ascii=False)}
+def _att_fake(argv):
+    _att_calls.append(list(argv))
+    mid = argv[argv.index("--message-ids") + 1] if "--message-ids" in argv else ""
+    downloading = "--download-resources" in argv
+    if mid == "om_otherchat":
+        return {"ok": True, "data": {"messages": [_att_msg(mid, "chat_other", _now_ms)]}}
+    if mid == "om_oldfile1":
+        return {"ok": True, "data": {"messages": [_att_msg(mid, CH, "2000-01-01T00:00:00+00:00")]}}
+    if mid == "om_emptyid1":
+        return {"ok": True, "data": {"messages": [{"chat_id": CH, "create_time": _now_ms, "msg_type": "file",
+            "content": json.dumps({"file_key": "file_empty", "file_name": "空编号.txt"}, ensure_ascii=False)}]}}
+    if mid == "om_badload1":
+        shown = "om_otherid1" if downloading else mid
+        return {"ok": True, "data": {"messages": [_att_msg(shown, CH, _now_ms, name="错消息.txt")]}}
+    if mid == "om_badchat1":
+        shown = "chat_other" if downloading else CH
+        return {"ok": True, "data": {"messages": [_att_msg(mid, shown, _now_ms, name="错群.txt")]}}
+    if mid == "om_noidload1":
+        if downloading:
+            return {"ok": True, "data": {"messages": [{"msg_type": "file",
+                "content": json.dumps({"file_key": "file_noid", "file_name": "无编号.txt"}, ensure_ascii=False)}]}}
+        return {"ok": True, "data": {"messages": [_att_msg(mid, CH, _now_ms, name="无编号.txt")]}}
+    if mid == "om_redactimg1":
+        return {"ok": True, "data": {"messages": [_att_msg(mid, CH, _now_ms, name="杭州某某科技有限公司-截图.png")]}}
+    return {"ok": True, "data": {"messages": [_att_msg(mid, CH, _now_ms)]}}
+_tatt = _tl(); _tatt.fake = _att_fake
+_actx = {"chat_type": "group", "chat_id": CH, "user": "user_sender"}
+try: _tatt._message_attachment({"message_id": "om_otherchat"}, _actx); _aerr = ""
+except _tools.ToolError as _e: _aerr = _e.user_msg
+check("历史附件：别的会话不下载",
+      "当前会话" in _aerr and not any("--download-resources" in a for a in _att_calls), _aerr + "\n" + str(_att_calls))
+_att_calls.clear()
+try: _tatt._message_attachment({"message_id": "om_oldfile1"}, _actx); _aerr = ""
+except _tools.ToolError as _e: _aerr = _e.user_msg
+check("历史附件：超出 history.days 不下载",
+      "超过了最近" in _aerr and not any("--download-resources" in a for a in _att_calls), _aerr)
+_att_calls.clear()
+for _i, _name in enumerate(("a.txt", "b.txt", "c.txt")):
+    _stage_file("om_capfile1", _name, data=("甲乙丙"[_i] + "文").encode("utf-8"))
+_tcap = _tl(); _tcap.t.setdefault("message_attachment", {})["max_per_answer"] = 2
+_tcap.fake = _att_fake
+_cap_ctx = {"chat_type": "group", "chat_id": CH, "user": "user_sender"}
+_cap_res = _tcap._message_attachment({"message_id": "om_capfile1"}, _cap_ctx)
+check("历史附件：单次回答最多读取配置的个数",
+      _cap_ctx.get("_attach_used") == 2 and "还有 1 个没有读" in _cap_res
+      and sum(s in _cap_res for s in ("甲文", "乙文", "丙文")) == 2, _cap_res)
+def _att_dir(mid):
+    return os.path.join(T, "tmp", "att_" + re.sub(r"\W", "", mid)[-20:])
+_att_calls.clear()
+_stage_file("om_emptyid1", "secret.txt", data="空编号不该读到".encode("utf-8"))
+try: _tatt._message_attachment({"message_id": "om_emptyid1"}, _actx); _aerr = ""
+except _tools.ToolError as _e: _aerr = _e.user_msg
+check("历史附件：消息编号为空时不下载",
+      "没有对上这条消息" in _aerr and "空编号不该读到" not in _aerr
+      and not any("--download-resources" in a for a in _att_calls), _aerr + "\n" + str(_att_calls))
+_att_calls.clear()
+_stage_file("om_badload1", "body.txt", data="错消息正文不该读到".encode("utf-8"))
+try: _tatt._message_attachment({"message_id": "om_badload1"}, _actx); _aerr = ""
+except _tools.ToolError as _e: _aerr = _e.user_msg
+check("历史附件：下载结果的消息编号对不上就删掉临时目录并不读",
+      "下载结果和当前会话对不上" in _aerr and "错消息正文不该读到" not in _aerr
+      and any("--download-resources" in a for a in _att_calls) and not os.path.isdir(_att_dir("om_badload1")), _aerr)
+_att_calls.clear()
+_stage_file("om_badchat1", "body.txt", data="错群正文不该读到".encode("utf-8"))
+try: _tatt._message_attachment({"message_id": "om_badchat1"}, _actx); _aerr = ""
+except _tools.ToolError as _e: _aerr = _e.user_msg
+check("历史附件：下载结果的会话对不上就删掉临时目录并不读",
+      ("当前会话" in _aerr or "对不上" in _aerr) and "错群正文不该读到" not in _aerr
+      and any("--download-resources" in a for a in _att_calls) and not os.path.isdir(_att_dir("om_badchat1")), _aerr)
+_att_calls.clear()
+_stage_file("om_noidload1", "plain.txt", data="沿用第一次核对的正文".encode("utf-8"))
+_noid = _tatt._message_attachment({"message_id": "om_noidload1"}, _actx)
+check("历史附件：下载结果没有编号时沿用第一次核对", "沿用第一次核对的正文" in _noid, _noid)
+_bare_dir = os.path.join(T, "tmp", "bare_customer"); os.makedirs(_bare_dir, exist_ok=True)
+_bare_path = os.path.join(_bare_dir, "杭州某某科技有限公司-备注.txt")
+open(_bare_path, "w", encoding="utf-8").write("备注正文")
+_bare_out = _tools.apply_original_names([_bare_path], {"content": "没有原名"}, _tatt.names)
+check("没有原名时，磁盘上的客户名也会改成打码文件名",
+      os.path.basename(_bare_out[0]) == "某客户-备注.txt" and not os.path.exists(_bare_path)
+      and "杭州某某科技有限公司" not in os.path.basename(_bare_out[0]))
+_stage_file("om_redactimg1", "raw.png", data=b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
+_img_res = _tatt._message_attachment({"message_id": "om_redactimg1"}, _actx)
+_disk_names = []
+for _root in (os.path.join(T, "tmp"), os.path.join(T, "kb", ".attach")):
+    if not os.path.isdir(_root): continue
+    for _dp, _ds, _fs in os.walk(_root):
+        _disk_names.extend(_fs)
+_attach_names = []
+for _dp, _ds, _fs in os.walk(os.path.join(T, "kb", ".attach")):
+    _attach_names.extend(_fs)
+check("附件落盘和 kb/.attach 都用打码后的文件名",
+      "杭州某某科技有限公司" not in "\n".join(_disk_names) and "杭州某某科技有限公司" not in _img_res
+      and any(n.startswith("某客户") and n.endswith(".png") for n in _attach_names), (_img_res, _disk_names, _attach_names))
+_off = json.loads(json.dumps(cfg)); _off["tools"].pop("message_attachment", None)
+check("没写 message_attachment 时跟着附件开关", _tl(_off).enabled("message_attachment") is True)
+_off["tools"]["attachment"]["enabled"] = False
+check("附件关掉且没单独写时，历史附件也关掉", _tl(_off).enabled("message_attachment") is False)
+_off["tools"]["message_attachment"] = {"enabled": True, "max_per_answer": 4}
+check("可以单独打开历史附件", _tl(_off).enabled("message_attachment") is True)
 _card = {"msg_type": "interactive", "content": json.dumps({"header": {"title": {"content": "卡片标题丙"}}, "elements": [{"tag": "div", "text": {"content": "卡片正文丙"}}]}, ensure_ascii=False)}
 check("卡片正文能抽成文字", "卡片标题丙" in _tools.message_text(_card) and "卡片正文丙" in _tools.message_text(_card))
 import acp_client as _acp
@@ -1875,6 +2050,8 @@ o = _dump([ev("i13m1", "比赛什么时候截止")], "webprompt")
 _ps = prompts(o)
 check("提示词里写了先搜索比赛日期，记忆关着时不出现记忆提议工具",
       _ps and "联网搜索" in _ps[0] and "比赛" in _ps[0] and "memory_propose" not in _ps[0], _ps[0][:800] if _ps else o)
+check("系统提示要求真的去读群里的文件和文档",
+      _ps and "要真的去读" in _ps[0] and "不要只看发送记录" in _ps[0] and "message_attachment" in _ps[0], _ps[0][:600] if _ps else o)
 _mem_on = json.loads(json.dumps(cfg)); _mem_on["memory"]["enabled"] = True
 _mem_path = os.path.join(T, "memprop.json"); json.dump(_mem_on, open(_mem_path, "w", encoding="utf-8"), ensure_ascii=False)
 o = _dump([ev("web2", "你好")], "webmem", cfg_path=_mem_path)
@@ -1970,6 +2147,71 @@ _gmd = os.path.join(T, "memory", "groups", CH, "GROUP.md")
 _gtext = open(_gmd, encoding="utf-8").read() if os.path.isfile(_gmd) else ""
 check("确认后写入群记忆，并刷新已打开话题的档案快照",
       _mc and "已记" in o2 and "周四" in _gtext and "memory snapshot refreshed" in o2, o2 + "\n" + _gtext)
+
+# ---------- 只读工具连续多轮：历史 → 知识库 → 历史附件 ----------
+def _rounds_cfg(name, **agent):
+    c = json.loads(json.dumps(cfg)); c["agent"].pop("max_tool_rounds", None); c["agent"].update(agent)
+    pth = os.path.join(T, name + ".json"); json.dump(c, open(pth, "w", encoding="utf-8"), ensure_ascii=False); return pth
+_chain_mid = "om_chainfile1"
+_stage_file(_chain_mid, "报名.docx", src=_docx_p)
+_now_iso = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
+_chain_map = {
+    "im +chat-messages-list": {"ok": True, "data": {"messages": [
+        {"message_id": _chain_mid, "msg_type": "file", "create_time": _now_iso,
+         "content": json.dumps({"file_key": "file_chain1", "file_name": "报名.docx"}, ensure_ascii=False),
+         "sender": {"name": "小李"}},
+        {"message_id": "om_chainpost1", "msg_type": "post", "create_time": _now_iso,
+         "content": json.dumps({"content": [[{"tag": "a", "text": "报名说明", "href": "https://example.feishu.cn/wiki/wikCHAIN1"}]]}, ensure_ascii=False),
+         "sender": {"name": "小王"}},
+    ]}},
+    "im +messages-mget": {"ok": True, "data": {"messages": [{
+        "message_id": _chain_mid, "chat_id": CH, "create_time": _now_iso, "msg_type": "file",
+        "content": json.dumps({"file_key": "file_chain1", "file_name": "报名.docx"}, ensure_ascii=False),
+    }]}},
+    "wiki +node-get": {"ok": True, "data": {"node": {"obj_token": "doxCHAIN", "obj_type": "docx", "title": "报名说明"}}},
+    "docs +fetch": {"ok": True, "data": {"document": {"content": "知识库正文丁"}, "markdown": "不该出现的旧字段"}},
+}
+_chain_fp = os.path.join(T, "chain_fake.json"); json.dump(_chain_map, open(_chain_fp, "w", encoding="utf-8"), ensure_ascii=False)
+_chain_env = {"AGENTBOT_FAKE_AGENT": "0", "AGENTBOT_FAKE_DUMP_PROMPT": "1", "AGENTBOT_FAKE_LARK": _chain_fp}
+_seq = [
+    {"tool": "history", "args": {}},
+    {"tool": "docs_read", "args": {"doc": "https://example.feishu.cn/wiki/wikCHAIN1"}},
+    {"tool": "message_attachment", "args": {"message_id": _chain_mid}},
+]
+_q = "<<FAKE_SEQ>>" + json.dumps(_seq, ensure_ascii=False) + "<<END>> 总结群里最近的文件和文档"
+o = run([ev("chain1", _q)], name="chain_read", cfg_path=_rounds_cfg("chain_cfg"), extra_env=_chain_env)
+_ps = prompts(o); _joined = "\n".join(_ps)
+_ih, _id, _ia = o.find("tool call history"), o.find("tool call docs_read"), o.find("tool call message_attachment")
+check("只读工具连续三轮：先查历史，再读知识库，再读附件",
+      0 <= _ih < _id < _ia
+      and "[fake-lark] wiki +node-get" in o and "[fake-lark] docs +fetch" in o and "[fake-lark] im +messages-mget" in o
+      and any("工具结果（history）" in p and "[文件 报名.docx id=%s]" % _chain_mid in p and "https://example.feishu.cn/wiki/wikCHAIN1" in p for p in _ps)
+      and any("工具结果（docs_read）" in p and "知识库正文丁" in p for p in _ps)
+      and any("工具结果（message_attachment）" in p and "赛程常见问题正文" in p for p in _ps)
+      and "不该出现的旧字段" not in _joined and "file_chain1" not in _joined
+      and "[fake] 已根据工具结果回答" in o, o[-2500:])
+_q2 = "<<FAKE_SEQ_FORCE>>" + json.dumps(_seq, ensure_ascii=False) + "<<END>> 再总结一次"
+o2 = run([ev("chain2", _q2)], name="chain_cap", cfg_path=_rounds_cfg("chain_cap", max_tool_rounds=2), extra_env=_chain_env)
+_ps2 = prompts(o2)
+check("读到配置的最后一轮就直接回答，多出来的附件工具不执行",
+      "tool call history" in o2 and "tool call docs_read" in o2 and "tool call message_attachment" not in o2
+      and "[fake-lark] im +messages-mget" not in o2 and "赛程常见问题正文" not in "\n".join(_ps2)
+      and "先说到这里" in o2 and "<<TOOL>>" not in o2.split("[dry-run] reply chain2: ", 1)[-1], o2[-2000:])
+_seq_bare = [{"tool": "history", "args": {}}, {"tool": "message_attachment", "args": {"message_id": _chain_mid}}]
+_q_bare = "<<FAKE_SEQ_BARE>>" + json.dumps(_seq_bare, ensure_ascii=False) + "<<END>> 只读一轮再吐工具行"
+o_bare = run([ev("chainbare", _q_bare)], name="chain_bare", cfg_path=_rounds_cfg("chain_bare", max_tool_rounds=1), extra_env=_chain_env)
+_reply_bare = o_bare.split("[dry-run] reply chainbare: ", 1)[-1]
+check("轮数用尽且最后只剩工具行时给出说明和已读摘要",
+      "这几步已经查完" in _reply_bare and "已经读到的内容" in _reply_bare and "报名.docx" in _reply_bare
+      and "id=om_" not in _reply_bare and "<<TOOL>>" not in _reply_bare
+      and "没能生成回答" not in _reply_bare and "赛程常见问题正文" not in _reply_bare
+      and "tool call history" in o_bare and "tool call message_attachment" not in o_bare, _reply_bare[:800])
+_seq3 = [{"tool": "history", "args": {}}, {"tool": "docs_create", "args": {"title": "周报", "markdown": "内容"}}]
+_q3 = "<<FAKE_SEQ>>" + json.dumps(_seq3, ensure_ascii=False) + "<<END>> 先看历史再写文档"
+o3 = run([ev("chain3", _q3, sender_id="user_admin")], name="chain_write", cfg_path=_rounds_cfg("chain_write"), extra_env=_chain_env)
+check("读完历史仍可提议写入，写入停在确认码，不会接着执行",
+      "tool call history" in o3 and "tool call docs_create" in o3 and "确认" in o3
+      and "[fake-lark] docs +create" not in o3 and "[fake] 已根据工具结果回答" not in o3, o3[-2000:])
 
 print("\n%d/%d passed" % (sum(r for _, r in results), len(results))); shutil.rmtree(T, ignore_errors=True)
 sys.exit(0 if all(r for _, r in results) else 1)
