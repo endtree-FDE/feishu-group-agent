@@ -1,44 +1,103 @@
 # 飞书群机器人模板
 
-这是一个飞书群机器人的模板。有人在群里 @ 它，或者私聊它，它就用你电脑上的 Cursor 来回答。
+这是一个跑在你自己电脑上的飞书群机器人模板。有人在群里 @ 它，或者私聊它，它就用你这台电脑上的 Cursor（或你自己的 OpenAI 兼容模型账号）来回答。
 
-它能看本群最近的聊天，读分享给它的文档、日历和多维表格，也能看图片和文件。
-
-要新建文档、建日程或往表格加记录时，必须由指定的人在 5 分钟内回复一个 6 位数，它才会动手。
+它能看本群最近的聊天，读分享给它的文档、日历和多维表格，也能看图片和文件。要新建文档、建日程或往表格加记录时，必须由指定的人在限定时间内回复一个 6 位确认码，它才会动手。
 
 每个群可以记自己的事：说「记一下」就记下，说「/记忆」就查看，说「/忘记」就删掉。
 
-默认用这台电脑上的 Cursor（模型名默认 `grok-4.7-high-fast`，额度算 `cursor-agent login` 的那个账号）。也可以换成你自己的模型账号（DeepSeek、通义千问、Kimi、智谱、xAI、OpenAI，或本机 Ollama）。密钥放在环境变量里，不写进配置。见 [docs/模型接口.md](docs/模型接口.md)。
+仓库里的配置都是占位符。App Secret、填好的群编号和文档编号、客户名名单、聊天记忆和知识库原文都不应该提交。
 
-## 它能做什么
+## English
+
+A template for a Feishu (Lark) group bot that runs on your own computer. It answers @mentions and allow-listed private chats using Cursor, or any OpenAI-compatible model whose API key stays in an environment variable. It can read recent chat, docs, calendars, and Bitable, and it writes only after a one-time confirmation code. Configuration in this repository uses placeholders. Do not commit App Secrets, filled agent configs, customer-name lists, memory, logs, or real knowledge-base files. Apache-2.0.
+
+## 架构
+
+一条消息从飞书进来，先过门卫，再拼上下文，然后交给模型。模型若要读飞书，走只读工具；若要改飞书，先发确认码。回答出去之前再打一次码。
+
+```mermaid
+flowchart LR
+  feishu["飞书群 @ / 私聊"] --> lark["lark-cli 长连接"]
+  lark --> guard["门卫：去重、白名单、限流、脱敏"]
+  guard --> pack["拼装：人设、群记忆、技能目录、知识库"]
+  pack --> model["Cursor 或 OpenAI 兼容模型"]
+  model --> tools["只读工具"]
+  model --> confirm["写入提案 + 6 位确认码"]
+  tools --> model
+  confirm --> feishu
+  model --> out["出口脱敏后回复"]
+  out --> feishu
+  pack --- store["memory / kb / state.db"]
+```
+
+完整分层图和设计说明：
+
+- [docs/架构.md](docs/架构.md)
+- [docs/arch-full.mmd](docs/arch-full.mmd)
+- [docs/memory-flow.mmd](docs/memory-flow.mmd)
+
+## 功能
 
 - 只在被 @ 或被允许的私聊里回答，不主动发消息。
 - 同一个话题接着聊；发「新话题」就清空这几轮上下文。
-- 长期记忆按群分开，白名单的人才能记和删，删除是真删。
+- 长期记忆按群分开。白名单里的人才能记和删，删除是真删。
 - 进度卡片：先告诉你正在处理（默认关着，配置里打开）。
-- 客户名按你的名单打成「某客户」；手机号、证件号、邮箱、密钥和电脑路径自动隐藏。
+- 客户名按你的名单打成「某客户」。手机号、证件号、邮箱、密钥样子的字符串和电脑路径自动隐藏。
 - 话题红线默认不设。要限制什么，写在自己的配置里。
-- 同一个应用只跑一个进程；看门狗发现卡住会在本机重启，不往群里说话。
-- 知识库可以定时收进来，先放待审区，你点头才换上。
-- 技能（默认关着）：提示词里只放一行目录。模型要用时再读那份步骤。打开之后，问题里的词如果对上技能的触发词，会把那份步骤直接放进这一题。见 [docs/技能.md](docs/技能.md)。
-- 常驻模式（默认关着）：`agent.mode` 写成 `acp` 后，Cursor 只启动一次。不改的话仍是每题一个进程。见 [docs/常驻模式.md](docs/常驻模式.md)。只对 Cursor 这一路有用。
-- 模型可以换成你自己的账号：配置里写 `model_provider` 为 `openai_compat`，密钥放在环境变量。没写这一项时，仍是 Cursor。见 [docs/模型接口.md](docs/模型接口.md)。
+- 同一个应用只跑一个进程。看门狗发现卡住会在本机重启，不往群里说话。
+- 知识库可以定时收进来，先放待审区，你确认后才换上。
+- 技能默认关着。打开后，提示词里只放一行目录，命中触发词才放入步骤。见 [docs/技能.md](docs/技能.md)。
+- 常驻模式默认关着。`agent.mode` 写成 `acp` 后，Cursor 只启动一次。见 [docs/常驻模式.md](docs/常驻模式.md)。
+- 模型可以换成你自己的账号：`model_provider` 写成 `openai_compat`，密钥放在环境变量。见 [docs/模型接口.md](docs/模型接口.md)。
 
-## 在自己电脑上先检查
+## 快速开始
 
-需要 Windows 和 Python 3.12。不需要先装别的 Python 包，也不需要联网：
+需要 Windows 和 Python 3.12 才能真正连上飞书。离线测试在其他系统上也可以跑，不需要先装别的 Python 包，也不需要联网。看 PDF 附件时才需要另外安装 `pypdf`。
 
 ```text
 python tests/run_tests.py
 ```
 
-一共 139 项，全部通过就可以。看 PDF 附件时才需要另外安装 `pypdf`。
+一共 147 项，全部通过就可以。
 
-从零开始：看 [docs/新建智能体.md](docs/新建智能体.md)。
+从零接到飞书：看 [docs/新建智能体.md](docs/新建智能体.md)。顺序是创建企业自建应用、申请权限、在你自己的电脑上初始化 lark-cli、复制配置、启动。
 
-已经有一个机器人、想换成这套（例如「小景」）：看 [docs/升级已有智能体.md](docs/升级已有智能体.md)。
+已经有一个机器人、想换成这套（文档里的例子叫「小景」）：看 [docs/升级已有智能体.md](docs/升级已有智能体.md)。
 
-配置每一项的意思：[agents/CONFIG.md](agents/CONFIG.md)。
+最小配置步骤：
+
+1. 复制 `agents/example.json`，改成你自己的文件名。这个文件已被 `.gitignore` 排除，不会被提交。
+2. 把所有 `REPLACE_` 换成你自己的编号。不要在里面写 App Secret。
+3. 复制 `redact.example.txt` 为 `redact.txt`。没有要隐藏的客户名就先留空。
+4. 在仓库根目录运行 `scripts\start.ps1 -Config agents\<你的文件>.json`。
+
+## 配置说明
+
+每一项的意思在 [agents/CONFIG.md](agents/CONFIG.md)。常用的几项：
+
+| 键 | 填什么 |
+|---|---|
+| `profile` | 你在 lark-cli 里起的名字，不是密钥 |
+| `bot_open_id` | 机器人自己的编号 |
+| `chat_ids` | 允许回答的群 |
+| `write.allowed_users` | 谁可以发起写入和改群记忆 |
+| `write.resources` | 允许新建或追加的文件夹、文档、日历、多维表格 |
+| `model_provider` | `cursor`（默认）或 `openai_compat` |
+| `agent.api_key_env` | 只写环境变量的名字，不写密钥本身 |
+| `redact_file` | 客户名名单，默认 `redact.txt`，不要提交 |
+
+`REPLACE_` 开头的值必须换成你自己的，留着不能启动。
+
+## 安全说明
+
+写操作要同时满足三道锁：人在白名单里、资源在白名单里、动作属于允许的四类（新建文档、文末追加、建日程、加一条表格记录）。发起人还要在原来的会话里回复确认码。没有删除、没有覆盖全文、没有改权限。
+
+密钥放在你自己的电脑上：飞书 App Secret 只在 `lark-cli config init --app-secret-stdin` 时输入；模型密钥只进环境变量。
+
+不要提交这些文件：填好的 `agents/*.json`、`redact.txt`、`memory/`、`logs/`、`state/`、`state.db`、`kb/` 里的真实资料、`.env`。
+
+细节见 [SECURITY.md](SECURITY.md) 和 [docs/安全红线.md](docs/安全红线.md)。
 
 ## 文件
 
@@ -46,7 +105,7 @@ python tests/run_tests.py
 |---|---|
 | `agentbot.py` | 主程序：收消息、决定回不回、叫模型、回复 |
 | `providers/` | 模型接口。默认 `cursor`；`openai_compat` 接你自己的账号；`fake` 只给测试用 |
-| `acp_client.py` | 可选的常驻进程。默认不用，Cursor 且 `agent.mode` 为 `acp` 才启动 |
+| `acp_client.py` | 可选的常驻进程。默认不用 |
 | `tools.py` | 动飞书的手：只读，以及要确认码的写入 |
 | `guard.py` | 打码和话题红线 |
 | `memory.py` | 每个群一份长期记忆 |
@@ -58,12 +117,13 @@ python tests/run_tests.py
 | `agents/CONFIG.md` | 每一项怎么填 |
 | `redact.example.txt` | 空的客户名名单样子，复制成 `redact.txt` 再用 |
 | `scripts/` | Windows 上的启动、停止、看门狗、计划任务 |
-| `tests/run_tests.py` | 离线测试，139 项 |
-| `tests/fake_acp_agent.py` | 测试用的假常驻服务，不是真的 cursor-agent |
-| `docs/` | 给人看的说明和架构图。技能怎么写见 `docs/技能.md` |
+| `tests/run_tests.py` | 离线测试，147 项 |
+| `docs/` | 给人看的说明和架构图 |
 | `SKILL.md` | 给帮忙操作的 AI 助手看的步骤 |
 
-设计说明和两张流程图在 `docs/架构.md`、`docs/arch-full.mmd`、`docs/memory-flow.mmd`。
+## 参与贡献
+
+看 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ## 许可证
 

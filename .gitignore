@@ -1,19 +1,39 @@
+# Python
 __pycache__/
 *.pyc
+
+# 填了真实飞书编号的机器人配置。仓库里只保留占位示例。
+agents/*.json
+!agents/example.json
+
+# 运行时状态、日志、记忆、审计
 state/
+state.db
+*.db
 logs/
 tmp/
 audit/
 memory/
+bot.pid
+*.pid
+
+# 知识库实数据。只保留空目录说明。
+kb/*
+!kb/请把资料放在这里.md
 kb_inbox/
 kb_staging/
 kb_prev/
 kb_new/
 bundles/
+uploads/
+
+# 客户名名单和本地密钥。不要提交填好的文件。
 redact.txt
 redact_candidates.txt
-bot.pid
-*.pid
-uploads/
+.env
+.env.*
+!.env.example
+
+# 本地工具缓存
 agent-tools/
 **/.attach/
