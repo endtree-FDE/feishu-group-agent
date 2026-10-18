@@ -565,6 +565,8 @@ def build_prompt(q, sess, ctx, extra=""):
     if not limited:
         pre = TOOLS.skills.preload_block(q)  # 触发词预放：只放进会变的部分，紧挨在本次问题前面；关闭或没命中时是空的
         if pre: parts.append(pre)
+        recalled = GMEM.recall_block(ctx.get("chat_id"), q, ctx["chat_type"])  # 被截掉的事实：跟着这一题走，不进稳定前缀
+        if recalled: parts.append(recalled)
     parts.append("提问：" + q)
     return "\n\n".join(parts)
 
