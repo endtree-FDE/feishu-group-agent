@@ -115,10 +115,10 @@
 - **参考：** [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)、[语义化版本](https://semver.org/lang/zh-CN/)、[GitHub Releases](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)。
 - **验收：** 仓库根有 `CHANGELOG.md`，至少有一个未发布或已发布的版本节。有一处单一版本号（例如 `VERSION` 文件），和 changelog、Release 标签一致。缺这个文件时，程序行为与现在相同。Release 说明不包含密钥和真实编号。
 
-### 13. Issue 和 Pull Request 模板
+### 13. Issue 和 Pull Request 模板（本轮草稿）
 
 - **目标：** 报问题和提改动时，先写清复现步骤、影响和有没有碰到写入或脱敏。
-- **现状：** 没有 `.github/ISSUE_TEMPLATE/`，也没有拉取请求模板。
+- **现状：** `.github/ISSUE_TEMPLATE/` 有缺陷和功能两个模板，漏洞改走私人通报。`.github/PULL_REQUEST_TEMPLATE.md` 要求写配置兼容和对抗自检。
 - **参考：** [Issue 和 PR 模板](https://docs.github.com/en/communities/using-templates-to-encourage-useful-issues-and-pull-requests/about-issue-and-pull-request-templates)。
 - **验收：** 至少有一个 bug 模板、一个功能模板、一个 PR 模板。模板提醒不要粘贴 App Secret、群号、open_id、客户名。不因为加了模板而改变程序行为。
 

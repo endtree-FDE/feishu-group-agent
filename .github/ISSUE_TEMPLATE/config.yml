@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 安全漏洞 / Security
+    url: https://github.com/endtree-FDE/feishu-group-agent/security/advisories/new
+    about: 不要在公开 Issue 里贴 App Secret、群号、open_id 或客户名。请使用私人安全通报。
