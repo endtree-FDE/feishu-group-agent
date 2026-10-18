@@ -67,6 +67,45 @@ hint_cfg = {"bot_open_id": "REPLACE_BOT_OPEN_ID"}
 hint_errors, hint_lines = check_data(hint_cfg, "mine.json")
 check("非示例里的 REPLACE_ 只是提示", hint_errors == [] and hint_lines and "REPLACE_" in hint_lines[0])
 
+import subprocess
+WIZ = os.path.join(ROOT, "setup_agent.py")
+
+def wizard(args, outdir=None):
+    cmd = [sys.executable, WIZ] + args
+    if outdir:
+        cmd += ["--outdir", outdir]
+    proc = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
+    return proc.returncode, proc.stdout + proc.stderr
+
+code, out = wizard(["--name", "drydeepseek", "--provider", "deepseek", "--dry-run"])
+check("向导干跑不写文件", code == 0 and not os.path.exists(os.path.join(ROOT, "agents", "drydeepseek.json")))
+check("向导干跑写出预设模型名和计划任务", "deepseek-flash" in out and "grok-4.7-high-fast" not in out and "register-tasks.ps1" in out and "start.ps1" in out and "没有写入" in out)
+
+code, out = wizard(["--name", "drycursor"])
+check("不加 --write 也是干跑", code == 0 and "grok-4.7-high-fast" in out and "没有写入" in out and not os.path.exists(os.path.join(ROOT, "agents", "drycursor.json")))
+
+with tempfile.TemporaryDirectory() as td:
+    code, out = wizard(["--name", "box", "--provider", "deepseek", "--write"], td)
+    dest = os.path.join(td, "box.json")
+    body = open(dest, encoding="utf-8").read() if code == 0 else ""
+    check("向导 --write 只写新文件", code == 0 and os.path.isfile(dest) and '"model_provider": "deepseek"' in body and "deepseek-flash" in body and "sk-" not in body)
+    first = body
+    code2, out2 = wizard(["--name", "box", "--provider", "cursor", "--write"], td)
+    check("已有文件不覆盖", code2 == 1 and open(dest, encoding="utf-8").read() == first and "没有覆盖" in out2)
+    code3, out3 = wizard(["--name", "../evil", "--provider", "cursor", "--write"], td)
+    check("名字不能跳出目录", code3 == 2 and not os.path.exists(os.path.join(td, "..", "evil.json")))
+    code4, _ = wizard(["--api-key", "nope", "--name", "box2", "--write"], td)
+    check("拒绝 --api-key", code4 == 2 and not os.path.exists(os.path.join(td, "box2.json")))
+    code5, out5 = wizard(["--name", "custom", "--provider", "openai_compat", "--base-url", "https://example.com/v1", "--model", "m", "--api-key-env", "UNIT_OPENAI_KEY", "--write"], td)
+    custom = open(os.path.join(td, "custom.json"), encoding="utf-8").read()
+    check("自填兼容接口写入变量名", code5 == 0 and "UNIT_OPENAI_KEY" in custom and "grok-4.7-high-fast" not in custom)
+    planted = "sk-" + "planted"
+    code6, out6 = wizard(["--name", "leak", "--provider", "openai_compat", "--base-url", "https://example.com/v1?api_key=abc", "--model", "m", "--api-key-env", planted, "--write"], td)
+    check("向导拒绝夹带密钥且不回显", code6 == 2 and not os.path.exists(os.path.join(td, "leak.json")) and planted not in out6 and "api_key=abc" not in out6)
+
+code, out = wizard(["--name", "both", "--dry-run", "--write"])
+check("干跑和写入不能一起用", code == 2 and "不能一起用" in out and not os.path.exists(os.path.join(ROOT, "agents", "both.json")))
+
 if failures:
     print("%d failed" % len(failures))
     sys.exit(1)

@@ -192,6 +192,14 @@
 
 配置文件里没有账号、没有密码、没有密钥。`api_key_env` 只是变量名。Cursor 的额度算在运行 `cursor-agent login` 的那个人头上。`openai_compat` 的额度算在那个环境变量对应的账号上。
 
+从示例生成一份新配置，并看计划任务命令（默认不写文件）：
+
+```text
+python setup_agent.py --name demo --provider deepseek --dry-run
+```
+
+`--write` 只在 `agents/<名字>.json` 还不存在时创建。不要用 `--api-key`。
+
 只想先看 JSON 写得对不对、有没有把密钥写进文件，可以不连飞书：
 
 ```text
