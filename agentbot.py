@@ -12,7 +12,7 @@ import json, os, re, subprocess, sys, time, logging, collections, threading, sql
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import guard, memory, providers
 from providers.base import PartialText
-from tools import Tools, ToolError, TOOL_DOC, READ_TOOLS, WRITE_TOOLS, run_capture, parse_cli_json, clip_body, office_text
+from tools import Tools, ToolError, TOOL_DOC, MEMORY_TOOL_DOC, READ_TOOLS, WRITE_TOOLS, run_capture, parse_cli_json, clip_body, office_text, message_text
 
 CFG_PATH = sys.argv[1]; ARGS = sys.argv[2:]
 def _opt(name):
@@ -87,6 +87,7 @@ with DBL:
     DB.execute("create table if not exists turns(sess text, ts real, role text, text text)")
     DB.execute("create index if not exists turns_sess on turns(sess, ts)")
     DB.execute("create table if not exists chats(chat_id text primary key, name text, status text, source text, inviter text, ts real, updated real)")
+    DB.execute("create table if not exists threads(root text primary key, chat_id text, initiator text, ts real)")
     _seen_cols = {r[1] for r in DB.execute("pragma table_info(seen)")}
     # 旧库只有 mid/ts，那些行视为已经答过，避免升级后把历史消息再答一遍。
     if "status" not in _seen_cols: DB.execute("alter table seen add column status text default 'answered'")
@@ -173,6 +174,66 @@ def forget(sess):
     with DBL: DB.execute("delete from turns where sess=?", (sess,)); DB.commit()
     try: get_provider().drop(sess)
     except Exception as e: log.warning("acp drop %s: %s", sess, e)
+def _refresh_memory(chat_id):
+    """记忆落盘后，把这个群已经开着的话题换成新档案。新话题本来就会读到新文件。"""
+    try:
+        block = GMEM.prompt_block(chat_id, "group")
+        fn = getattr(get_provider(), "refresh_memory", None)
+        if fn: fn(chat_id, block)
+    except Exception as e: log.warning("memory refresh %s: %s", chat_id, e)
+def _memory_hook(text, ctx):
+    return GMEM.remember_text(ctx.get("chat_id"), ctx.get("user"), text, ctx.get("message_id"))
+GMEM.on_changed = _refresh_memory
+TOOLS.memory_enabled = GMEM.enabled
+TOOLS.memory_hook = _memory_hook
+def _bot_answered(sess):
+    with DBL:
+        row = DB.execute("select 1 from turns where sess=? and role=? limit 1", (sess, "bot")).fetchone()
+    return bool(row)
+def _note_thread(ev, uid):
+    root = ev.get("thread_id") or ev.get("root_id") or ev.get("message_id")
+    chat = ev.get("chat_id") or ""
+    if not root or not chat: return
+    with DBL:
+        row = DB.execute("select initiator from threads where root=?", (str(root)[:120],)).fetchone()
+        if row: return
+        DB.execute("insert or ignore into threads(root, chat_id, initiator, ts) values(?,?,?,?)",
+                   (str(root)[:120], str(chat)[:80], str(uid)[:80], time.time()))
+        DB.commit()
+def _thread_initiator(root):
+    with DBL:
+        row = DB.execute("select initiator from threads where root=?", (str(root)[:120],)).fetchone()
+    return row[0] if row else ""
+def _follow_cfg():
+    c = CFG.get("thread_followup")
+    if not isinstance(c, dict): return {"enabled": False, "who": "initiator_or_whitelist"}
+    who = str(c.get("who") or "initiator_or_whitelist").strip()
+    if who not in ("initiator", "whitelist", "initiator_or_whitelist", "anyone"): who = "initiator_or_whitelist"
+    return {"enabled": bool(c.get("enabled", False)), "who": who}
+def _thread_followup_ok(ev, uid):
+    """话题里机器人已经答过，发起人或白名单可以不 @ 接着问。没写这项时关闭。"""
+    fc = _follow_cfg()
+    if not fc["enabled"] or (ev.get("chat_type") or "group") == "p2p": return False
+    root = ev.get("thread_id") or ev.get("root_id")
+    if not root or not _bot_answered(session_key(ev)): return False
+    who = fc["who"]
+    if who == "anyone": return True
+    if who == "whitelist": return is_admin(uid)
+    if who == "initiator": return uid == _thread_initiator(root)
+    return uid == _thread_initiator(root) or is_admin(uid)
+_OWN_CONTEXT = ("image", "file", "post", "media", "merge_forward", "interactive", "card")
+def _context_targets(ev, sess, mtype, mid):
+    """自己这条若带图片或转发就取；引用别人的也取。话题里接着问纯文字、且父消息就是话题根时不再重复取。"""
+    parent = str(ev.get("parent_id") or "")
+    reply_to = str(ev.get("reply_to") or "")
+    root = str(ev.get("thread_id") or ev.get("root_id") or "")
+    out = []
+    if mtype in _OWN_CONTEXT: out.append(mid)
+    quote = reply_to or parent
+    if quote and quote != mid and quote not in out:
+        skip = (not reply_to) and parent and root and parent == root and mtype == "text" and _bot_answered(sess)
+        if not skip: out.append(quote)
+    return out
 
 # ---------- 哪些群可以回答 ----------
 # chat_ids 写了非空列表：只回答这些群，和以前一样（即使同时开了 auto_join 也忽略它）。
@@ -461,7 +522,10 @@ def build_prompt(q, sess, ctx, extra=""):
     # 放在稳定前缀里：同一话题两次提问逐字相同，也不进预放正文的字数预算。
     parts.append(_UNTRUSTED_NOTE)
     tools_on = [n for n in READ_TOOLS | WRITE_TOOLS if TOOLS.enabled(n)]
-    if not limited and FEAT.get("tools") and tools_on: parts.append(TOOL_DOC + "\n（当前启用：%s）" % "、".join(sorted(tools_on)))
+    if not limited and FEAT.get("tools") and tools_on:
+        doc = TOOL_DOC + "\n（当前启用：%s）" % "、".join(sorted(tools_on))
+        if GMEM.enabled: doc += "\n" + MEMORY_TOOL_DOC
+        parts.append(doc)
     if not limited:
         sk = TOOLS.skills.prompt_block()  # 技能目录：工具说明之后、群档案之前；关闭时是空的，什么都不加
         if sk: parts.append(sk)
@@ -501,6 +565,10 @@ def _run_tool(name, args, ctx, on_stage):
     if ctx.get("limited"):
         return "未在私聊名单里的人不能使用飞书工具、技能或写入。", True
     if on_stage and name in TOOL_LABEL: on_stage("正在查%s…" % TOOL_LABEL[name])
+    if name == "memory_propose":
+        if on_stage: on_stage("正在准备记忆确认…")
+        try: return TOOLS.propose_memory(args, ctx), True
+        except ToolError as e: return e.user_msg, True
     if name in WRITE_TOOLS:
         try: return TOOLS.propose_write(name, args, ctx), True
         except ToolError as e: return e.user_msg, True
@@ -557,12 +625,19 @@ def _att_chars():
     if raw is None: return body_max_chars()
     try: return int(raw)
     except (TypeError, ValueError): return body_max_chars()
-def attachment_context(msg_id, ctx):
-    """返回 (extra_prompt, cleanup_fn)；无权限/未启用时抛 ToolError"""
-    d, files, mtype = TOOLS.fetch_attachments(msg_id, ctx, TMP)
+def attachment_context(msg_id, ctx, label=""):
+    """返回 (extra_prompt, cleanup_fn)；无权限/未启用时抛 ToolError。label 用来标出引用或本条。"""
+    d, files, mtype, msg = TOOLS.fetch_attachments(msg_id, ctx, TMP)
     lim = int(CFG.get("tools", {}).get("attachment", {}).get("max_mb", 20)) * 1024 * 1024
     chars = _att_chars()
     parts, img_dir = [], None
+    plain = message_text(msg)
+    mt = str(mtype or "").lower()
+    if plain and mt not in ("file", "image", "media"):
+        parts.append("%s：\n%s" % (label or "消息", clip_body(plain, chars)))
+    if mt in ("merge_forward", "merge_forward_msg"):
+        try: parts.append(TOOLS.expand_merge(msg_id, ctx))
+        except ToolError as e: parts.append("（合并转发未能展开：%s）" % e.user_msg)
     for f in files[:5]:
         ext = os.path.splitext(f)[1].lower(); name = os.path.basename(f)
         if os.path.getsize(f) > lim: parts.append("附件 %s 太大，已跳过。" % name); continue
@@ -582,8 +657,8 @@ def attachment_context(msg_id, ctx):
             elif not txt:
                 parts.append("附件《%s》没有提取到文字。" % name)
             else:
-                label = {"docx": "Word", "pptx": "PPT", "xlsx": "Excel"}.get(kind, "Office")
-                parts.append("附件《%s》（%s 文本）：\n%s" % (name, label, clip_body(txt, chars)))
+                kind_zh = {"docx": "Word", "pptx": "PPT", "xlsx": "Excel"}.get(kind, "Office")
+                parts.append("附件《%s》（%s 文本）：\n%s" % (name, kind_zh, clip_body(txt, chars)))
         elif ext in OFFICE_OLD:
             parts.append("附件《%s》是旧版 Office 格式，请另存为 .docx、.pptx 或 .xlsx 后再发。" % name)
         elif ext in IMG_EXT and FEAT.get("vision", True):
@@ -593,8 +668,29 @@ def attachment_context(msg_id, ctx):
     def cleanup():
         for p in (d, img_dir):
             if p: shutil.rmtree(p, ignore_errors=True)
-    if not files:
-        return ("（附件没有取到内容。）" if mtype in ("image", "file", "media") else ""), cleanup
+    if not parts and not files:
+        return ("（附件没有取到内容。）" if mt in ("image", "file", "media") else ""), cleanup
+    if not parts and mt in ("image", "file", "media"):
+        return "（附件没有取到内容。）", cleanup
+    return "\n\n".join(p for p in parts if p), cleanup
+
+def _load_context(targets, ctx, mid):
+    """按顺序取几条消息。中途失败时先清掉已经下载的临时文件。"""
+    parts, cleanups = [], []
+    try:
+        for src in targets:
+            text, cleanup = attachment_context(src, ctx, label=("这条消息" if src == mid else "被引用的消息"))
+            if cleanup: cleanups.append(cleanup)
+            if text: parts.append(text)
+    except Exception:
+        for c in cleanups:
+            try: c()
+            except Exception: pass
+        raise
+    def cleanup():
+        for c in cleanups:
+            try: c()
+            except Exception: pass
     return "\n\n".join(parts), cleanup
 
 # ---------- 回复 ----------
@@ -878,7 +974,7 @@ def handle(ev):
         if not allow and not pc.get("open_to_all", False): allow = list((CFG.get("write", {}).get("allowed_users") or {}).keys())
         if allow and uid not in allow: return
     else:
-        if not is_for_me(ev): return
+        if not is_for_me(ev) and not _thread_followup_ok(ev, uid): return
         gate = group_gate(ev.get("chat_id"), uid, clean_q(ev.get("content") or ""))
         log.info("chat gate %s %s -> %s", ev.get("chat_id"), uid, gate)
         if gate == "silent":
@@ -912,6 +1008,8 @@ def _handle_claimed(ev, mid, ctype, uid):
     sess = session_key(ev); mtype = ev.get("message_type") or "text"
     ctx = {"user": uid, "chat_id": ev.get("chat_id"), "chat_type": ctype, "message_id": mid, "limited": p2p_limited(uid, ctype)}
     q = clean_q(ev.get("content") or "")
+    ctx["question"] = q
+    if ctype != "p2p": _note_thread(ev, uid)
     log.info("Q %s %s/%s sess=%s from %s: %s", mid, ctype, mtype, sess, uid, guard.redact(q, REDACT_NAMES)[:200])
     # 命令
     m = CONFIRM_RX.match(q)
@@ -928,10 +1026,11 @@ def _handle_claimed(ev, mid, ctype, uid):
     ok, why = rate_ok(uid)
     if not ok:
         if why == "hour": reply(mid, CFG["texts"]["busy"])
+        elif why == "user": reply(mid, (CFG.get("texts") or {}).get("wait") or "请稍等一下，我处理完上一条就回复你。")
         return
-    # 附件：私聊直接发的图片/文件，或 @我 时回复/引用了一条图片/文件消息
-    att_src = mid if mtype in ("image", "file", "post", "media") and ctype == "p2p" else (ev.get("reply_to") or ev.get("parent_id"))
-    if not q and mtype in ("image", "file", "media"): q = "请看我发的附件，概括它的内容。"
+    # 本条若是图片、富文本或转发，取它自己；回复或引用了别的消息时，把那段原文也带上。
+    targets = _context_targets(ev, sess, mtype, mid)
+    if not q and mtype in ("image", "file", "media", "post", "merge_forward"): q = "请看我发的内容，概括要点。"
     if not q: reply(mid, CFG["texts"]["empty"]); return
     with _AL:
         full = _waiting >= QUEUE_MAX
@@ -947,8 +1046,8 @@ def _handle_claimed(ev, mid, ctype, uid):
         with _AL: _waiting -= 1; _active += 1; _peak = max(_peak, _active); act = _active
         log.info("agent start %s active=%d peak=%d", mid, act, _peak); t0 = time.time(); prog.set_stage("正在思考…"); q_model = ""
         try:
-            if att_src and FEAT.get("attachments") and (mtype != "text" or ev.get("reply_to") or ev.get("parent_id")):
-                try: extra, cleanup = attachment_context(att_src, ctx)
+            if targets and FEAT.get("attachments"):
+                try: extra, cleanup = _load_context(targets, ctx, mid)
                 except ToolError as e:
                     log.info("attachment degraded: %s %s", e.user_msg, e.detail[:200])
                     if mtype != "text": extra = "（附件读取失败：%s。请如实告诉提问者。）" % e.user_msg

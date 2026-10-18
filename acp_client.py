@@ -975,6 +975,16 @@ class Pool:
             with self.state_lock:
                 self._restarting = False
 
+    def refresh_profiles(self, chat_id, block):
+        """这个群的档案变了：已经开着的话题下次提问用新快照，不关掉会话。"""
+        if not chat_id: return
+        prefix = "g:%s:" % chat_id
+        with self.state_lock:
+            for key, sess in self.sessions.items():
+                if str(key).startswith(prefix):
+                    sess.snapshot = block or ""
+                    self.log.info("acp snapshot refreshed %s", key)
+
     def drop(self, key):
         with self.state_lock:
             had = self.sessions.pop(key, None)

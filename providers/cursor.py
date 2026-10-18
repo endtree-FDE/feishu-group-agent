@@ -155,6 +155,10 @@ class CursorProvider(Provider):
         if self._pool is not None:
             self._pool.drop(sess)
 
+    def refresh_memory(self, chat_id, block):
+        if self._pool is not None:
+            self._pool.refresh_profiles(chat_id, block)
+
     def close(self):
         if self._pool is not None:
             self._pool.close()

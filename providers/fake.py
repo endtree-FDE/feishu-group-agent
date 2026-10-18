@@ -32,6 +32,9 @@ class FakeProvider(Provider):
             return "[fake] 未照搬"
         return "[fake] " + prompt.rsplit("提问：", 1)[-1][:200]
 
+    def refresh_memory(self, chat_id, block):
+        self.log.info("memory snapshot refreshed %s", chat_id)
+
     def check_items(self):
         return [("fake", True, "测试模式，不连接模型")]
 

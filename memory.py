@@ -63,6 +63,7 @@ class GroupMemory:
         self.writers = dict((cfg.get("write") or {}).get("allowed_users") or {})
         self.mem_rules = guard.policy_rules(cfg, "memory")
         self._cache = {}; self._lock = threading.RLock(); self._pending = {}
+        self.on_changed = None  # 落盘后通知（刷新已打开话题里的档案快照）
 
     # ---------- 路径 ----------
     def gdir(self, chat_id):
@@ -172,6 +173,10 @@ class GroupMemory:
             os.replace(gp + ".tmp", gp)
         elif os.path.isfile(gp): os.remove(gp)
         with self._lock: self._cache.pop(chat_id, None)
+        cb = self.on_changed
+        if cb:
+            try: cb(chat_id)
+            except Exception: pass
 
     def _next_id(self, chat_id, facts):
         d = self.gdir(chat_id); mp = os.path.join(d, "meta.json")
@@ -188,6 +193,14 @@ class GroupMemory:
         with open(os.path.join(d, "memory-audit.jsonl"), "a", encoding="utf-8") as f: f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
     def _can_write(self, user): return user in self.writers
+
+    def remember_text(self, chat, user, text, mid=None):
+        """确认之后写入。调用方已经核对过白名单和确认码。"""
+        if not self.enabled: return "这个机器人还没开启长期记忆。"
+        if not self.gdir(chat): return "这个会话不支持记忆。"
+        if not self._can_write(user): return "只有写入白名单里的成员能修改群记忆。需要记的话，请白名单成员来发。"
+        with self._lock:
+            return self._remember(chat, user, (text or "").strip(), mid)
 
     def handle(self, q, ctx):
         """命令入口。是记忆命令就返回回复文字，否则返回 None（交给后面的正常问答）"""

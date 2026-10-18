@@ -1580,5 +1580,183 @@ if _old_code:
 o2 = run([ev("pw4", "确认 " + (_old_code or "000000"), sender_id="user_admin")], name="pw_exp")
 check("过期的确认码在新进程里无效", _old_code and "无效或已过期" in o2 and "docs +create" not in o2.split("reply pw4")[-1], o2)
 
+# ---------- 话题续问、引用、日程批量、记忆提议、稍等 ----------
+class _L:
+    def info(self, *a, **k): pass
+    def warning(self, *a, **k): pass
+    def debug(self, *a, **k): pass
+def _tl(c=None):
+    return _tools.Tools(json.loads(json.dumps(c or cfg)), T, lambda: ["lark"], _L(), dry=True)
+_sp = cfg["system_prompt"]
+check("人设写明联网搜索是自带能力，比赛和截止日期要先搜并给出链接",
+      "联网搜索" in _sp and "比赛" in _sp and "1 到 3" in _sp and "读写飞书只能通过下面列出的工具" in _sp and "自带的能力" in _sp, _sp)
+check("工具说明把联网搜索和飞书工具分开", "联网搜索和打开网页是你自带的能力" in _tools.TOOL_DOC and "file_" in _tools.TOOL_DOC)
+_c_cal = json.loads(json.dumps(cfg))
+for _k in ("calendar_update", "calendar_delete", "calendar_create_batch"): _c_cal["tools"].pop(_k, None)
+_tcal = _tl(_c_cal)
+check("旧配置没写改删批量时跟着建日程的开关",
+      _tcal.enabled("calendar_update") and _tcal.enabled("calendar_delete") and _tcal.enabled("calendar_create_batch"))
+_c_off = json.loads(json.dumps(_c_cal)); _c_off["tools"]["calendar_delete"] = {"enabled": False}
+_c_off["tools"]["calendar_create"]["enabled"] = False; _c_off["tools"].pop("calendar_update", None)
+_toff = _tl(_c_off)
+check("写了 enabled false 就关掉；建日程关掉时，没单独写的修改也关掉",
+      _toff.enabled("calendar_delete") is False and _toff.enabled("calendar_update") is False and _toff.enabled("calendar_create") is False)
+_argv, _sum, _steps = _tcal._build_write("calendar_update", {"event_id": "evt_1", "summary": "改期", "add_attendee_ids": ["ou_x"], "notify": True})
+check("改日程带 --notify=false，并且丢掉参会人参数",
+      "--notify=false" in _argv and _argv[:2] == ["calendar", "+update"] and not any("attendee" in str(x).lower() for x in _argv), _argv)
+_argv, _sum, _steps = _tcal._build_write("calendar_delete", {"event_id": "evt_1", "summary": "评审会"})
+check("删日程带 --notify=false，不带参会人",
+      "--notify=false" in _argv and _argv[:2] == ["calendar", "+delete"] and not any("attendee" in str(x).lower() for x in _argv), _argv)
+_evs = [{"summary": "评审会", "start": "2026-11-01T10:00:00+08:00", "end": "2026-11-01T11:00:00+08:00", "add_attendee_ids": ["ou_x"]},
+        {"summary": "路演", "start": "2026-11-02T10:00:00+08:00", "end": "2026-11-02T11:00:00+08:00"}]
+_argv, _sum, _steps = _tcal._build_write("calendar_create_batch", {"events": _evs, "notify_all": True})
+check("批量建日程一个说明里列出每一条，命令里不邀请人",
+      len(_steps) == 2 and "评审会" in _sum and "路演" in _sum and all(s["argv"][:2] == ["calendar", "+create"] and not any("attendee" in str(x).lower() for x in s["argv"]) for s in _steps), _sum)
+_seen_cmd = []
+def _cal_fake(argv):
+    _seen_cmd.append(list(argv))
+    if len(_seen_cmd) == 2: return {"ok": False, "error": {"message": "第二次失败"}}
+    return {"ok": True, "data": {}}
+_tcal.fake = _cal_fake
+_ctx_all = {"user": "user_admin", "chat_id": CH, "chat_type": "group", "question": "请 @全员 通知大家"}
+_prop = _tcal.propose_write("calendar_create_batch", {"events": _evs, "notify_all": True, "add_attendee_ids": ["ou_x"]}, _ctx_all)
+_cc = (_re.search(r"确认 (\d{6})", _prop) or [None, None])[1]
+_done = _tcal.confirm(_cc, _ctx_all) if _cc else ""
+check("批量确认按条执行，中途失败会说明完成了几步，没全部成功时不 @全员",
+      _cc and "已完成 1/2" in _done and 'user_id="all"' not in _done and len(_seen_cmd) == 2
+      and not any("attendee" in str(x).lower() for x in _seen_cmd[0]), _done + "\n" + _prop)
+_ctx_no = dict(_ctx_all, question="建两个日程")
+_seen_cmd.clear()
+_prop = _tcal.propose_write("calendar_create", {"summary": "内部会", "start": "2026-11-03T10:00:00+08:00", "end": "2026-11-03T11:00:00+08:00", "notify_all": True}, _ctx_no)
+_cc = (_re.search(r"确认 (\d{6})", _prop) or [None, None])[1]
+_done = _tcal.confirm(_cc, _ctx_no) if _cc else ""
+check("模型自己打开 notify_all 但对方没要求时，不 @全员",
+      _cc and "已完成" in _done and 'user_id="all"' not in _done, _done)
+def _hist_fake(argv):
+    return {"ok": True, "data": {"messages": [
+        {"create_time": "2026-10-16 19:00", "content": "无关", "sender": {"name": "甲"},
+         "thread_replies": [{"content": "我们在讨论 openjiuwen", "sender": {"name": "乙"}}]},
+        {"msg_type": "image", "content": "", "sender": {"name": "丙"}},
+    ]}}
+_th = _tl(); _th.fake = _hist_fake
+_hctx = {"chat_type": "group", "chat_id": CH, "user": "user_sender"}
+_ht = _th._history({"keyword": "OpenJiuwen"}, _hctx)
+_hall = _th._history({}, _hctx)
+check("群历史关键词不区分大小写，并带上话题回复", "openjiuwen" in _ht.lower() and "回复" in _ht and "丙" not in _ht, _ht)
+check("群历史给图片留占位", "[图片]" in _hall, _hall)
+_card = {"msg_type": "interactive", "content": json.dumps({"header": {"title": {"content": "卡片标题丙"}}, "elements": [{"tag": "div", "text": {"content": "卡片正文丙"}}]}, ensure_ascii=False)}
+check("卡片正文能抽成文字", "卡片标题丙" in _tools.message_text(_card) and "卡片正文丙" in _tools.message_text(_card))
+import acp_client as _acp
+_pool = _acp.Pool(lambda: ["python"], {}, T, _L())
+_s_demo = _acp._Sess("sid_demo", "以下是本群的长期档案\n旧事实")
+_pool.sessions["g:chat_demo:topic"] = _s_demo
+_pool.sessions["g:chat_other:topic"] = _acp._Sess("sid_other", "以下是本群的长期档案\n别的群")
+_pool.refresh_profiles("chat_demo", "以下是本群的长期档案\n新事实")
+_snap = _acp.apply_snapshot("规则\n\n以下是本群的长期档案\n旧事实\n\n提问：你好", _s_demo.snapshot)
+check("记忆变更后只刷新这个群已打开话题的档案快照",
+      "新事实" in _snap and "旧事实" not in _snap and "提问：你好" in _snap and _pool.sessions["g:chat_other:topic"].snapshot.endswith("别的群"), _snap)
+
+def _dump(events, name, cfg_path=None):
+    return run(events, name=name, cfg_path=cfg_path, extra_env={"AGENTBOT_FAKE_DUMP_PROMPT": "1"})
+o = _dump([ev("i13m1", "比赛什么时候截止")], "webprompt")
+_ps = prompts(o)
+check("提示词里写了先搜索比赛日期，记忆关着时不出现记忆提议工具",
+      _ps and "联网搜索" in _ps[0] and "比赛" in _ps[0] and "memory_propose" not in _ps[0], _ps[0][:800] if _ps else o)
+_mem_on = json.loads(json.dumps(cfg)); _mem_on["memory"]["enabled"] = True
+_mem_path = os.path.join(T, "memprop.json"); json.dump(_mem_on, open(_mem_path, "w", encoding="utf-8"), ensure_ascii=False)
+o = _dump([ev("web2", "你好")], "webmem", cfg_path=_mem_path)
+_ps = prompts(o)
+check("长期记忆打开后，提示词里有 memory_propose", _ps and "memory_propose" in _ps[0], _ps[0][-600:] if _ps else o)
+_off = json.loads(json.dumps(cfg)); _off.pop("thread_followup", None)
+_off_path = os.path.join(T, "nofollow.json"); json.dump(_off, open(_off_path, "w", encoding="utf-8"), ensure_ascii=False)
+o = run([ev("tfoff1", "先问"), ev("tfoff2", "接着", mentions=[], content="接着", root_id="tfoff1")], name="nofollow", cfg_path=_off_path)
+check("旧配置没写话题续问时，不 @ 仍然不回复", "reply tfoff1" in o and "reply tfoff2" not in o, o)
+_init = json.loads(json.dumps(cfg)); _init["thread_followup"] = {"enabled": True, "who": "initiator"}
+_init_path = os.path.join(T, "follow_init.json"); json.dump(_init, open(_init_path, "w", encoding="utf-8"), ensure_ascii=False)
+o = run([ev("tfi1", "先问", sender_id="user_sender"),
+         ev("tfi2", "管理员", sender_id="user_admin", mentions=[], content="管理员插话", root_id="tfi1")],
+        name="follow_init", cfg_path=_init_path)
+check("who=initiator 时白名单以外的人不能不 @ 接着问", "reply tfi1" in o and "reply tfi2" not in o, o)
+o = run([ev("tf1", "先问一句", sender_id="user_sender"),
+         ev("tf2", "接着问", sender_id="user_sender", mentions=[], content="接着问", root_id="tf1"),
+         ev("tf3", "别人插话", sender_id="user_other", mentions=[], content="别人插话", root_id="tf1"),
+         ev("tf4", "管理员补充", sender_id="user_admin", mentions=[], content="管理员补充", root_id="tf1")], name="follow")
+check("话题里发起人可以不 @ 接着问，外人不行，白名单可以",
+      "reply tf1" in o and "reply tf2" in o and "reply tf3" not in o and "reply tf4" in o, o)
+o = _dump([ev("qroot1", "根上的问题"),
+           ev("qfol1", "接着说", root_id="qroot1", parent_id="qroot1", mentions=[], content="接着说")], "qskip")
+check("已答过的话题里接着发文字，不再重复拉取话题根",
+      "reply qfol1" in o and "im +messages-mget" not in o, o)
+_gap = json.loads(json.dumps(cfg)); _gap["rate_limit"] = {"min_gap_per_user": 1000, "max_per_hour": 100}
+_gap_path = os.path.join(T, "gap.json"); json.dump(_gap, open(_gap_path, "w", encoding="utf-8"), ensure_ascii=False)
+o = run([ev("gap1", "第一问"), ev("gap2", "紧接着问")], name="gap", cfg_path=_gap_path)
+check("同一个人间隔太短时回复请稍等，并且不去调用模型",
+      "agent start gap1" in o and "请稍等" in o and "reply gap2" in o and "agent start gap2" not in o, o)
+_with_mget('{"text":"被引用的原文甲"}', "text")
+o = _dump([ev("qt1", "看这句", parent_id="qt_src", root_id="qt_root", reply_to="qt_src")], "quote")
+_ps = prompts(o)
+check("引用的文字会交给模型", _ps and "被引用的消息" in _ps[0] and "被引用的原文甲" in _ps[0], _ps[0] if _ps else o)
+json.dump(_saved_fake, open(FP, "w", encoding="utf-8"), ensure_ascii=False)
+_stage_file("fileroot", "file_demo.docx", src=_docx_p)
+_with_mget('{"file_key":"file_demo","file_name":"常见问题.docx"}')
+o = _dump([ev("fileq1", "这份讲什么", parent_id="fileroot", root_id="fileroot")], "fileq")
+_ps = prompts(o)
+check("第一次回复文件（文件就是话题根）仍会下载并把正文交给模型",
+      _ps and "im +messages-mget" in o and "常见问题.docx" in _ps[0] and "赛程常见问题正文" in _ps[0], _ps[0] if _ps else o)
+json.dump(_saved_fake, open(FP, "w", encoding="utf-8"), ensure_ascii=False)
+_stage_file("post1", "pic.png", data=b"\x89PNG\r\n\x1a\n")
+_with_mget(json.dumps({"title": "", "content": [[{"tag": "text", "text": "帖子正文乙"}, {"tag": "img", "image_key": "img_x"}]]}, ensure_ascii=False), "post")
+o = _dump([ev("post1", "看这条帖子", message_type="post")], "postmsg")
+_ps = prompts(o)
+check("帖子里的文字和图片会交给模型", _ps and "帖子正文乙" in _ps[0] and "图片" in _ps[0], _ps[0] if _ps else o)
+json.dump(_saved_fake, open(FP, "w", encoding="utf-8"), ensure_ascii=False)
+_mf = dict(_saved_fake)
+_mf["im +messages-mget"] = {"ok": True, "data": {"messages": [{"msg_type": "merge_forward", "content": "{}"}]}}
+_mf["api GET"] = {"ok": True, "data": {"items": [
+    {"msg_type": "text", "body": {"content": json.dumps({"text": "转发里的句子丙"}, ensure_ascii=False)}, "sender": {"name": "甲"}},
+    {"msg_type": "merge_forward", "body": {"content": json.dumps({"text": "内层"}, ensure_ascii=False)}, "sender": {"name": "乙"}},
+]}}
+json.dump(_mf, open(FP, "w", encoding="utf-8"), ensure_ascii=False)
+o = _dump([ev("mf1", "展开这个转发", message_type="merge_forward")], "merge")
+_ps = prompts(o)
+check("合并转发展开一层，内层不再请求",
+      _ps and "转发里的句子丙" in _ps[0] and "内层转发不再展开" in _ps[0] and o.count("[fake-lark] api GET") == 1, _ps[0] if _ps else o)
+json.dump(_saved_fake, open(FP, "w", encoding="utf-8"), ensure_ascii=False)
+_batch_q = '<<FAKE_TOOL>>{"tool":"calendar_create_batch","args":{"events":[{"summary":"评审会","start":"2026-11-01T10:00:00+08:00","end":"2026-11-01T11:00:00+08:00"},{"summary":"路演","start":"2026-11-02T10:00:00+08:00","end":"2026-11-02T11:00:00+08:00"}],"add_attendee_ids":["ou_x"]}}<<END>> 建两个日程'
+o = run([ev("cb1", _batch_q, sender_id="user_admin")], name="cal_batch")
+_cb = (_re.search(r"确认 (\d{6})", o) or [None, None])[1]
+_cb_reply = o[o.rfind("[dry-run] reply cb1: "):] if "[dry-run] reply cb1: " in o else ""
+check("批量建日程先列出每一条，还不执行，回复里不出现参会人",
+      _cb and "评审会" in _cb_reply and "路演" in _cb_reply and "calendar +create" not in o and "ou_x" not in _cb_reply, o)
+o2 = run([ev("cb2", "确认 " + (_cb or "000000"), sender_id="user_admin")], name="cal_batch_ok")
+check("一个确认码创建全部日程", _cb and o2.count("[fake-lark] calendar +create") == 2 and "已完成" in o2 and 'user_id="all"' not in o2, o2)
+_up_q = '<<FAKE_TOOL>>{"tool":"calendar_update","args":{"event_id":"evt_1","summary":"改期","add_attendee_ids":["ou_x"]}}<<END>> 改日程'
+o = run([ev("cu1", _up_q, sender_id="user_admin")], name="cal_up")
+_cu = (_re.search(r"确认 (\d{6})", o) or [None, None])[1]
+o2 = run([ev("cu2", "确认 " + (_cu or "000000"), sender_id="user_admin")], name="cal_up_ok")
+check("确认后才改日程", _cu and "[fake-lark] calendar +update" in o2 and "已完成" in o2 and "calendar +update" not in o, o2)
+_del_q = '<<FAKE_TOOL>>{"tool":"calendar_delete","args":{"event_id":"evt_1","summary":"评审会"}}<<END>> 删日程'
+o = run([ev("cd1", _del_q, sender_id="user_admin")], name="cal_del")
+_cd = (_re.search(r"确认 (\d{6})", o) or [None, None])[1]
+o2 = run([ev("cd2", "确认 " + (_cd or "000000"), sender_id="user_admin")], name="cal_del_ok")
+check("确认后才删日程", _cd and "[fake-lark] calendar +delete" in o2 and "已完成" in o2 and "calendar +delete" not in o, o2)
+_na_q = '<<FAKE_TOOL>>{"tool":"calendar_create","args":{"summary":"全员会","start":"2026-11-04T10:00:00+08:00","end":"2026-11-04T11:00:00+08:00","notify_all":true}}<<END>> 请@全员 建日程'
+o = run([ev("nall1", _na_q, sender_id="user_admin")], name="cal_na")
+_na = (_re.search(r"确认 (\d{6})", o) or [None, None])[1]
+o2 = run([ev("nall2", "确认 " + (_na or "000000"), sender_id="user_admin")], name="cal_na_ok")
+check("对方明确要求 @全员 时，确认成功的回复里才带上",
+      _na and '<at user_id="all">' in o2 and "calendar +create" in o2 and '<at user_id="all">' not in o, o2)
+_mp = '<<FAKE_TOOL>>{"tool":"memory_propose","args":{"text":"讨论会：改到周四下午"}}<<END>> 记住这个'
+o = run([ev("mp1", _mp, sender_id="user_sender")], name="mem_deny", cfg_path=_mem_path)
+check("不在白名单的人不能提议写入群记忆", "不在写入白名单" in o and "已记" not in o, o)
+o = run([ev("mp2", _mp, sender_id="user_admin")], name="mem_prop", cfg_path=_mem_path)
+_mc = (_re.search(r"确认 (\d{6})", o) or [None, None])[1]
+check("白名单提议记忆时先给确认码，还没落盘", _mc and "将要记入本群记忆" in o and "已记" not in o, o)
+o2 = run([ev("mp3", "确认 " + (_mc or "000000"), sender_id="user_admin")], name="mem_ok", cfg_path=_mem_path)
+_gmd = os.path.join(T, "memory", "groups", CH, "GROUP.md")
+_gtext = open(_gmd, encoding="utf-8").read() if os.path.isfile(_gmd) else ""
+check("确认后写入群记忆，并刷新已打开话题的档案快照",
+      _mc and "已记" in o2 and "周四" in _gtext and "memory snapshot refreshed" in o2, o2 + "\n" + _gtext)
+
 print("\n%d/%d passed" % (sum(r for _, r in results), len(results))); shutil.rmtree(T, ignore_errors=True)
 sys.exit(0 if all(r for _, r in results) else 1)

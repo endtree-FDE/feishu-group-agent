@@ -27,10 +27,14 @@ SCOPE_HINT = {
     "docs_search": "search:docs:read", "calendar_read": "calendar:calendar.event:read",
     "base_read": "base:record:read", "attachment": "im:message:readonly / im:resource",
     "docs_create": "docx:document:create", "docs_append": "docx:document:write_only",
-    "calendar_create": "calendar:calendar.event:create", "base_create": "base:record:create",
+    "calendar_create": "calendar:calendar.event:create", "calendar_create_batch": "calendar:calendar.event:create",
+    "calendar_update": "calendar:calendar.event:update", "calendar_delete": "calendar:calendar.event:delete",
+    "base_create": "base:record:create", "merge_forward": "im:message:readonly",
 }
 READ_TOOLS = {"history", "docs_read", "docs_search", "calendar_read", "base_read"}
-WRITE_TOOLS = {"docs_create", "docs_append", "calendar_create", "base_create"}
+WRITE_TOOLS = {"docs_create", "docs_append", "calendar_create", "calendar_create_batch", "calendar_update", "calendar_delete", "base_create"}
+_CAL_FOLLOW = {"calendar_create_batch", "calendar_update", "calendar_delete"}
+_NOTIFY_RX = re.compile(r"@\s*全员|@\s*所有人|通知全员|通知所有人|提醒全员|告知全员|艾特全员")
 # 正文超过这个长度时，保留开头、中段和结尾，方便分段概括。配置没写时用这个默认值。
 DEFAULT_BODY_CHARS = 20000
 _NOT_FOUND_CODES = {3380002, 3380003, 1770002, 1770003, 1254043, 1254044}
@@ -56,18 +60,25 @@ def apply_legacy_names(cfg):
     take((cfg.get("write") or {}).get("resources"), _LEGACY_RESOURCES, "write.resources")
     return hints
 
-TOOL_DOC = """可用工具（每次最多调用一个；需要时只输出一行：<<TOOL>>{"tool":"名称","args":{...}}，不要输出别的）：
-- history {"keyword":"可选关键词"}：读取本群最近 7 天消息（仅群聊可用）
+TOOL_DOC = """可用工具（飞书读写每次最多调用一个；需要时只输出一行：<<TOOL>>{"tool":"名称","args":{...}}，不要输出别的）：
+- history {"keyword":"可选关键词"}：读取本群最近几天的消息，包含话题里的回复（仅群聊可用）
 - docs_search {"query":"关键词"}：搜索已分享给机器人的飞书文档
 - docs_read {"doc":"云文档链接或 token","keyword":"可选"}：读取飞书文档内容。file_ 或 img_ 开头的是聊天附件，不是云文档，不要传给这个工具
 - calendar_read {"start":"ISO8601","end":"ISO8601"}：查看团队日历日程
 - base_read {"keyword":"可选"}：查询团队多维表格记录
 - docs_create {"title":"标题","markdown":"正文"}：在团队专用文件夹新建文档（需发起人确认）
 - docs_append {"doc":"文档 token","markdown":"追加内容"}：在白名单文档末尾追加（需确认）
-- calendar_create {"summary":"标题","start":"ISO8601","end":"ISO8601","description":"可选"}：在团队日历建日程（需确认）
+- calendar_create {"summary":"标题","start":"ISO8601","end":"ISO8601","description":"可选","notify_all":false}：在团队日历建一个日程（需确认，不邀请任何人）
+- calendar_create_batch {"events":[{"summary":"标题","start":"ISO8601","end":"ISO8601","description":"可选"}],"notify_all":false}：一次提议多个日程，一个确认码确认全部（需确认，不邀请任何人）
+- calendar_update {"event_id":"日程 id","summary":"可选","start":"可选","end":"可选","description":"可选","notify_all":false}：修改已有日程（需确认，不改参会人）
+- calendar_delete {"event_id":"日程 id","summary":"可选，用于确认时给人看","notify_all":false}：删除已有日程（需确认，不通知参会人）
 - base_create {"fields":{"字段名":"值"}}：在团队多维表格新增一条记录（需确认）
+上面这些只是飞书读写。联网搜索和打开网页是你自带的能力，不在这张表里，需要时直接用，不要拒绝。
+多个日程用 calendar_create_batch，仍然只输出一行。notify_all 只在对方明确说要 @全员 或通知所有人时才设为 true，不要自己写 at 标签，也不要邀请任何人。
 没有必要就不要调用工具，直接回答。
-重要：你处于只读模式，不能改本地文件，但飞书的新建/追加/建日程/加记录不需要你自己执行——只要输出上面那一行 <<TOOL>>，机器人会代为执行（写操作先让发起人回复确认码）。用户要求写飞书时，直接输出对应工具行，绝不要回答“切换到可编辑模式”或“无法创建”。"""
+重要：你处于只读模式，不能改本地文件，但飞书的新建/追加/建日程/改日程/删日程/加记录不需要你自己执行——只要输出上面那一行 <<TOOL>>，机器人会代为执行（写操作先让发起人回复确认码）。用户要求写飞书时，直接输出对应工具行，绝不要回答“切换到可编辑模式”或“无法创建”。"""
+MEMORY_TOOL_DOC = """还可以提议写入群记忆（需白名单发起人确认，仍只输出一行）：
+- memory_propose {"text":"主题：内容"}：用户明确说「记住」「以后都」这类偏好时使用。不要把没经确认的内容当成已经记住。"""
 
 class Tools:
     def __init__(self, cfg, base, lark_exe, log, dry=False):
@@ -83,7 +94,13 @@ class Tools:
         self.names = guard.load_names(os.path.join(base, cfg.get("redact_file", "redact.txt")))
 
     # ---------- 基础 ----------
-    def enabled(self, name): return bool(self.t.get(name, {}).get("enabled", False))
+    def enabled(self, name):
+        spec = self.t.get(name)
+        if isinstance(spec, dict) and "enabled" in spec: return bool(spec.get("enabled"))
+        # 旧配置只写了 calendar_create。改、删、批量跟着它开；写了 enabled 就以写的为准。
+        if name in _CAL_FOLLOW and name not in self.t:
+            return bool((self.t.get("calendar_create") or {}).get("enabled"))
+        return bool((spec or {}).get("enabled", False)) if isinstance(spec, dict) else False
     def audit(self, **kw):
         kw["ts"] = datetime.datetime.now().isoformat(timespec="seconds")
         for k in ("args", "summary", "detail", "err", "result"):
@@ -148,12 +165,13 @@ class Tools:
         j = self.lark("history", ["im", "+chat-messages-list", "--chat-id", ctx["chat_id"], "--start", start,
                                   "--page-size", "50", "--page-all", "--page-limit", str(self.t["history"].get("max_pages", 2)), "--no-reactions"])
         msgs = (j.get("data") or {}).get("messages") or []
-        kw = (a.get("keyword") or "").strip(); lines = []
+        kw = (a.get("keyword") or "").strip(); kw_l = kw.lower(); lines = []
         for m in msgs:
-            c = (m.get("content") or "").replace("\n", " ")
-            if kw and kw not in c: continue
-            s = m.get("sender") or {}
-            lines.append("%s %s：%s" % (m.get("create_time", ""), s.get("name") or s.get("sender_type", ""), c[:200]))
+            blob = _history_blob(m)
+            if kw_l and kw_l not in blob.lower(): continue
+            lines.append(_history_line(m))
+            for r in (m.get("thread_replies") or m.get("replies") or []):
+                if isinstance(r, dict): lines.append("  回复 " + _history_line(r))
         return "本群最近 %d 天消息（%d 条%s）：\n" % (days, len(lines), "，关键词=" + kw if kw else "") + "\n".join(lines[:150])
 
     def _docs_search(self, a, ctx):
@@ -204,10 +222,12 @@ class Tools:
         if ctx["user"] not in (self.w.get("allowed_users") or {}):
             self.audit(kind="write_denied", tool=name, user=ctx["user"], chat=ctx["chat_id"], args=_brief(args))
             raise ToolError("你不在写入白名单里，这个操作只能由管理员发起")
-        argv, summary = self._build_write(name, args or {})
+        raw = args or {}
+        argv, summary, steps = self._build_write(name, raw)
+        notify = _want_notify(name, raw, ctx.get("question") or "")
         code = "%06d" % random.SystemRandom().randint(0, 999999)
-        rec = {"tool": name, "argv": argv, "summary": summary, "user": ctx["user"],
-               "chat_id": ctx["chat_id"], "ts": time.time()}
+        rec = {"tool": name, "argv": argv, "steps": steps, "summary": summary, "user": ctx["user"],
+               "chat_id": ctx["chat_id"], "ts": time.time(), "notify_all": notify}
         with self.pl:
             self._gc()
             self.pending[code] = rec
@@ -216,29 +236,50 @@ class Tools:
         ttl = int(self.w.get("confirm_ttl_sec", 300)) // 60
         return "将要执行：%s\n请发起人在 %d 分钟内 @我 回复「确认 %s」执行，或「取消 %s」。" % (summary, ttl, code, code)
 
+    def propose_memory(self, args, ctx):
+        """模型提议记一条。落盘仍要白名单发起人用确认码点头。"""
+        if not getattr(self, "memory_enabled", False): raise ToolError("长期记忆还没开启")
+        if ctx.get("chat_type") == "p2p": raise ToolError("私聊里不能记进群记忆")
+        if ctx["user"] not in (self.w.get("allowed_users") or {}):
+            self.audit(kind="write_denied", tool="memory_propose", user=ctx["user"], chat=ctx["chat_id"], args=_brief(args))
+            raise ToolError("你不在写入白名单里，这个操作只能由管理员发起")
+        text = str((args or {}).get("text") or "").strip()
+        limit = _cfg_int((self.cfg.get("memory") or {}).get("max_fact_chars"), 300)
+        if len(text) < 2: raise ToolError("要记的内容太短")
+        if limit > 0 and len(text) > limit: raise ToolError("太长了，请控制在 %d 字以内" % limit)
+        code = "%06d" % random.SystemRandom().randint(0, 999999)
+        summary = "写入群记忆：%s" % text[:80]
+        rec = {"tool": "memory_propose", "argv": [], "steps": [], "summary": summary, "memory_text": text,
+               "user": ctx["user"], "chat_id": ctx["chat_id"], "ts": time.time(), "notify_all": False}
+        with self.pl:
+            self._gc()
+            self.pending[code] = rec
+            self._save_pending(code, rec)
+        self.audit(kind="write_proposed", tool="memory_propose", user=ctx["user"], chat=ctx["chat_id"], code=code, summary=summary)
+        ttl = int(self.w.get("confirm_ttl_sec", 300)) // 60
+        return "将要记入本群记忆：%s\n请发起人在 %d 分钟内 @我 回复「确认 %s」执行，或「取消 %s」。没确认之前，不要把它当成已经记住。" % (text[:200], ttl, code, code)
+
     def _build_write(self, name, a):
+        """返回 (首条命令, 给人看的说明, 步骤列表)。每一步是 {"tool","argv"}。旧的单步记录仍只靠 argv。"""
+        a = a or {}
         r = self.w.get("resources", {})
         if name == "docs_create":
             folder = r.get("folder_token")
             if not folder: raise ToolError("还没配置专用文档文件夹")
             title = str(a.get("title") or "未命名")[:80]
-            return (["docs", "+create", "--parent-token", folder, "--title", title, "--doc-format", "markdown",
-                     "--content", str(a.get("markdown") or "")[:20000]], "在专用文件夹新建文档《%s》" % title)
+            argv = ["docs", "+create", "--parent-token", folder, "--title", title, "--doc-format", "markdown",
+                    "--content", str(a.get("markdown") or "")[:20000]]
+            return argv, "在专用文件夹新建文档《%s》" % title, [{"tool": name, "argv": argv}]
         if name == "docs_append":
             doc = str(a.get("doc") or ""); allow = r.get("docs_append_tokens") or []
             if not allow: raise ToolError("还没配置允许追加的文档")
             tok = _allow_token(doc, allow)
             if not tok: raise ToolError("这份文档不在可写白名单里")
-            return (["docs", "+update", "--doc", tok, "--command", "append", "--doc-format", "markdown",
-                     "--content", str(a.get("markdown") or "")[:20000]], "在文档 %s 末尾追加 %d 字" % (tok, len(str(a.get("markdown") or ""))))
-        if name == "calendar_create":
-            cid = r.get("calendar_id")
-            if not cid: raise ToolError("还没配置团队专用日历")
-            for k in ("summary", "start", "end"):
-                if not a.get(k): raise ToolError("日程缺少 %s" % k)
-            argv = ["calendar", "+create", "--calendar-id", cid, "--summary", str(a["summary"])[:100], "--start", str(a["start"]), "--end", str(a["end"])]
-            if a.get("description"): argv += ["--description", str(a["description"])[:2000]]
-            return argv, "在团队日历创建日程「%s」%s ~ %s（不邀请任何人）" % (a["summary"], a["start"], a["end"])
+            argv = ["docs", "+update", "--doc", tok, "--command", "append", "--doc-format", "markdown",
+                    "--content", str(a.get("markdown") or "")[:20000]]
+            return argv, "在文档 %s 末尾追加 %d 字" % (tok, len(str(a.get("markdown") or ""))), [{"tool": name, "argv": argv}]
+        if name in ("calendar_create", "calendar_create_batch", "calendar_update", "calendar_delete"):
+            return self._build_calendar(name, _strip_people(a), r.get("calendar_id"))
         if name == "base_create":
             if not r.get("base_token") or not r.get("table_id"): raise ToolError("还没配置可写的多维表格")
             fields = a.get("fields") or {}
@@ -247,9 +288,57 @@ class Tools:
                 if isinstance(fields.get(sf), str): fields[sf] = [fields[sf]]
             tf = self.w.get("base_time_field", "时间")
             if tf and tf not in fields: fields[tf] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-            return (["base", "+record-batch-create", "--base-token", r["base_token"], "--table-id", r["table_id"],
-                     "--json", json.dumps({"create_records": [fields]}, ensure_ascii=False)], "在团队表格新增 1 条记录：%s" % json.dumps(fields, ensure_ascii=False)[:200])
+            argv = ["base", "+record-batch-create", "--base-token", r["base_token"], "--table-id", r["table_id"],
+                    "--json", json.dumps({"create_records": [fields]}, ensure_ascii=False)]
+            return argv, "在团队表格新增 1 条记录：%s" % json.dumps(fields, ensure_ascii=False)[:200], [{"tool": name, "argv": argv}]
         raise ToolError("未知写入工具")
+
+    def _build_calendar(self, name, a, cid):
+        if not cid: raise ToolError("还没配置团队专用日历")
+        if name == "calendar_create":
+            argv, line = self._one_event(a, cid)
+            return argv, "在团队日历创建日程%s（不邀请任何人）" % line, [{"tool": "calendar_create", "argv": argv}]
+        if name == "calendar_create_batch":
+            events = a.get("events") if isinstance(a.get("events"), list) else None
+            if not events: raise ToolError("没有要创建的日程")
+            cap = _cfg_int(self.w.get("max_batch"), 10)
+            if cap < 1: cap = 1
+            if len(events) > cap: raise ToolError("一次最多创建 %d 个日程" % cap)
+            steps, lines = [], []
+            for i, ev in enumerate(events, 1):
+                if not isinstance(ev, dict): raise ToolError("第 %d 个日程格式不对" % i)
+                argv, line = self._one_event(ev, cid)
+                steps.append({"tool": "calendar_create", "argv": argv})
+                lines.append("%d. %s" % (i, line))
+            summary = "在团队日历一次创建 %d 个日程（不邀请任何人）：\n%s" % (len(lines), "\n".join(lines))
+            return steps[0]["argv"], summary, steps
+        eid = _safe_id(a.get("event_id"), "日程编号")
+        if name == "calendar_delete":
+            label = str(a.get("summary") or eid)[:100]
+            argv = ["calendar", "+delete", "--calendar-id", cid, "--event-id", eid, "--notify=false"]
+            return argv, "删除团队日历上的日程「%s」（不通知参会人，不改其他日程）" % label, [{"tool": name, "argv": argv}]
+        argv = ["calendar", "+update", "--calendar-id", cid, "--event-id", eid, "--notify=false"]
+        changed = False
+        if a.get("summary"):
+            argv += ["--summary", str(a["summary"])[:100]]; changed = True
+        if a.get("description"):
+            argv += ["--description", str(a["description"])[:2000]]; changed = True
+        if a.get("start"):
+            argv += ["--start", str(a["start"])[:40]]; changed = True
+        if a.get("end"):
+            argv += ["--end", str(a["end"])[:40]]; changed = True
+        if not changed: raise ToolError("没有要修改的内容")
+        return argv, "修改团队日历上的日程 %s（不改参会人，不邀请任何人）" % eid, [{"tool": name, "argv": argv}]
+
+    def _one_event(self, a, cid):
+        a = _strip_people(a or {})
+        for k in ("summary", "start", "end"):
+            if not str(a.get(k) or "").strip(): raise ToolError("日程缺少 %s" % k)
+        argv = ["calendar", "+create", "--calendar-id", cid, "--summary", str(a["summary"])[:100],
+                "--start", str(a["start"])[:40], "--end", str(a["end"])[:40]]
+        if a.get("description"): argv += ["--description", str(a["description"])[:2000]]
+        if any("attendee" in str(x).lower() for x in argv): raise ToolError("不能邀请参会人")
+        return argv, "「%s」%s ~ %s" % (str(a["summary"])[:100], a["start"], a["end"])
 
     def _state_db(self):
         if self._db is not None: return self._db
@@ -297,16 +386,35 @@ class Tools:
             self.pending.pop(code); self._drop_pending(code)
         if cancel:
             self.audit(kind="write_cancelled", tool=p["tool"], user=ctx["user"], code=code); return "已取消。"
+        if p.get("tool") == "memory_propose":
+            hook = getattr(self, "memory_hook", None)
+            if not hook:
+                self.audit(kind="write_failed", tool="memory_propose", user=ctx["user"], code=code, err="no hook")
+                return "记忆功能还没接上。"
+            try: msg = hook(p.get("memory_text") or "", ctx)
+            except Exception as e:
+                self.audit(kind="write_failed", tool="memory_propose", user=ctx["user"], code=code, err=str(e)[:200])
+                return "执行失败：" + str(e)[:120]
+            kind = "write_done" if str(msg).startswith("已记") else "write_failed"
+            self.audit(kind=kind, tool="memory_propose", user=ctx["user"], chat=ctx["chat_id"], code=code, summary=p.get("summary"), result=_brief(msg))
+            return msg
+        steps = p.get("steps") or [{"tool": p.get("tool"), "argv": p.get("argv") or []}]
+        links, done = [], 0
         try:
-            j = self.lark(p["tool"], p["argv"])
-            self.audit(kind="write_done", tool=p["tool"], user=ctx["user"], chat=ctx["chat_id"], code=code, summary=p["summary"],
-                       result=_brief(j.get("data")))
-            d = j.get("data") or {}
-            link = d.get("url") or d.get("doc" + "_url") or (d.get("document") or {}).get("url") or d.get("app_link") or ""
-            return "已完成：%s%s" % (p["summary"], ("\n" + link) if link else "")
+            for st in steps:
+                j = self.lark(st["tool"], st["argv"]); done += 1
+                d = j.get("data") or {}
+                link = d.get("url") or d.get("doc" + "_url") or (d.get("document") or {}).get("url") or d.get("app_link") or ""
+                if link: links.append(link)
         except ToolError as e:
             self.audit(kind="write_failed", tool=p["tool"], user=ctx["user"], code=code, err=e.user_msg, detail=e.detail[:300])
+            if done: return "已完成 %d/%d 步。后面的失败了：%s" % (done, len(steps), e.user_msg)
             return "执行失败：" + e.user_msg
+        self.audit(kind="write_done", tool=p["tool"], user=ctx["user"], chat=ctx["chat_id"], code=code, summary=p["summary"],
+                   result=_brief({"n": done, "links": links[:5]}))
+        msg = "已完成：%s%s" % (p["summary"], ("\n" + "\n".join(links)) if links else "")
+        if p.get("notify_all"): msg = '<at user_id="all"></at>\n' + msg
+        return msg
 
     # ---------- 附件（图片/文件） ----------
     def fetch_attachments(self, message_id, ctx, tmp_root):
@@ -327,7 +435,137 @@ class Tools:
         msg = msgs[0] if msgs else {}
         files = apply_original_names(files, msg)
         self.audit(kind="read", tool="attachment", user=ctx["user"], chat=ctx["chat_id"], ok=True, n=len(files))
-        return d, files, (msg.get("msg_type") or msg.get("message_type") or "")
+        return d, files, (msg.get("msg_type") or msg.get("message_type") or ""), msg
+
+    def expand_merge(self, message_id, ctx):
+        """展开一条合并转发。只展开这一层；内层转发只留一句，不再请求。"""
+        mid = str(message_id or "")
+        if not re.match(r"^[A-Za-z0-9_]{1,80}$", mid): raise ToolError("消息编号不对")
+        j = self.lark("merge_forward", ["api", "GET", "/open-apis/im/v1/messages/" + mid])
+        items = _merge_items((j or {}).get("data") or {})
+        if not items: return "（这条合并转发的内容按平台权限看不到明细。）"
+        lines = []
+        for it in items[:30]:
+            it = _normalize_msg(it)
+            mt = str(it.get("msg_type") or it.get("message_type") or "").lower()
+            line = _history_line(it)
+            if mt in ("merge_forward", "merge_forward_msg"): line += "（内层转发不再展开）"
+            lines.append(line)
+        more = ("\n（还有 %d 条没有展开）" % (len(items) - 30)) if len(items) > 30 else ""
+        self.audit(kind="read", tool="merge_forward", user=ctx.get("user"), chat=ctx.get("chat_id"), ok=True, n=len(lines))
+        return "合并转发里的消息：\n" + "\n".join(lines) + more
+
+def _want_notify(name, args, question):
+    """只有日程类、模型开了开关、并且对方原话明确要求通知所有人，才在成功回复里 @全员。"""
+    if name not in ("calendar_create", "calendar_create_batch", "calendar_update", "calendar_delete"): return False
+    if not isinstance(args, dict) or not args.get("notify_all"): return False
+    return bool(_NOTIFY_RX.search(str(question or "")))
+
+def _strip_people(a):
+    """丢掉参会人、邀请和通知开关。日程命令不允许带这些人。"""
+    if not isinstance(a, dict): return {}
+    out = {}
+    for k, v in a.items():
+        lk = str(k).lower().replace("-", "_")
+        if "attendee" in lk or lk in ("notify", "notify_all"): continue
+        out[k] = v
+    if isinstance(a.get("events"), list):
+        out["events"] = [_strip_people(x) if isinstance(x, dict) else x for x in a["events"]]
+    return out
+
+def _safe_id(raw, label):
+    s = str(raw or "").strip()
+    if not re.match(r"^[A-Za-z0-9_][A-Za-z0-9_.:-]{0,119}$", s): raise ToolError(label + "不对")
+    return s
+
+def _normalize_msg(msg):
+    if not isinstance(msg, dict): return {}
+    if msg.get("content") is None and isinstance(msg.get("body"), dict):
+        msg = dict(msg); msg["content"] = msg["body"].get("content")
+    return msg
+
+def _merge_items(data):
+    if not isinstance(data, dict): return []
+    for k in ("items", "messages"):
+        v = data.get(k)
+        if isinstance(v, list): return [x for x in v if isinstance(x, dict)]
+    inner = data.get("data")
+    if isinstance(inner, dict) and inner is not data: return _merge_items(inner)
+    if data.get("body") or data.get("msg_type") or data.get("message_type") or data.get("content") is not None:
+        return [data]
+    return []
+
+_SKIP_WALK = {"text", "title", "content", "tag", "image_key", "file_key", "file_token", "style", "href", "user_id", "open_id"}
+
+def _collect_text(obj, out, depth=0):
+    if depth > 12 or obj is None: return
+    if isinstance(obj, str):
+        s = obj.strip()
+        if len(s) >= 2 and s[0] in "{[":
+            try: parsed = json.loads(s)
+            except Exception: parsed = None
+            if isinstance(parsed, (dict, list)):
+                _collect_text(parsed, out, depth + 1); return
+        if s: out.append(s)
+        return
+    if isinstance(obj, list):
+        for x in obj: _collect_text(x, out, depth + 1)
+        return
+    if not isinstance(obj, dict): return
+    tag = str(obj.get("tag") or "")
+    if tag == "img": out.append("[图片]"); return
+    if tag in ("file", "media"): out.append("[文件]"); return
+    for k in ("text", "title"):
+        v = obj.get(k)
+        if isinstance(v, (str, dict, list)): _collect_text(v, out, depth + 1)
+    content = obj.get("content")
+    if isinstance(content, (str, dict, list)): _collect_text(content, out, depth + 1)
+    for k, v in obj.items():
+        if k in _SKIP_WALK: continue
+        if isinstance(v, (dict, list)): _collect_text(v, out, depth + 1)
+
+def _join_parts(parts):
+    out = []
+    for p in parts:
+        p = re.sub(r"\s+", " ", str(p)).strip()
+        if not p or (out and out[-1] == p): continue
+        out.append(p)
+    return "\n".join(out)
+
+def message_text(msg):
+    """一条消息里给人读的文字。图片、文件、合并转发留占位，不把 file_key 当正文。"""
+    msg = _normalize_msg(msg)
+    parts = []
+    _collect_text(msg.get("content"), parts, 0)
+    text = _join_parts(parts)
+    mtype = str(msg.get("msg_type") or msg.get("message_type") or "").lower()
+    extras = []
+    if mtype in ("image", "media") and "[图片]" not in text: extras.append("[图片]")
+    if mtype == "file" and "[文件]" not in text: extras.append("[文件]")
+    if mtype == "post" and not text: extras.append("[富文本]")
+    if mtype in ("merge_forward", "merge_forward_msg") and "[合并转发]" not in text: extras.append("[合并转发]")
+    if mtype in ("interactive", "card") and not text: extras.append("[卡片]")
+    if extras: text = (text + " " + " ".join(extras)).strip()
+    return text
+
+def _sender_name(m):
+    s = m.get("sender") if isinstance(m, dict) else None
+    if isinstance(s, dict): return str(s.get("name") or s.get("id") or "")
+    if isinstance(s, str): return s
+    return str((m or {}).get("sender_id") or "") if isinstance(m, dict) else ""
+
+def _history_line(m):
+    if not isinstance(m, dict): return str(m or "")
+    m = _normalize_msg(m)
+    ts = str(m.get("create_time") or m.get("create_time_ms") or "")
+    return "%s %s：%s" % (ts, _sender_name(m), message_text(m))
+
+def _history_blob(m):
+    if not isinstance(m, dict): return ""
+    bits = [message_text(m)]
+    for r in (m.get("thread_replies") or m.get("replies") or []):
+        if isinstance(r, dict): bits.append(message_text(r))
+    return "\n".join(x for x in bits if x)
 
 def _allow_token(doc, allow):
     """白名单要整段对上，不能只是子串。doxTEST 不能放行 doxTESTxxx。链接里独立的一段可以。"""
