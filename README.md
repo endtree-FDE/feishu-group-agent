@@ -60,7 +60,7 @@ flowchart LR
 python tests/run_tests.py
 ```
 
-一共 208 项，全部通过就可以。
+最后一行会打印通过条数。全部通过就可以。条数会随测试增加，这里不再写死。
 
 从零接到飞书：看 [docs/新建智能体.md](docs/新建智能体.md)。顺序是创建企业自建应用、申请权限、在你自己的电脑上初始化 lark-cli、复制配置、启动。
 
@@ -72,6 +72,27 @@ python tests/run_tests.py
 2. 把所有 `REPLACE_` 换成你自己的编号。不要在里面写 App Secret。
 3. 复制 `redact.example.txt` 为 `redact.txt`。没有要隐藏的客户名就先留空。
 4. 在仓库根目录运行 `scripts\start.ps1 -Config agents\<你的文件>.json`。
+
+## English guide
+
+The purpose, the write lock, and the “do not commit” rule are in the English paragraph at the top. The diagram in [架构](#架构) is the path from a Feishu message to a redacted reply.
+
+Quick start:
+
+1. Copy `agents/example.json` to a new filename. That copy is gitignored.
+2. Replace every `REPLACE_` value with your own ids. Do not put an App Secret in the file.
+3. Copy `redact.example.txt` to `redact.txt`. Leave it empty if you have no customer names to hide.
+4. On Windows, from the repository root, run `scripts\start.ps1 -Config agents\<your-file>.json`.
+
+Offline tests do not need Feishu or extra packages:
+
+```text
+python tests/run_tests.py
+```
+
+The last line prints how many checks passed. Do not commit filled-in `agents/*.json`, `redact.txt`, `.env`, `memory/`, `logs/`, `state/`, `state.db`, or real files under `kb/`.
+
+A screenshot placeholder, with rules for hiding ids, is in [docs/demo/README.md](docs/demo/README.md).
 
 ## 配置说明
 
@@ -120,7 +141,7 @@ python tests/run_tests.py
 | `agents/CONFIG.md` | 每一项怎么填 |
 | `redact.example.txt` | 空的客户名名单样子，复制成 `redact.txt` 再用 |
 | `scripts/` | Windows 上的启动、停止、看门狗、计划任务 |
-| `tests/run_tests.py` | 离线测试，208 项 |
+| `tests/run_tests.py` | 离线测试。通过时最后一行打印条数 |
 | `docs/` | 给人看的说明和架构图 |
 | `SKILL.md` | 给帮忙操作的 AI 助手看的步骤 |
 
