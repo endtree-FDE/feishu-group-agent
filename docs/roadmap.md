@@ -18,7 +18,7 @@
 
 ## 接下来按这个顺序做
 
-### 1. 知识库目录，并按文件名读取
+### 1. 知识库目录，并按文件名读取（本轮草稿）
 
 - **目标：** 模型知道知识库里有哪些文件，并能按相对路径读出正文。没有依据时仍说不知道。`openai_compat` 读不了工作区文件，所以必须有程序代读，不能只靠 Cursor 自己翻文件夹。
 - **参考：** [OpenClaw 工作区](https://docs.openclaw.ai/concepts/agent-workspace)、[Dify 知识库](https://github.com/langgenius/dify)、[CowAgent](https://github.com/zhayujie/CowAgent)、本仓库 `docs/架构.md` 里还没落地的知识库目录。
