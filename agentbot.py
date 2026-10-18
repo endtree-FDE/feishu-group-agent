@@ -5,12 +5,12 @@
 #   --lock-test N      只拿单实例锁并保持 N 秒（不启动 consumer）
 #   --check            自检：配置、目录、cursor-agent、lark-cli，可选探测权限（--probe），不启动 consumer
 #   环境变量 AGENTBOT_FAKE_AGENT=秒：用 sleep 代替 cursor-agent（仅测试）
-#   环境变量 AGENTBOT_AGENT_CMD='["python","fake.py"]'：替换 cursor-agent 可执行文件（仅测试，用来模拟 stream-json）
+#   环境变量 AGENTBOT_AGENT_CMD='["python","fake.py"]'：替换 cursor-agent 可执行文件（仅测试，用来模拟 stream-json 或 ACP）
 # 模型名字来自配置 agent.model；没写时用 DEFAULT_MODEL。登录和额度是运行这台电脑的人自己的 Cursor 账号，程序里不写账号。
 import json, os, re, subprocess, sys, time, glob, logging, collections, threading, sqlite3, hashlib, atexit, shutil, datetime
 
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
-import guard, memory
+import acp_client, guard, memory
 from tools import Tools, ToolError, TOOL_DOC, READ_TOOLS, WRITE_TOOLS, run_capture
 
 CFG_PATH = sys.argv[1]; ARGS = sys.argv[2:]
@@ -106,8 +106,12 @@ def history(sess):
     return rows[::-1]
 def remember(sess, role, text):
     with DBL: DB.execute("insert into turns values(?,?,?,?)", (sess, time.time(), role, text[:2000])); DB.commit()
+ACP = None  # 常驻 ACP 进程，mode=acp 时才创建
 def forget(sess):
     with DBL: DB.execute("delete from turns where sess=?", (sess,)); DB.commit()
+    if ACP is not None:
+        try: ACP.drop(sess)
+        except Exception as e: log.warning("acp drop %s: %s", sess, e)
 
 # ---------- 限流 + 并发 ----------
 RL = CFG.get("rate_limit", {}); RLL = threading.Lock(); last_user = {}; hour_hits = collections.deque()
@@ -247,21 +251,46 @@ def stream_agent(cmd, on_stage=None):
     if why: return rc, None, "".join(err), why, st
     return rc, st.final_text(), "".join(err), "", st
 
-def run_agent(prompt, on_stage=None):
+def agent_transport(a=None):
+    """oneshot：每题一个 -p 进程（默认，和以前一样）。acp：常驻进程。旧配置里的 ask/plan 仍是一次性。"""
+    m = str((a if a is not None else CFG.get("agent", {})).get("mode") or "").strip().lower()
+    return "acp" if m == "acp" else "oneshot"
+
+def oneshot_cli_mode(a):
+    """交给 cursor-agent --mode 的只读/计划模式。oneshot 和 acp 这两个新值都固定用 ask。"""
+    m = str((a or {}).get("mode") or "ask").strip().lower()
+    return m if m in ("ask", "plan") else "ask"
+
+def agent_base_cmd():
+    return json.loads(os.environ["AGENTBOT_AGENT_CMD"]) if os.environ.get("AGENTBOT_AGENT_CMD") else agent_cmd()
+
+def build_acp_cmd():
+    """cursor-agent --model … --mode ask acp。--model / --mode / --trust 是全局参数，写在子命令 acp 前面。"""
     a = CFG.get("agent", {})
-    if FAKE:
-        if on_stage: on_stage("正在思考…")
-        time.sleep(float(FAKE))
-        if os.environ.get("AGENTBOT_FAKE_DUMP_PROMPT"): log.info("fake prompt: %s", json.dumps(prompt, ensure_ascii=False))  # 仅测试：检查 prompt 拼装
-        m = re.search(r"<<FAKE_TOOL>>(\{.*?\})<<END>>", prompt)
-        if m and "工具结果（" not in prompt: return "<<TOOL>>" + m.group(1)
-        return "[fake] " + prompt.rsplit("提问：", 1)[-1][:200]
-    base_cmd = json.loads(os.environ["AGENTBOT_AGENT_CMD"]) if os.environ.get("AGENTBOT_AGENT_CMD") else agent_cmd()
+    cmd = list(agent_base_cmd())
+    model = (a.get("model") or "").strip() or DEFAULT_MODEL
+    cmd += ["--model", model, "--mode", "ask", "--trust", "--workspace", KB, "acp"]
+    return cmd
+
+def acp_pool():
+    global ACP
+    if ACP is None:
+        a = dict(CFG.get("agent") or {})
+        if not (a.get("model") or "").strip():
+            a["model"] = DEFAULT_MODEL
+        ACP = acp_client.Pool(build_acp_cmd, a, KB, log)
+        atexit.register(ACP.close)
+    return ACP
+
+def run_agent_oneshot(prompt, on_stage=None):
+    a = CFG.get("agent", {})
+    base_cmd = agent_base_cmd()
     model_id = (a.get("model") or "").strip() or DEFAULT_MODEL
     # 先用配置里的模型；失败后再去掉模型参数重试（有的账号暂时用不了指定模型）
     tries = [model_id] + [None] * int(a.get("network_retries", 2))
+    cli_mode = oneshot_cli_mode(a)
     for i, model in enumerate(tries):
-        cmd = base_cmd + ["-p", "--mode", a.get("mode", "ask"), "--output-format", "stream-json", "--stream-partial-output", "--trust"]
+        cmd = base_cmd + ["-p", "--mode", cli_mode, "--output-format", "stream-json", "--stream-partial-output", "--trust"]
         if model: cmd += ["--model", model]
         cmd += ["--workspace", KB, prompt]
         rc, out, err, why, st = stream_agent(cmd, on_stage)
@@ -274,6 +303,23 @@ def run_agent(prompt, on_stage=None):
         log.error("agent rc=%s model=%s events=%d err=%s", rc, model, st.events, (err or "")[:300])
         time.sleep(10 * (i + 1) if re.search(r"network|socket|TLS|ECONN|ETIMEDOUT|aborted", err or "", re.I) else 3)
     return None
+
+def run_agent(prompt, on_stage=None, sess=None):
+    a = CFG.get("agent", {})
+    if FAKE:
+        if on_stage: on_stage("正在思考…")
+        time.sleep(float(FAKE))
+        if os.environ.get("AGENTBOT_FAKE_DUMP_PROMPT"): log.info("fake prompt: %s", json.dumps(prompt, ensure_ascii=False))  # 仅测试：检查 prompt 拼装
+        m = re.search(r"<<FAKE_TOOL>>(\{.*?\})<<END>>", prompt)
+        if m and "工具结果（" not in prompt: return "<<TOOL>>" + m.group(1)
+        return "[fake] " + prompt.rsplit("提问：", 1)[-1][:200]
+    if agent_transport(a) == "acp":
+        try:
+            out = acp_pool().ask(sess or "default", prompt, on_stage)
+            return (out or "")[: a.get("max_chars", 3500)] or None
+        except acp_client.AcpFail as e:
+            log.error("acp fallback: %s", e)
+    return run_agent_oneshot(prompt, on_stage)
 
 def build_prompt(q, sess, ctx, extra=""):
     parts = [CFG["system_prompt"]]
@@ -322,7 +368,7 @@ def _run_tool(name, args, ctx, on_stage):
     return guard.redact(res, REDACT_NAMES), False
 
 def answer(q, sess, ctx, extra="", on_stage=None):
-    out = run_agent(build_prompt(q, sess, ctx, extra), on_stage)
+    out = run_agent(build_prompt(q, sess, ctx, extra), on_stage, sess)
     if isinstance(out, PartialText): return _partial_clean(out)
     if not out: return None
     m = TOOL_RX.search(out)
@@ -333,7 +379,7 @@ def answer(q, sess, ctx, extra="", on_stage=None):
     if done: return res
     if on_stage: on_stage("正在整理答案…")
     follow = _FOLLOW_SKILL if name == "skill_read" and not str(res).startswith("工具不可用") else _FOLLOW_STOP
-    out2 = run_agent(build_prompt(q, sess, ctx, extra + "\n\n工具结果（%s）：\n%s\n\n%s" % (name, res[:9000], follow)), on_stage)
+    out2 = run_agent(build_prompt(q, sess, ctx, extra + "\n\n工具结果（%s）：\n%s\n\n%s" % (name, res[:9000], follow)), on_stage, sess)
     if isinstance(out2, PartialText): return _partial_clean(out2)
     m2 = TOOL_RX.search(out2 or "")
     # 只有「刚读完一份技能、步骤还要求调飞书」才再走一轮原来的工具回合，避免连环读技能
@@ -347,7 +393,7 @@ def answer(q, sess, ctx, extra="", on_stage=None):
     res2, done2 = _run_tool(name2, args2, ctx, on_stage)
     if done2: return res2
     if on_stage: on_stage("正在整理答案…")
-    out3 = run_agent(build_prompt(q, sess, ctx, extra + "\n\n工具结果（%s）：\n%s\n\n%s" % (name2, str(res2)[:9000], _FOLLOW_STOP)), on_stage)
+    out3 = run_agent(build_prompt(q, sess, ctx, extra + "\n\n工具结果（%s）：\n%s\n\n%s" % (name2, str(res2)[:9000], _FOLLOW_STOP)), on_stage, sess)
     if isinstance(out3, PartialText): return _partial_clean(out3)
     if out3 and TOOL_RX.search(out3): out3 = TOOL_RX.sub("", out3).strip()
     return out3 or ("工具不可用：" + res2 if str(res2).startswith("工具不可用") else None)
@@ -703,6 +749,11 @@ def self_check():
     p("skills", not sks.invalid, sks.status())
     for bad in sks.invalid:
         print("FAIL skill %s %s" % (bad.folder, bad.reason)); ok = False
+    if agent_transport() == "acp":
+        try:
+            p("acp", True, acp_client.probe(build_acp_cmd(), KB, log))
+        except Exception as e:
+            p("acp", False, str(e))
     if "--probe" in ARGS:
         try:
             for k, (good, scope, err) in probe_progress().items():

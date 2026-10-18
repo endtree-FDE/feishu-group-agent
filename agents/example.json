@@ -41,12 +41,14 @@
     "open_to_all": false
   },
   "agent": {
-    "mode": "ask",
+    "mode": "oneshot",
     "model": "grok-4.7-high-fast",
     "network_retries": 2,
     "max_runtime_sec": 1800,
     "stall_sec": 300,
-    "max_chars": 3500
+    "max_chars": 3500,
+    "acp_max_sessions": 8,
+    "acp_idle_sec": 1800
   },
   "redact_file": "redact.txt",
   "help_pattern": "你(能|会|可以)(干|做|帮)(什么|啥)|你有(什么|哪些|啥)(权限|功能|能力)|^有(什么|哪些|啥)(权限|功能)[?？]?$|你是谁|怎么用你",
