@@ -4,13 +4,14 @@
 #   --parallel         dry-run 时每条事件一个线程（测并发）
 #   --lock-test N      只拿单实例锁并保持 N 秒（不启动 consumer）
 #   --check            自检：配置、目录、当前模型接口、lark-cli，可选探测权限（--probe），不启动 consumer
+#   --doctor           只读诊断：登录、scope、事件订阅、网络、依赖、重复进程。不发消息，不写心跳
 #   环境变量 AGENTBOT_FAKE_AGENT=秒：用 sleep 代替模型（仅测试，优先于 model_provider）
 #   环境变量 AGENTBOT_AGENT_CMD='["python","fake.py"]'：替换 cursor-agent 可执行文件（仅测试，用来模拟 stream-json 或 ACP）
 # 模型从哪来看配置 model_provider，没写就是 cursor。cursor 的登录和额度是运行这台电脑的人自己的账号，程序里不写账号。
 import json, os, re, subprocess, sys, time, logging, collections, threading, sqlite3, hashlib, atexit, shutil, datetime
 
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
-import acp_client, guard, memory, providers
+import acp_client, guard, memory, observe, providers
 from providers.base import PartialText
 from tools import Tools, ToolError, TOOL_DOC, MEMORY_TOOL_DOC, READ_TOOLS, WRITE_TOOLS, run_capture, parse_cli_json, clip_body, message_text, attachment_limits, inspect_download, safe_download_name
 
@@ -19,7 +20,7 @@ def _opt(name):
     if name not in ARGS: return None
     i = ARGS.index(name); nxt = ARGS[i + 1] if i + 1 < len(ARGS) else ""
     return nxt if nxt and not nxt.startswith("--") else ""
-DRY = _opt("--dry-run") is not None; PARALLEL = "--parallel" in ARGS; LOCK_TEST = _opt("--lock-test"); CHECK = "--check" in ARGS
+DRY = _opt("--dry-run") is not None; PARALLEL = "--parallel" in ARGS; LOCK_TEST = _opt("--lock-test"); CHECK = "--check" in ARGS; DOCTOR = "--doctor" in ARGS
 CFG = json.load(open(CFG_PATH, encoding="utf-8-sig"))
 acp_client.configure_web(CFG)
 if not CFG.get("bot_open_id") and not DRY:
@@ -32,6 +33,7 @@ for k in ("NO_PROXY", "no_proxy"): os.environ[k] = "open.feishu.cn,.feishu.cn,.l
 FEAT = CFG.get("features", {})
 HELP_RX = re.compile(CFG.get("help_pattern", r"你(能|会|可以)(干|做|帮)(什么|啥)|你有(什么|哪些|啥)(权限|功能|能力)|^有(什么|哪些|啥)(权限|功能)[?？]?$|你是谁|怎么用你"))
 REDACT_NAMES = guard.load_names(os.path.join(BASE, CFG.get("redact_file", "redact.txt")))
+OBS = observe.Observe(LOGD, REDACT_NAMES)
 GMEM = memory.GroupMemory(CFG, BASE, REDACT_NAMES)  # 长期记忆（群档案），默认关闭
 POLICY_IN, POLICY_OUT, POLICY_PROG = (guard.policy_rules(CFG, st) for st in ("input", "output", "progress"))  # 话题红线：默认空 = 从不拦截
 
@@ -560,22 +562,42 @@ def _tool_args(call):
         args = dict(args); args["name"] = call["name"]
     return args
 
+def _note_tool(ctx, name, ok, detail, err, started):
+    try:
+        OBS.note_tool((ctx or {}).get("message_id") or "", name, ok, observe.code_of(detail), time.time() - started, err or "")
+    except Exception:
+        log.warning("observe tool failed %s", name)
 def _run_tool(name, args, ctx, on_stage):
     """返回 (text, done)。done 为真时，text 就是给用户的最终回复（确认码或拒绝）。"""
     log.info("tool call %s %s", name, guard.redact(json.dumps(args, ensure_ascii=False), REDACT_NAMES)[:200])
+    started = time.time()
     if ctx.get("limited"):
+        _note_tool(ctx, name, False, "", "未在私聊名单", started)
         return "未在私聊名单里的人不能使用飞书工具、技能或写入。", True
     if on_stage and name in TOOL_LABEL: on_stage("正在查%s…" % TOOL_LABEL[name])
     if name == "memory_propose":
         if on_stage: on_stage("正在准备记忆确认…")
-        try: return TOOLS.propose_memory(args, ctx), True
-        except ToolError as e: return e.user_msg, True
+        try:
+            text = TOOLS.propose_memory(args, ctx)
+            _note_tool(ctx, name, True, "", "", started)
+            return text, True
+        except ToolError as e:
+            _note_tool(ctx, name, False, e.detail, e.user_msg, started)
+            return guard.redact(e.user_msg, REDACT_NAMES), True
     if name in WRITE_TOOLS:
-        try: return TOOLS.propose_write(name, args, ctx), True
-        except ToolError as e: return e.user_msg, True
+        try:
+            text = TOOLS.propose_write(name, args, ctx)
+            _note_tool(ctx, name, True, "", "", started)
+            return text, True
+        except ToolError as e:
+            _note_tool(ctx, name, False, e.detail, e.user_msg, started)
+            return guard.redact(e.user_msg, REDACT_NAMES), True
     try: res = TOOLS.run_read(name, args, ctx)
     except ToolError as e:
-        log.info("tool %s degraded: %s %s", name, e.user_msg, e.detail[:200]); res = "工具不可用：" + e.user_msg
+        log.info("tool %s degraded: %s %s", name, guard.redact(e.user_msg, REDACT_NAMES), guard.redact(e.detail[:200], REDACT_NAMES))
+        _note_tool(ctx, name, False, e.detail, e.user_msg, started)
+        return "工具不可用：" + guard.redact(e.user_msg, REDACT_NAMES), False
+    _note_tool(ctx, name, True, "", "", started)
     res = guard.redact(res, REDACT_NAMES)
     if name in _UNTRUSTED_TOOLS: res = guard.neutralize(res)
     return res, False
@@ -1030,11 +1052,13 @@ def _handle_claimed(ev, mid, ctype, uid):
     with SEM:
         with _AL: _waiting -= 1; _active += 1; _peak = max(_peak, _active); act = _active
         log.info("agent start %s active=%d peak=%d", mid, act, _peak); t0 = time.time(); prog.set_stage("正在思考…"); q_model = ""
+        try: OBS.begin(mid)
+        except Exception: pass
         try:
             if targets and FEAT.get("attachments"):
                 try: extra, cleanup = _load_context(targets, ctx, mid)
                 except ToolError as e:
-                    log.info("attachment degraded: %s %s", e.user_msg, e.detail[:200])
+                    log.info("attachment degraded: %s %s", e.user_msg, guard.redact(e.detail[:200], REDACT_NAMES))
                     if mtype != "text": extra = "（附件读取失败：%s。请如实告诉提问者。）" % e.user_msg
             def hook(stage, think=None, end=False, text=None):
                 # text 是回答的文字片段，由模型层拼成最终答案，不刷进进度卡片
@@ -1059,6 +1083,8 @@ def _handle_claimed(ev, mid, ctype, uid):
     log.info("metric kind=answer chat=%s limited=%d in_chars=%d out_chars=%d elapsed=%.1fs ok=%d partial=%d",
              "p2p" if ctype == "p2p" else "group", 1 if ctx.get("limited") else 0,
              len(q_model or ""), len(final or ""), time.time() - t0, 1 if a else 0, 1 if partial else 0)
+    try: OBS.finish(mid, bool(a), time.time() - t0)
+    except Exception: log.warning("observe answer failed %s", mid)
     try: replaced = prog.finish(final)
     except Exception as e: log.warning("progress finish error (ignored): %s", e); replaced = False
     if replaced: log.info("reply %s ok=True via status edit", mid); return
@@ -1176,6 +1202,8 @@ def heartbeat():
     while True:
         try: open(os.path.join(STATE, "heartbeat"), "w").write(str(int(time.time())))
         except OSError: pass
+        try: OBS.shrink_stdio()
+        except Exception: pass
         time.sleep(60)
 
 def self_check():
@@ -1219,6 +1247,9 @@ def self_check():
     return ok
 
 def main():
+    if DOCTOR:
+        import doctor
+        sys.exit(doctor.run_doctor(CFG, BASE, lark_exe()))
     if CHECK: sys.exit(0 if self_check() else 1)
     if not CFG.get("bot_open_id"): log.warning("dry-run：bot_open_id 为空")
     if LOCK_TEST is not None:

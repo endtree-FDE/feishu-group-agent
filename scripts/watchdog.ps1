@@ -3,6 +3,10 @@ param([string]$Config = "agents\example.json")
 $base = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $hb = Join-Path $base "state\heartbeat"; $wl = Join-Path $base "logs\watchdog.log"
 . (Join-Path $PSScriptRoot "botproc.ps1")
+. (Join-Path $PSScriptRoot "rotatelog.ps1")
+Rotate-LogFile $wl
+Rotate-LogFile (Join-Path $base "logs\stdout.log")
+Rotate-LogFile (Join-Path $base "logs\stderr.log")
 $pidf = Join-Path $base "bot.pid"; $alive = $false
 if (Test-Path $pidf) {
   $rawId = "$((Get-Content $pidf -ErrorAction SilentlyContinue | Select-Object -First 1))".Trim()

@@ -12,6 +12,7 @@ if (-not [IO.Path]::IsPathRooted($cfgPath)) { $cfgPath = Join-Path $base $cfgPat
 if (-not (Test-Path -LiteralPath $cfgPath)) { "config not found: $cfgPath"; exit 2 }
 $cfg = [IO.File]::ReadAllText($cfgPath) | ConvertFrom-Json
 . (Join-Path $PSScriptRoot "botproc.ps1")
+. (Join-Path $PSScriptRoot "rotatelog.ps1")
 
 # 本目录已经在跑就不要再启动，也不要结束它自己的 event 进程。
 # 锁里的编号若已被别的程序复用，不当成自己还活着。
@@ -43,6 +44,9 @@ Stop-LarkLeftovers $base ([string]$cfg.profile)
 
 $py = (Get-Command python.exe -ErrorAction SilentlyContinue).Source; if (-not $py) { $py = "C:\Program Files\Python312\python.exe" }
 New-Item -ItemType Directory -Force (Join-Path $base "logs") | Out-Null
+Rotate-LogFile (Join-Path $base "logs\stdout.log")
+Rotate-LogFile (Join-Path $base "logs\stderr.log")
+Rotate-LogFile (Join-Path $base "logs\watchdog.log")
 $p = Start-Process -FilePath $py -ArgumentList "`"$base\agentbot.py`"", "`"$cfgPath`"" -WorkingDirectory $base -WindowStyle Hidden -PassThru `
   -RedirectStandardOutput "$base\logs\stdout.log" -RedirectStandardError "$base\logs\stderr.log"
 $p.Id | Out-File (Join-Path $base "bot.pid") -Encoding ascii
