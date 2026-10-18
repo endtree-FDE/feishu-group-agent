@@ -12,8 +12,9 @@
     "inviter_open_ids": []
   },
   "conflict_pidfiles": [],
+  "shutdown_wait_sec": 15,
   "reply_in_thread": true,
-  "catchup": {"enabled": true, "overlap_sec": 300, "max_messages": 20},
+  "catchup": {"enabled": true, "overlap_sec": 300, "max_messages": 20, "max_age_sec": 43200},
   "thread_followup": {"enabled": true, "who": "initiator_or_whitelist"},
   "max_concurrency": 2,
   "max_queue": 4,
@@ -57,6 +58,7 @@
     "network_retries": 2,
     "max_runtime_sec": 1800,
     "stall_sec": 300,
+    "progress_heartbeat_sec": 20,
     "max_chars": 3500,
     "body_max_chars": 20000,
     "max_tool_rounds": 4,

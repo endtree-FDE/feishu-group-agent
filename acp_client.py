@@ -36,6 +36,58 @@ class AcpFail(Exception):
         self.restart = restart
 
 
+def _cfg_float(cfg, key, default):
+    """配置里没写、写空、或写了无法转成数字时，用 default。写了 0 就保留 0。"""
+    cfg = cfg or {}
+    if key not in cfg or cfg.get(key) is None or cfg.get(key) == "":
+        return float(default)
+    try:
+        return float(cfg.get(key))
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def runtime_limits(cfg):
+    """返回 (max_runtime_sec, stall_sec, pulse_sec)。
+
+    max_runtime_sec <= 0：不设硬时限。没写这一项时仍是 1800，旧配置行为不变。
+    stall_sec <= 0：改回 300。卡死要靠「多久没有新输出」发现，不靠把检测关掉。
+    pulse_sec <= 0：不打进度心跳。没写时 20 秒。
+    """
+    max_rt = _cfg_float(cfg, "max_runtime_sec", 1800)
+    if max_rt < 0:
+        max_rt = 1800.0
+    stall = _cfg_float(cfg, "stall_sec", 300)
+    if stall <= 0:
+        stall = 300.0
+    pulse = _cfg_float(cfg, "progress_heartbeat_sec", 20)
+    if pulse < 0:
+        pulse = 20.0
+    return max_rt, stall, pulse
+
+
+def limit_reason(now, started, last_io, stall_sec, max_runtime):
+    """没有新输出超过 stall_sec 就是卡住。max_runtime<=0 时不因为总时长停。"""
+    silent = now - last_io
+    if stall_sec > 0 and silent > stall_sec:
+        return "stall %.0fs no output" % silent
+    if max_runtime > 0 and (now - started) > max_runtime:
+        return "max_runtime %.0fs" % max_runtime
+    return ""
+
+
+def pulse_due(now, last_pulse, interval):
+    return interval > 0 and (now - last_pulse) >= interval
+
+
+def config_option_attempts(session_id, config_id, value):
+    """先按现行 ACP 带 type=id。对方若回 Invalid params，再试一次不带 type 的旧写法。"""
+    return [
+        {"sessionId": session_id, "configId": config_id, "type": "id", "value": value},
+        {"sessionId": session_id, "configId": config_id, "value": value},
+    ]
+
+
 def kill_proc(p):
     """停掉子进程。Windows 用 taskkill /T，和 agentbot.kill_tree 同一做法；别处不用 Unix 专有接口。"""
     if not p or p.poll() is not None:
@@ -691,8 +743,7 @@ class Pool:
         self.log = log
         self.max_sessions = max(1, int(self.cfg.get("acp_max_sessions", 8) or 8))
         self.idle_sec = float(self.cfg.get("acp_idle_sec", 1800) if self.cfg.get("acp_idle_sec", 1800) is not None else 1800)
-        self.stall_sec = float(self.cfg.get("stall_sec", 300) or 300)
-        self.max_runtime = float(self.cfg.get("max_runtime_sec", 1800) or 1800)
+        self.max_runtime, self.stall_sec, self.pulse_sec = runtime_limits(self.cfg)
         self.model = (self.cfg.get("model") or "").strip()
         self.allow_web = _flag(self.cfg, "acp_allow_web", True)
         self.web_max = _pos_int(self.cfg, "acp_web_max_per_turn", 15)
@@ -713,6 +764,7 @@ class Pool:
         self.last_io = time.time()
         self._restarting = False
         self._restart_thread = None
+        self._restart_times = []
         self._err_tail = []
 
     def _secret_names(self):
@@ -722,6 +774,15 @@ class Pool:
 
     def _alive(self):
         return bool(self.ready_flag and self.proc and self.proc.poll() is None)
+
+    def _cancel(self, sid):
+        """卡死时先通知对方停这一题。写不进去就交给后面的重启去杀进程。"""
+        if not sid:
+            return
+        try:
+            self._write({"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": sid}})
+        except Exception:
+            pass
 
     def _write(self, obj):
         data = (json.dumps(obj, ensure_ascii=False) + "\n").encode("utf-8")
@@ -960,12 +1021,19 @@ class Pool:
         self._err_tail = []
         threading.Thread(target=self._read_out, args=(proc, gen), daemon=True).start()
         threading.Thread(target=self._read_err, args=(proc, gen), daemon=True).start()
+        threading.Thread(target=self._watch_proc, args=(proc, gen), daemon=True).start()
         return proc
 
     def _handshake(self):
         result = self._rpc("initialize", {
             "protocolVersion": 1,
-            "clientCapabilities": {"fs": {"readTextFile": False, "writeTextFile": False}, "terminal": False},
+            # parameterizedModelPicker：当前 cursor-agent 才按 configOptions 接受模型。
+            # 不带这个能力时，set_config_option 常被回 Invalid params。
+            "clientCapabilities": {
+                "fs": {"readTextFile": False, "writeTextFile": False},
+                "terminal": False,
+                "_meta": {"parameterizedModelPicker": True},
+            },
             "clientInfo": {"name": "feishu-group-agent", "title": "飞书群助手", "version": "1.0.0"},
         }, timeout=90)
         ver = result.get("protocolVersion") if isinstance(result, dict) else None
@@ -987,9 +1055,10 @@ class Pool:
             self.ready_flag = False
             proc = self.proc
             self.proc = None
+            # 先作废这一代，再杀进程。退出监视线程看到代次变了就不会再重启。
+            self.gen += 1
             if proc:
                 kill_proc(proc)
-            self.gen += 1
             raise
 
     def start(self):
@@ -1022,11 +1091,39 @@ class Pool:
                 return
             self._start_locked()
 
+    def _watch_proc(self, proc, gen):
+        """进程在没有人正在等它的时候自己退出，也要拉起来。故意关掉的那一代不重启。"""
+        try:
+            rc = proc.wait()
+        except Exception:
+            return
+        with self.state_lock:
+            unexpected = self.gen == gen and self.proc is proc and self.ready_flag
+        if not unexpected:
+            return
+        with self.pending_lock:
+            busy = bool(self.pending)
+        # 正在等这一题的结果时，由那一题的等待循环去重启，避免两处同时杀进程。
+        if busy:
+            self.log.warning("acp exited rc=%s during turn", rc)
+            return
+        self.log.warning("acp exited rc=%s", rc)
+        self._schedule_restart()
+
     def _schedule_restart(self):
         with self.state_lock:
             if self._restarting:
                 return
-            self._restarting = True
+            now = time.time()
+            self._restart_times = [t for t in self._restart_times if now - t < 600]
+            paused = len(self._restart_times) >= 5
+            delay = 0
+            if not paused:
+                self._restart_times.append(now)
+                self._restarting = True
+                # 第一次马上拉起；短时间内反复退出就退避，避免把电脑打满。
+                n = len(self._restart_times)
+                delay = 0 if n <= 1 else min(8, 2 ** (n - 2))
             self.ready_flag = False
             self.sessions.clear()
             self.handlers.clear()
@@ -1034,17 +1131,26 @@ class Pool:
             self.proc = None
             # 先作废旧读线程，再拉起新进程，避免把新握手的请求清掉
             self.gen += 1
-            t = threading.Thread(target=self._restart_body, daemon=True)
-            self._restart_thread = t
+            t = None
+            if not paused:
+                t = threading.Thread(target=self._restart_body, args=(delay,), daemon=True)
+                self._restart_thread = t
         self._fail_pending("restart")
         if old:
             kill_proc(old)
+        if paused:
+            self.log.error("acp restart paused after repeated exits")
+            return
         self.log.info("acp restart")
         t.start()
 
-    def _restart_body(self):
+    def _restart_body(self, delay=0):
         try:
+            if delay:
+                time.sleep(delay)
             with self.start_lock:
+                if self._alive():
+                    return
                 self._start_locked()
         except Exception as e:
             self.log.warning("acp restart failed: %s", e)
@@ -1102,13 +1208,18 @@ class Pool:
         if not params:
             return
         cid, value = params
-        try:
-            self._rpc("session/set_config_option", {
-                "sessionId": sid, "configId": cid, "value": value,
-            }, timeout=20)
-        except AcpFail as e:
-            # 模型已经由启动参数 --model 钉住。设配置项失败不影响这一题。
-            self.log.debug("acp set_model: %s", e)
+        # 模型已经由启动参数 --model 钉住。设配置项失败不影响这一题。
+        # 2026-10 的 cursor-agent 对缺少 type 的请求回 Invalid params（-32602）。
+        last = None
+        for body in config_option_attempts(sid, cid, value):
+            try:
+                self._rpc("session/set_config_option", body, timeout=20)
+                return
+            except AcpFail as e:
+                last = e
+                if "Invalid params" not in str(e):
+                    break
+        self.log.debug("acp set_model: %s", last)
 
     def _get_or_create(self, key, prompt):
         """返回 (session, created, prompt)。新建时冻结档案；复用时换回快照。"""
@@ -1155,22 +1266,30 @@ class Pool:
             self._write({"jsonrpc": "2.0", "id": i, "method": "session/prompt", "params": {
                 "sessionId": sid, "prompt": [{"type": "text", "text": prompt}],
             }})
+            last_pulse = t0
             while not ev.wait(0.2):
                 proc = self.proc
                 if proc is None or proc.poll() is not None:
                     raise AcpFail("process exited rc=%s" % (None if proc is None else proc.returncode))
-                silent = time.time() - self.last_io
-                if silent > self.stall_sec:
-                    raise AcpFail("stall %.0fs no output" % silent)
-                if time.time() - t0 > self.max_runtime:
-                    raise AcpFail("max_runtime %.0fs" % self.max_runtime)
+                now = time.time()
+                why = limit_reason(now, t0, self.last_io, self.stall_sec, self.max_runtime)
+                if why:
+                    self._cancel(sid)
+                    raise AcpFail(why)
+                if pulse_due(now, last_pulse, self.pulse_sec):
+                    last_pulse = now
+                    silent = now - self.last_io
+                    self.log.info("acp pulse sid=%s elapsed=%ds silent=%.0fs", sid, int(now - t0), silent)
+                    if silent >= self.pulse_sec:
+                        turn._emit("已经 %d 秒没有新输出…" % int(silent))
         finally:
             with self.state_lock:
                 self.handlers.pop(sid, None)
         if box.get("error") is not None:
             err = box["error"]
             text = err.get("message") if isinstance(err, dict) else str(err)
-            raise AcpFail("protocol session/prompt: %s" % text)
+            code = err.get("code") if isinstance(err, dict) else None
+            raise AcpFail("protocol session/prompt: %s%s" % (("code=%s " % code) if code is not None else "", text))
         text = turn.finish()
         if not text:
             stop = box.get("result") if isinstance(box.get("result"), dict) else {}
@@ -1189,6 +1308,7 @@ class Pool:
                 finally:
                     sess.inflight -= 1
                     sess.last = time.time()
+            self._restart_times.clear()
             return out
         except AcpFail as e:
             if e.restart:

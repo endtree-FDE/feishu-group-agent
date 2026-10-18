@@ -79,12 +79,39 @@ namespace BotProc {
   }
 }
 
+function Test-PathToken([string]$Text, [string]$Base) {
+  # 整段路径要对上。c:\bots\a 不能命中 c:\bots\ab。
+  $n = ConvertTo-NormPath $Text
+  $b = ConvertTo-NormPath $Base
+  if (-not $n -or -not $b) { return $false }
+  $start = 0
+  while ($start -lt $n.Length) {
+    $i = $n.IndexOf($b, $start)
+    if ($i -lt 0) { return $false }
+    $beforeOk = $true
+    if ($i -gt 0) {
+      $prev = $n[$i - 1]
+      $beforeOk = ($prev -eq ' ' -or $prev -eq '"' -or $prev -eq "'" -or $prev -eq '=' -or $prev -eq "`t")
+    }
+    $end = $i + $b.Length
+    $afterOk = $true
+    if ($end -lt $n.Length) {
+      $nxt = $n[$end]
+      $afterOk = ($nxt -eq '\' -or $nxt -eq ' ' -or $nxt -eq '"' -or $nxt -eq "'" -or $nxt -eq "`t")
+    }
+    if ($beforeOk -and $afterOk) { return $true }
+    $start = $i + 1
+  }
+  return $false
+}
+
 function Test-OurAgent($Proc, [string]$Base) {
-  # 命令行里要出现 agentbot.py，并且路径落在本目录。编号被别的程序复用时这里为假。
+  # 命令行里要出现 agentbot.py，并且本目录是完整路径（bot 不能命中 bot2）。
+  # 命令行只有文件名时，才看工作目录。编号被别的程序复用时这里为假。
   if (-not $Proc) { return $false }
   $cl = [string]$Proc.CommandLine
   if (-not $cl -or $cl -notmatch '(?i)agentbot\.py') { return $false }
-  if ((ConvertTo-NormPath $cl).Contains((ConvertTo-NormPath $Base))) { return $true }
+  if (Test-PathToken $cl $Base) { return $true }
   $cwd = Get-ProcessCwd ([int]$Proc.ProcessId)
   return [bool]($cwd -and (Test-UnderBase $cwd $Base))
 }
@@ -93,7 +120,7 @@ function Test-BelongsToBot($Proc, [string]$Base, [string]$Profile) {
   if (-not $Proc) { return $false }
   $cl = [string]$Proc.CommandLine
   if (Test-ProfileInCommandLine $cl $Profile) { return $true }
-  if ($cl -and (ConvertTo-NormPath $cl).Contains((ConvertTo-NormPath $Base))) { return $true }
+  if ($cl -and (Test-PathToken $cl $Base)) { return $true }
   $cwd = Get-ProcessCwd ([int]$Proc.ProcessId)
   return [bool]($cwd -and (Test-UnderBase $cwd $Base))
 }
@@ -111,7 +138,8 @@ function Get-ConfigPathFromCommandLine([string]$CommandLine, [string]$Base) {
   foreach ($c in $cands) {
     $full = $c
     if (-not [IO.Path]::IsPathRooted($full)) { try { $full = Join-Path $Base $c } catch { continue } }
-    if ((ConvertTo-NormPath $full).StartsWith($nb)) { return $full }
+    $nf = ConvertTo-NormPath $full
+    if ($nf -eq $nb -or $nf.StartsWith($nb + '\')) { return $full }
   }
   return ""
 }

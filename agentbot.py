@@ -4,13 +4,14 @@
 #   --parallel         dry-run 时每条事件一个线程（测并发）
 #   --lock-test N      只拿单实例锁并保持 N 秒（不启动 consumer）
 #   --check            自检：配置、目录、当前模型接口、lark-cli，可选探测权限（--probe），不启动 consumer
+#   --doctor           只读诊断：登录、scope、事件订阅、网络、依赖、重复进程。不发消息，不写心跳
 #   环境变量 AGENTBOT_FAKE_AGENT=秒：用 sleep 代替模型（仅测试，优先于 model_provider）
 #   环境变量 AGENTBOT_AGENT_CMD='["python","fake.py"]'：替换 cursor-agent 可执行文件（仅测试，用来模拟 stream-json 或 ACP）
 # 模型从哪来看配置 model_provider，没写就是 cursor。cursor 的登录和额度是运行这台电脑的人自己的账号，程序里不写账号。
-import json, os, re, subprocess, sys, time, logging, collections, threading, sqlite3, hashlib, atexit, shutil, datetime
+import json, os, re, subprocess, sys, time, logging, collections, threading, sqlite3, hashlib, atexit, shutil, datetime, signal
 
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
-import acp_client, guard, memory, providers
+import acp_client, feishu_link, guard, lifecycle, memory, observe, proc_identity, providers
 from providers.base import PartialText
 from tools import Tools, ToolError, TOOL_DOC, MEMORY_TOOL_DOC, READ_TOOLS, WRITE_TOOLS, run_capture, parse_cli_json, clip_body, message_text, attachment_limits, inspect_download, disk_download_name
 
@@ -19,7 +20,7 @@ def _opt(name):
     if name not in ARGS: return None
     i = ARGS.index(name); nxt = ARGS[i + 1] if i + 1 < len(ARGS) else ""
     return nxt if nxt and not nxt.startswith("--") else ""
-DRY = _opt("--dry-run") is not None; PARALLEL = "--parallel" in ARGS; LOCK_TEST = _opt("--lock-test"); CHECK = "--check" in ARGS
+DRY = _opt("--dry-run") is not None; PARALLEL = "--parallel" in ARGS; LOCK_TEST = _opt("--lock-test"); CHECK = "--check" in ARGS; DOCTOR = "--doctor" in ARGS
 CFG = json.load(open(CFG_PATH, encoding="utf-8-sig"))
 acp_client.configure_web(CFG)
 if not CFG.get("bot_open_id") and not DRY:
@@ -32,6 +33,7 @@ for k in ("NO_PROXY", "no_proxy"): os.environ[k] = "open.feishu.cn,.feishu.cn,.l
 FEAT = CFG.get("features", {})
 HELP_RX = re.compile(CFG.get("help_pattern", r"你(能|会|可以)(干|做|帮)(什么|啥)|你有(什么|哪些|啥)(权限|功能|能力)|^有(什么|哪些|啥)(权限|功能)[?？]?$|你是谁|怎么用你"))
 REDACT_NAMES = guard.load_names(os.path.join(BASE, CFG.get("redact_file", "redact.txt")))
+OBS = observe.Observe(LOGD, REDACT_NAMES)
 GMEM = memory.GroupMemory(CFG, BASE, REDACT_NAMES)  # 长期记忆（群档案），默认关闭
 POLICY_IN, POLICY_OUT, POLICY_PROG = (guard.policy_rules(CFG, st) for st in ("input", "output", "progress"))  # 话题红线：默认空 = 从不拦截
 
@@ -53,23 +55,42 @@ def _pid_alive(pid):
         return bool(ok) and code.value == 259  # STILL_ACTIVE
     try: os.kill(pid, 0); return True
     except OSError: return False
+def _release_lock():
+    try: text = open(LOCK, encoding="utf-8", errors="replace").read()
+    except OSError: return
+    lock = proc_identity.parse_lock(text)
+    if lock and int(lock["pid"]) == os.getpid():
+        try: os.remove(LOCK)
+        except OSError: pass
 def acquire_lock():
+    snap = proc_identity.snapshot(os.getpid()) or {}
+    body = proc_identity.format_lock(os.getpid(), snap.get("created") or "", BASE).encode("utf-8")
     try:
-        fd = os.open(LOCK, os.O_CREAT | os.O_EXCL | os.O_WRONLY); os.write(fd, str(os.getpid()).encode()); os.close(fd)
-        atexit.register(lambda: os.path.exists(LOCK) and open(LOCK).read().strip() == str(os.getpid()) and os.remove(LOCK))
+        fd = os.open(LOCK, os.O_CREAT | os.O_EXCL | os.O_WRONLY); os.write(fd, body); os.close(fd)
+        atexit.register(_release_lock)
         log.info("lock acquired pid %s", os.getpid()); return
     except FileExistsError:
-        old = open(LOCK).read().strip()
-        if old and old.isdigit() and int(old) != os.getpid() and _pid_alive(int(old)):
-            log.error("REFUSED: already running pid %s (lock %s)", old, LOCK); sys.exit(3)
-        log.warning("stale lock (pid %s), taking over", old); os.remove(LOCK); return acquire_lock()
+        try: text = open(LOCK, encoding="utf-8", errors="replace").read()
+        except OSError: text = ""
+        lock = proc_identity.parse_lock(text)
+        snap = proc_identity.snapshot(lock["pid"]) if lock else None
+        # 对不上的进程一律不结束。只是这个锁已经不能代表本机器人。
+        if proc_identity.decide(lock, snap, BASE) == "ours" and lock and int(lock["pid"]) != os.getpid():
+            log.error("REFUSED: already running pid %s (lock %s)", lock["pid"], LOCK); sys.exit(3)
+        log.warning("stale lock (pid %s), taking over", (lock or {}).get("pid", "?"))
+        try: os.remove(LOCK)
+        except OSError: pass
+        return acquire_lock()
 def check_conflicts():
-    # 同一应用只能有一个 consumer：配置里列出的旧版 pid 文件若对应进程还活着，就拒绝启动
+    # 同一应用只能有一个 consumer。pid 文件里的编号若已被别的程序复用，不当成旧机器人还活着，也不结束它。
     for pf in CFG.get("conflict_pidfiles", []):
-        if os.path.exists(pf):
-            p = open(pf).read().strip()
-            if p.isdigit() and _pid_alive(int(p)):
-                log.error("REFUSED: conflicting instance still running (pid %s from %s)", p, pf); sys.exit(4)
+        if not os.path.exists(pf): continue
+        try: text = open(pf, encoding="utf-8", errors="replace").read()
+        except OSError: continue
+        lock = proc_identity.parse_lock(text)
+        if not lock: continue
+        if proc_identity.conflict_blocks(proc_identity.snapshot(lock["pid"])):
+            log.error("REFUSED: conflicting instance still running (pid %s from %s)", lock["pid"], pf); sys.exit(4)
 
 # ---------- 外部命令 ----------
 def lark_exe():
@@ -564,22 +585,42 @@ def _tool_args(call):
         args = dict(args); args["name"] = call["name"]
     return args
 
+def _note_tool(ctx, name, ok, detail, err, started):
+    try:
+        OBS.note_tool((ctx or {}).get("message_id") or "", name, ok, observe.code_of(detail), time.time() - started, err or "")
+    except Exception:
+        log.warning("observe tool failed %s", name)
 def _run_tool(name, args, ctx, on_stage):
     """返回 (text, done)。done 为真时，text 就是给用户的最终回复（确认码或拒绝）。"""
     log.info("tool call %s %s", name, guard.redact(json.dumps(args, ensure_ascii=False), REDACT_NAMES)[:200])
+    started = time.time()
     if ctx.get("limited"):
+        _note_tool(ctx, name, False, "", "未在私聊名单", started)
         return "未在私聊名单里的人不能使用飞书工具、技能或写入。", True
     if on_stage and name in TOOL_LABEL: on_stage("正在查%s…" % TOOL_LABEL[name])
     if name == "memory_propose":
         if on_stage: on_stage("正在准备记忆确认…")
-        try: return TOOLS.propose_memory(args, ctx), True
-        except ToolError as e: return e.user_msg, True
+        try:
+            text = TOOLS.propose_memory(args, ctx)
+            _note_tool(ctx, name, True, "", "", started)
+            return text, True
+        except ToolError as e:
+            _note_tool(ctx, name, False, e.detail, e.user_msg, started)
+            return guard.redact(e.user_msg, REDACT_NAMES), True
     if name in WRITE_TOOLS:
-        try: return TOOLS.propose_write(name, args, ctx), True
-        except ToolError as e: return e.user_msg, True
+        try:
+            text = TOOLS.propose_write(name, args, ctx)
+            _note_tool(ctx, name, True, "", "", started)
+            return text, True
+        except ToolError as e:
+            _note_tool(ctx, name, False, e.detail, e.user_msg, started)
+            return guard.redact(e.user_msg, REDACT_NAMES), True
     try: res = TOOLS.run_read(name, args, ctx)
     except ToolError as e:
-        log.info("tool %s degraded: %s %s", name, e.user_msg, e.detail[:200]); res = "工具不可用：" + e.user_msg
+        log.info("tool %s degraded: %s %s", name, guard.redact(e.user_msg, REDACT_NAMES), guard.redact(e.detail[:200], REDACT_NAMES))
+        _note_tool(ctx, name, False, e.detail, e.user_msg, started)
+        return "工具不可用：" + guard.redact(e.user_msg, REDACT_NAMES), False
+    _note_tool(ctx, name, True, "", "", started)
     res = guard.redact(res, REDACT_NAMES)
     if name in _UNTRUSTED_TOOLS: res = guard.neutralize(res)
     return res, False
@@ -624,6 +665,7 @@ def answer(q, sess, ctx, extra="", on_stage=None):
             if not (m and FEAT.get("tools")): return out
             try: call = json.loads(m.group(1)); name = call.get("tool"); args = _tool_args(call)
             except Exception: return out.replace(m.group(0), "").strip() or None
+            # 下载和读附件在两次模型调用之间。这段时间没有模型输出，不计入静默检测。
             res, done = _run_tool(name, args, ctx, on_stage)
             if done: return res  # 写入、记忆确认、私聊限制：到此为止，不再往下读
             last = i == rounds - 1
@@ -1015,9 +1057,18 @@ def handle(ev):
     how = claim_message(mid, ev, replay=bool(ev.get("_replay")))
     if how == "skip": return
     if ev.get("_late") or how == "replay": LATE.note = "（延迟回复）"
-    try: _handle_claimed(ev, mid, ctype, uid)
+    finished = False
+    try:
+        _handle_claimed(ev, mid, ctype, uid); finished = True
     finally:
-        mark_answered(mid); LATE.note = ""
+        # 停机时这题还没走完：留着 received，下次启动补答。异常且并非停机，仍记成已回答，和以前一样。
+        if lifecycle.should_mark_answered(lifecycle.shutdown_requested(STATE), finished):
+            mark_answered(mid)
+            try: lifecycle.drop(STATE, mid)
+            except Exception: log.warning("inflight drop failed %s", mid)
+        else:
+            log.info("shutdown keeps inflight %s", mid)
+        LATE.note = ""
 
 def _handle_claimed(ev, mid, ctype, uid):
     global _active, _waiting, _peak
@@ -1061,16 +1112,23 @@ def _handle_claimed(ev, mid, ctype, uid):
     with SEM:
         with _AL: _waiting -= 1; _active += 1; _peak = max(_peak, _active); act = _active
         log.info("agent start %s active=%d peak=%d", mid, act, _peak); t0 = time.time(); prog.set_stage("正在思考…"); q_model = ""
+        try: lifecycle.touch(STATE, mid, "正在思考…", REDACT_NAMES)
+        except Exception: log.warning("inflight note failed %s", mid)
+        try: OBS.begin(mid)
+        except Exception: pass
         try:
             if targets and FEAT.get("attachments"):
                 try: extra, cleanup = _load_context(targets, ctx, mid)
                 except ToolError as e:
-                    log.info("attachment degraded: %s %s", e.user_msg, e.detail[:200])
+                    log.info("attachment degraded: %s %s", e.user_msg, guard.redact(e.detail[:200], REDACT_NAMES))
                     if mtype != "text": extra = "（附件读取失败：%s。请如实告诉提问者。）" % e.user_msg
             def hook(stage, think=None, end=False, text=None):
-                # text 是回答的文字片段，由模型层拼成最终答案，不刷进进度卡片
+                # text 是回答的文字片段，由模型层拼成最终答案，不刷进进度卡片，也不写入 inflight。
                 if think is not None: prog.add_thinking(think, end)
-                elif stage: prog.set_stage(stage)
+                elif stage:
+                    prog.set_stage(stage)
+                    try: lifecycle.touch(STATE, mid, stage, REDACT_NAMES)
+                    except Exception: pass
             q_model = clip_question(q)
             a = answer(q_model, sess, ctx, extra, on_stage=hook)
         except Exception as e:
@@ -1090,6 +1148,8 @@ def _handle_claimed(ev, mid, ctype, uid):
     log.info("metric kind=answer chat=%s limited=%d in_chars=%d out_chars=%d elapsed=%.1fs ok=%d partial=%d",
              "p2p" if ctype == "p2p" else "group", 1 if ctx.get("limited") else 0,
              len(q_model or ""), len(final or ""), time.time() - t0, 1 if a else 0, 1 if partial else 0)
+    try: OBS.finish(mid, bool(a), time.time() - t0)
+    except Exception: log.warning("observe answer failed %s", mid)
     try: replaced = prog.finish(final)
     except Exception as e: log.warning("progress finish error (ignored): %s", e); replaced = False
     if replaced: log.info("reply %s ok=True via status edit", mid); return
@@ -1136,7 +1196,39 @@ def _catchup_settings():
     def num(key, default):
         try: return int(c.get(key, default))
         except (TypeError, ValueError): return default
-    return {"enabled": bool(c.get("enabled", True)), "overlap_sec": max(0, num("overlap_sec", 300)), "max_messages": max(1, num("max_messages", 20))}
+    # max_age_sec：不写是 12 小时。写成 0 表示不再另加时限（仍受心跳和条数限制）。负数或写错按 12 小时。
+    if "max_age_sec" not in c or c.get("max_age_sec") is None or c.get("max_age_sec") == "":
+        max_age = 12 * 3600
+    else:
+        try: max_age = int(c.get("max_age_sec"))
+        except (TypeError, ValueError): max_age = 12 * 3600
+        if max_age < 0: max_age = 12 * 3600
+    return {"enabled": bool(c.get("enabled", True)), "overlap_sec": max(0, num("overlap_sec", 300)),
+            "max_messages": max(1, num("max_messages", 20)), "max_age_sec": max_age}
+
+def catchup_since(now, heartbeat, overlap_sec, max_age_sec):
+    """回扫起点。先从上次心跳往前重叠，再不能早于现在减去 max_age_sec。max_age_sec 为 0 时不另加时限。"""
+    start = float(heartbeat) - float(overlap_sec)
+    try: age = float(max_age_sec)
+    except (TypeError, ValueError): age = 0
+    if age > 0: start = max(start, float(now) - age)
+    return start
+
+def message_recalled(m):
+    """已撤回的消息不补答。只认明确的撤回标记，避免把普通状态当成撤回。"""
+    if not isinstance(m, dict): return False
+    def truthy(v):
+        if v is True: return True
+        if isinstance(v, str) and v.strip().lower() in ("1", "true", "yes"): return True
+        return False
+    for key in ("deleted", "recalled", "withdrawn", "is_deleted", "is_recalled"):
+        if truthy(m.get(key)): return True
+    for key in ("message_status", "msg_status", "status"):
+        val = m.get(key)
+        if isinstance(val, str) and val.strip().lower() in ("deleted", "recalled", "withdrawn", "recall", "recalled_message"):
+            return True
+    mtype = str(m.get("message_type") or m.get("msg_type") or "").strip().lower()
+    return mtype in ("deleted", "recall", "recalled")
 
 def event_from_listed(chat_id, m):
     """把 chat-messages-list 的一条收成 handle 能吃的事件。没有消息编号的跳过。"""
@@ -1169,7 +1261,7 @@ def catch_up_mentions():
     except Exception: hb = 0
     if hb <= 0:
         log.info("catchup skip: no previous heartbeat"); return
-    start_ts = hb - cfg["overlap_sec"]
+    start_ts = catchup_since(time.time(), hb, cfg["overlap_sec"], cfg["max_age_sec"])
     start = datetime.datetime.fromtimestamp(start_ts).astimezone().isoformat(timespec="seconds")
     chats = static_chat_ids()
     if chats is None: chats = [r["chat_id"] for r in all_chats() if r.get("status") == "admitted"]
@@ -1188,6 +1280,8 @@ def catch_up_mentions():
             if n >= cfg["max_messages"]: break
             ts = _msg_ts(m)
             if ts is not None and ts < start_ts: continue
+            if message_recalled(m):
+                log.info("catchup skip recalled %s", m.get("message_id") or m.get("id")); continue
             ev = event_from_listed(cid, m)
             if not ev or not is_for_me(ev): continue
             if (ev.get("sender_type") or "") in ("app", "bot"): continue
@@ -1203,11 +1297,69 @@ def catch_up_mentions():
 def startup_recover():
     recover_inflight(); catch_up_mentions()
 
-def heartbeat():
-    while True:
-        try: open(os.path.join(STATE, "heartbeat"), "w").write(str(int(time.time())))
+_CONSUMERS = []
+_CONSUMERS_LOCK = threading.Lock()
+_SHUTDOWN_ONCE = threading.Lock()
+_LINK = feishu_link.LinkWatch(jump_sec=feishu_link.jump_setting(CFG))
+def _track_consumer(proc):
+    snap = proc_identity.snapshot(proc.pid) or {}
+    with _CONSUMERS_LOCK: _CONSUMERS.append((proc, snap.get("created") or ""))
+def _stop_consumers():
+    """只结束创建时间仍对得上的那一个。对不上就跳过，避免编号被别的进程复用后误伤。"""
+    with _CONSUMERS_LOCK: items = list(_CONSUMERS)
+    for proc, created in items:
+        if proc.poll() is not None: continue
+        snap = proc_identity.snapshot(proc.pid)
+        if not created or not snap or str(snap.get("created") or "") != str(created):
+            log.warning("skip consumer pid %s (not the process we started)", proc.pid); continue
+        try: proc.terminate()
         except OSError: pass
-        time.sleep(60)
+def _flush_logs():
+    for h in log.handlers:
+        try: h.flush()
+        except Exception: pass
+def finish_shutdown():
+    """停掉本进程拉起的长连接，等正在答的题一小会儿。等不到就直接退出，不让收尾把题标成已回答。"""
+    if not _SHUTDOWN_ONCE.acquire(blocking=False): return
+    lifecycle.request_shutdown(STATE)
+    _stop_consumers()
+    deadline = time.time() + lifecycle.wait_sec(CFG)
+    while time.time() < deadline and (_active or _waiting): time.sleep(0.2)
+    _release_lock(); _flush_logs()
+    busy = bool(_active or _waiting)
+    log.info("shutdown done busy=%s", busy); _flush_logs()
+    if busy: os._exit(0)
+    sys.exit(0)
+def _on_signal(signum, _frame):
+    try: log.info("signal %s, shutting down", signum)
+    except Exception: pass
+    lifecycle.request_shutdown(STATE)
+    _stop_consumers()
+def _on_wake(gap):
+    # 先补答再写新心跳。心跳文件里还是休眠前的时间，回扫才能盖住这段空档。
+    log.warning("wake or clock jump %.0fs, restart long connection and catch up", gap)
+    try: catch_up_mentions()
+    except Exception: log.exception("catchup after wake failed")
+def heartbeat():
+    _LINK.start()
+    wrote = 0
+    while not lifecycle.SHUTDOWN.is_set():
+        try: gap = _LINK.pulse()
+        except Exception:
+            log.exception("link pulse failed"); gap = 0
+        if lifecycle.shutdown_requested(STATE):
+            _stop_consumers(); return
+        if gap:
+            try: _on_wake(gap)
+            except Exception: log.exception("wake handler failed")
+        now = time.time()
+        if not gap and now - wrote >= 60 and not lifecycle.SHUTDOWN.is_set():
+            try: open(os.path.join(STATE, "heartbeat"), "w").write(str(int(now)))
+            except OSError: pass
+            wrote = now
+            try: OBS.shrink_stdio()
+            except Exception: pass
+        time.sleep(1)
 
 def self_check():
     ok = True
@@ -1250,6 +1402,9 @@ def self_check():
     return ok
 
 def main():
+    if DOCTOR:
+        import doctor
+        sys.exit(doctor.run_doctor(CFG, BASE, lark_exe()))
     if CHECK: sys.exit(0 if self_check() else 1)
     if not CFG.get("bot_open_id"): log.warning("dry-run：bot_open_id 为空")
     if LOCK_TEST is not None:
@@ -1266,7 +1421,17 @@ def main():
             else: ingest(obj)
         for t in ths: t.join()
         log.info("dry-run finished peak_active=%d max_concurrency=%d", _peak, MAXC); return
-    check_conflicts(); acquire_lock(); startup_recover(); threading.Thread(target=heartbeat, daemon=True).start()
+    check_conflicts(); acquire_lock()
+    lifecycle.clear_request(STATE)  # 上次停止留下的请求不能让这次刚启动就退出
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try: signal.signal(sig, _on_signal)
+        except (OSError, ValueError): pass
+    if hasattr(signal, "SIGBREAK"):
+        try: signal.signal(signal.SIGBREAK, _on_signal)
+        except (OSError, ValueError): pass
+    threading.Thread(target=heartbeat, daemon=True).start()
+    startup_recover()
+    if lifecycle.SHUTDOWN.is_set(): finish_shutdown()
     log.info("starting %s (features=%s)", CFG["name"], json.dumps(FEAT, ensure_ascii=False))
     if static_chat_ids() is not None: record_static_chats()
     if auto_join_active(): sync_joined_chats()
@@ -1275,21 +1440,71 @@ def main():
         threading.Thread(target=_consume_forever, args=(key,), daemon=True).start()
     _consume_forever(keys[0])
 
+def _poke_consumer(proc, created, seen, down):
+    """连接断了或刚唤醒时，只结束创建时间仍对得上的那一个，好让读取循环返回。"""
+    while proc.poll() is None:
+        if not down.is_set() and _LINK.generation == seen:
+            time.sleep(0.5); continue
+        if feishu_link.may_signal(proc, created):
+            try: proc.terminate()
+            except OSError: pass
+        else:
+            log.warning("skip consumer pid %s (not the process we started)", proc.pid)
+        return
 def _consume_forever(event_key):
-    while True:
+    primary = threading.current_thread() is threading.main_thread()
+    while not lifecycle.SHUTDOWN.is_set():
+        seen = _LINK.generation
         argv = consume_argv(event_key)
         p = subprocess.Popen(argv, cwd=BASE, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
+        created = feishu_link.created_token(p.pid)
+        _track_consumer(p)
         if event_key == "im.message.receive_v1":
             open(os.path.join(STATE, "consumer.pid"), "w").write(str(p.pid))
         log.info("consumer %s pid %s", event_key, p.pid)
-        threading.Thread(target=lambda proc=p, key=event_key: [log.info("[consume:%s] %s", key, l.rstrip()) for l in proc.stderr], daemon=True).start()
+        down = threading.Event()
+        def _err(proc=p, key=event_key, flag=down):
+            for line in proc.stderr:
+                log.info("[consume:%s] %s", key, line.rstrip())
+                if _LINK.note(key, line) == "down": flag.set()
+        threading.Thread(target=_err, daemon=True).start()
+        threading.Thread(target=_poke_consumer, args=(p, created, seen, down), daemon=True).start()
         for line in p.stdout:
+            if lifecycle.SHUTDOWN.is_set() or _LINK.generation != seen or down.is_set(): break
             line = line.strip()
             if not line.startswith("{"): continue
             try: obj = json.loads(line)
             except Exception: continue
             threading.Thread(target=ingest, args=(obj,), daemon=True).start()
-        log.warning("consumer %s exited rc=%s, restart in 10s", event_key, p.wait()); time.sleep(10)
+        if lifecycle.SHUTDOWN.is_set(): reason = "shutdown"
+        elif _LINK.generation != seen: reason = "wake"
+        elif down.is_set(): reason = "down"
+        else: reason = "exit"
+        if p.poll() is None and reason in ("wake", "down", "shutdown"):
+            if feishu_link.may_signal(p, created):
+                try: p.terminate()
+                except OSError: pass
+            else:
+                log.warning("skip consumer pid %s (not the process we started)", p.pid)
+        while True:
+            # 上一进程还在就继续等。创建时间对不上时也不另起第二个接收进程。
+            action = feishu_link.next_consumer_action(p.poll() is None, reason, lifecycle.SHUTDOWN.is_set())
+            if action != "wait": break
+            time.sleep(0.5)
+        if action != "restart":
+            break
+        rc = p.wait()
+        if reason == "wake":
+            delay = 0
+            log.warning("consumer %s restart after wake", event_key)
+        else:
+            delay = _LINK.fail(event_key)
+            log.warning("consumer %s exited rc=%s (%s), restart in %ss", event_key, rc, reason, delay)
+        deadline = time.time() + delay
+        while time.time() < deadline:
+            if lifecycle.SHUTDOWN.is_set() or _LINK.generation != seen: break
+            time.sleep(0.5)
+    if primary: finish_shutdown()
 
 if __name__ == "__main__":
     main()

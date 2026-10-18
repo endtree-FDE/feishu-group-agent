@@ -89,6 +89,8 @@ def answer_for(text):
         return "根据工具结果：周五交报名"
     if "<<ACP_TOOL>>" in text:
         return '<<TOOL>>{"tool":"history","args":{}}'
+    if "<<ACP_ATTACH>>" in text:
+        return '<<TOOL>>{"tool":"message_attachment","args":{"message_id":"om_slowattach1"}}'
     if "<<ACP_SKILL>>" in text:
         return '<<TOOL>>{"tool":"skill_read","name":"progress-table"}'
     return "常驻答案"
@@ -205,6 +207,9 @@ def handle_prompt(req_id, sid, text, wait):
     if "<<ACP_PROGRESS>>" in text:
         finish(req_id, sid, "常驻答案", thought=True, read=True, pause=2.2)
         return
+    # 跟进回合先静默一小会儿，但短于 stall_sec。上一轮工具如果很慢，计时必须已经重新开始，否则这里会被当成卡死。
+    if follow and os.environ.get("AGENTBOT_ACP_FOLLOW_PAUSE"):
+        time.sleep(float(os.environ["AGENTBOT_ACP_FOLLOW_PAUSE"]))
     finish(req_id, sid, answer_for(text))
 
 
