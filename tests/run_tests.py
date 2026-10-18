@@ -2010,6 +2010,14 @@ o = run([ev("tf1", "先问一句", sender_id="user_sender"),
          ev("tf4", "管理员补充", sender_id="user_admin", mentions=[], content="管理员补充", root_id="tf1")], name="follow")
 check("话题里发起人可以不 @ 接着问，外人不行，白名单可以",
       "reply tf1" in o and "reply tf2" in o and "reply tf3" not in o and "reply tf4" in o, o)
+o = run([ev("thr1", "话题根", sender_id="user_sender"),
+         ev("thr2", "接着问细节", sender_id="user_sender", mentions=[], content="接着问细节",
+            root_id="thr1", thread_id="thr_other", parent_id="thr1")], name="thread_split")
+_thr_db = sqlite3.connect(os.path.join(T, "state", "state.db"))
+_thr_n = _thr_db.execute("select count(*) from turns where sess=?", ("g:%s:thr1" % CH,)).fetchone()[0]
+_thr_db.close()
+check("话题回复的 thread_id 和根消息不同时，仍是同一话题，发起人可以不 @ 接着问",
+      "reply thr1" in o and "reply thr2" in o and _thr_n == 4 and ("sess=g:%s:thr1" % CH) in o, o)
 o = _dump([ev("qroot1", "根上的问题"),
            ev("qfol1", "接着说", root_id="qroot1", parent_id="qroot1", mentions=[], content="接着说")], "qskip")
 check("已答过的话题里接着发文字，不再重复拉取话题根",

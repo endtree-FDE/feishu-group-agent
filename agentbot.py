@@ -138,10 +138,17 @@ def seen_event(eid):
     with DBL:
         try: DB.execute("insert into events values(?,?)", (eid, time.time())); DB.commit(); return False
         except sqlite3.IntegrityError: return True
+def _topic_id(ev):
+    """同一条话题用同一个编号。回复上的 root_id 优先于 thread_id，避免两者不一致时拆成两段会话。"""
+    if not isinstance(ev, dict): return ""
+    mid = str(ev.get("message_id") or "")
+    root = str(ev.get("root_id") or "")
+    if root and root != mid: return root
+    return str(ev.get("thread_id") or "") or mid
 def session_key(ev):
     # 群会话带上 chat_id。飞书的话题编号通常全局唯一，但伪造事件可以复用别的群的 root_id。
     if ev.get("chat_type") == "p2p": return "p2p:" + (ev.get("chat_id") or ev.get("sender_id") or "?")
-    topic = ev.get("thread_id") or ev.get("root_id") or ev.get("message_id")
+    topic = _topic_id(ev) or ev.get("message_id")
     return "g:%s:%s" % (ev.get("chat_id") or "?", topic)
 def history(sess):
     m = CFG.get("memory", {}); n = int(m.get("max_turns", 6)); ttl = float(m.get("ttl_hours", 24)) * 3600
@@ -192,7 +199,7 @@ def _bot_answered(sess):
         row = DB.execute("select 1 from turns where sess=? and role=? limit 1", (sess, "bot")).fetchone()
     return bool(row)
 def _note_thread(ev, uid):
-    root = ev.get("thread_id") or ev.get("root_id") or ev.get("message_id")
+    root = _topic_id(ev) or ev.get("message_id")
     chat = ev.get("chat_id") or ""
     if not root or not chat: return
     with DBL:
@@ -215,8 +222,8 @@ def _thread_followup_ok(ev, uid):
     """话题里机器人已经答过，发起人或白名单可以不 @ 接着问。没写这项时关闭。"""
     fc = _follow_cfg()
     if not fc["enabled"] or (ev.get("chat_type") or "group") == "p2p": return False
-    root = ev.get("thread_id") or ev.get("root_id")
-    if not root or not _bot_answered(session_key(ev)): return False
+    root = _topic_id(ev)
+    if not root or root == str(ev.get("message_id") or "") or not _bot_answered(session_key(ev)): return False
     who = fc["who"]
     if who == "anyone": return True
     if who == "whitelist": return is_admin(uid)
