@@ -189,6 +189,14 @@
 
 配置文件里没有账号、没有密码、没有密钥。`api_key_env` 只是变量名。Cursor 的额度算在运行 `cursor-agent login` 的那个人头上。`openai_compat` 的额度算在那个环境变量对应的账号上。
 
+只想先看 JSON 写得对不对、有没有把密钥写进文件，可以不连飞书：
+
+```text
+python checks/check_config.py agents/example.json
+```
+
+它按 `agents/config.schema.json` 检查已经写了的键。缺了的键不算错，不认识的新键先留着。类型不对、`api_key_env` 不像变量名、`base_url` 里夹了密钥，会打印「错误」并以失败退出。从示例复制出来的文件里如果还留着 `REPLACE_`，只打印「提示」，检查仍然通过。`example.json` 本身允许这些占位。
+
 ## 脱敏和红线
 
 `redact_file`：客户名名单的文件名，默认 `redact.txt`，放在 `base_dir` 里。一行一个名字。复制 `redact.example.txt` 再填。名单为空时，只打码手机号、证件号、邮箱、密钥样子的字符串和电脑路径。

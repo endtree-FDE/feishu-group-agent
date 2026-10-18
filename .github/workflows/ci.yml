@@ -29,6 +29,10 @@ jobs:
         env:
           PYTHONUTF8: "1"
         run: python checks/test_batch.py
+      - name: Config schema
+        env:
+          PYTHONUTF8: "1"
+        run: python checks/check_config.py agents/example.json
       - name: Tests
         env:
           PYTHONUTF8: "1"
