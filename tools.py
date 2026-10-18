@@ -26,12 +26,13 @@ SCOPE_HINT = {
     "history": "im:message.group_msg（群消息读取）", "docs_read": "docx:document:readonly",
     "docs_search": "search:docs:read", "calendar_read": "calendar:calendar.event:read",
     "base_read": "base:record:read", "attachment": "im:message:readonly / im:resource",
+    "message_attachment": "im:resource",
     "docs_create": "docx:document:create", "docs_append": "docx:document:write_only",
     "calendar_create": "calendar:calendar.event:create", "calendar_create_batch": "calendar:calendar.event:create",
     "calendar_update": "calendar:calendar.event:update", "calendar_delete": "calendar:calendar.event:delete",
     "base_create": "base:record:create", "merge_forward": "im:message:readonly",
 }
-READ_TOOLS = {"history", "docs_read", "docs_search", "calendar_read", "base_read"}
+READ_TOOLS = {"history", "docs_read", "docs_search", "calendar_read", "base_read", "message_attachment"}
 WRITE_TOOLS = {"docs_create", "docs_append", "calendar_create", "calendar_create_batch", "calendar_update", "calendar_delete", "base_create"}
 _CAL_FOLLOW = {"calendar_create_batch", "calendar_update", "calendar_delete"}
 _NOTIFY_RX = re.compile(r"@\s*全员|@\s*所有人|通知全员|通知所有人|提醒全员|告知全员|艾特全员")
@@ -60,10 +61,11 @@ def apply_legacy_names(cfg):
     take((cfg.get("write") or {}).get("resources"), _LEGACY_RESOURCES, "write.resources")
     return hints
 
-TOOL_DOC = """可用工具（飞书读写每次最多调用一个；需要时只输出一行：<<TOOL>>{"tool":"名称","args":{...}}，不要输出别的）：
-- history {"keyword":"可选关键词"}：读取本群最近几天的消息，包含话题里的回复（仅群聊可用）
+TOOL_DOC = """可用工具（每一轮只输出一行：<<TOOL>>{"tool":"名称","args":{...}}，不要输出别的。只读工具可以连续多轮；写入类每轮只提议一个，并要发起人确认）：
+- history {"keyword":"可选关键词"}：读取本群最近几天的消息，包含话题里的回复（仅群聊可用）。文件和图片会写成 [文件 文件名 id=om_…]，文档链接会保留
+- message_attachment {"message_id":"om_消息编号"}：读取当前会话里这条消息的附件（文件、图片、富文本里的文件）。只能读当前会话、且在 history.days 天以内的消息
 - docs_search {"query":"关键词"}：搜索已分享给机器人的飞书文档
-- docs_read {"doc":"云文档链接或 token","keyword":"可选"}：读取飞书文档内容。file_ 或 img_ 开头的是聊天附件，不是云文档，不要传给这个工具
+- docs_read {"doc":"云文档链接、知识库链接或 token","keyword":"可选"}：读取飞书文档或知识库。file_ 或 img_ 开头的是聊天附件，不是云文档，不要传给这个工具；聊天附件用 message_attachment
 - calendar_read {"start":"ISO8601","end":"ISO8601"}：查看团队日历日程
 - base_read {"keyword":"可选"}：查询团队多维表格记录
 - docs_create {"title":"标题","markdown":"正文"}：在团队专用文件夹新建文档（需发起人确认）
@@ -76,6 +78,7 @@ TOOL_DOC = """可用工具（飞书读写每次最多调用一个；需要时只
 上面这些只是飞书读写。联网搜索和打开网页是你自带的能力，不在这张表里，需要时直接用，不要拒绝。
 多个日程用 calendar_create_batch，仍然只输出一行。notify_all 只在对方明确说要 @全员 或通知所有人时才设为 true，不要自己写 at 标签，也不要邀请任何人。
 没有必要就不要调用工具，直接回答。
+被问到本群里的文件、图片、飞书文档或知识库时，要真的去读，不要只看发送记录：先用 history 看 [文件 文件名 id=om_…] 和文档链接，再用 message_attachment 按消息编号读取附件，用 docs_read 读取文档或知识库，读完再总结。
 重要：你处于只读模式，不能改本地文件，但飞书的新建/追加/建日程/改日程/删日程/加记录不需要你自己执行——只要输出上面那一行 <<TOOL>>，机器人会代为执行（写操作先让发起人回复确认码）。用户要求写飞书时，直接输出对应工具行，绝不要回答“切换到可编辑模式”或“无法创建”。"""
 MEMORY_TOOL_DOC = """还可以提议写入群记忆（需白名单发起人确认，仍只输出一行）：
 - memory_propose {"text":"主题：内容"}：用户明确说「记住」「以后都」这类偏好时使用。不要把没经确认的内容当成已经记住。"""
@@ -95,6 +98,12 @@ class Tools:
 
     # ---------- 基础 ----------
     def enabled(self, name):
+        # 旧配置没写 message_attachment 时，跟着附件开关。写了 enabled 就以写的为准。
+        if name == "message_attachment":
+            spec = self.t.get(name)
+            if not isinstance(spec, dict) or "enabled" not in spec:
+                return self.enabled("attachment")
+            return bool(spec.get("enabled"))
         spec = self.t.get(name)
         if isinstance(spec, dict) and "enabled" in spec: return bool(spec.get("enabled"))
         # 旧配置只写了 calendar_create。改、删、批量跟着它开；写了 enabled 就以写的为准。
@@ -167,11 +176,11 @@ class Tools:
         msgs = (j.get("data") or {}).get("messages") or []
         kw = (a.get("keyword") or "").strip(); kw_l = kw.lower(); lines = []
         for m in msgs:
-            blob = _history_blob(m)
+            blob = _history_blob(m, self.names)
             if kw_l and kw_l not in blob.lower(): continue
-            lines.append(_history_line(m))
+            lines.append(_history_line(m, self.names))
             for r in (m.get("thread_replies") or m.get("replies") or []):
-                if isinstance(r, dict): lines.append("  回复 " + _history_line(r))
+                if isinstance(r, dict): lines.append("  回复 " + _history_line(r, self.names))
         return "本群最近 %d 天消息（%d 条%s）：\n" % (days, len(lines), "，关键词=" + kw if kw else "") + "\n".join(lines[:150])
 
     def _docs_search(self, a, ctx):
@@ -185,14 +194,107 @@ class Tools:
         if not doc: raise ToolError("没有给出文档链接")
         if is_chat_file_token(doc):
             raise ToolError("这是聊天附件，不是云文档。请直接根据附件内容回答，不要把 file_key 当成文档 token")
+        wiki = wiki_token(doc)
+        if wiki:
+            doc = self._resolve_wiki(wiki)
         allow = self.t["docs_read"].get("allow_tokens")  # 为空表示：机器人能看到的都能读
         if allow and not _allow_token(doc, allow): raise ToolError("这份文档不在可读白名单里")
         argv = ["docs", "+fetch", "--doc", doc, "--doc-format", "markdown"]
         if a.get("keyword"): argv += ["--scope", "keyword", "--keyword", str(a["keyword"])[:50]]
-        j = self.lark("docs_read", argv)
-        d = j.get("data") or {}
-        text = d.get("markdown") or d.get("content") or json.dumps(d, ensure_ascii=False)
+        try:
+            j = self.lark("docs_read", argv)
+        except ToolError as e:
+            if wiki and "没有访问" in (e.user_msg or ""):
+                bot = (self.cfg.get("bot_names") or ["机器人"])[0]
+                raise ToolError("这份知识库文档没对应用开放（需要把它分享给应用「%s」）" % bot, e.detail)
+            raise
+        text = doc_plain(j.get("data") or {})
         return "文档内容（节选）：\n" + clip_body(text, _cfg_int(self.t["docs_read"].get("max_chars"), DEFAULT_BODY_CHARS))
+
+    def _resolve_wiki(self, token):
+        """知识库链接先换成底层文档 token。权限不足时说明缺的是知识库 scope，还是文档没对应用开放。"""
+        try:
+            j = self.lark("docs_read", ["wiki", "+node-get", "--node-token", token])
+        except ToolError as e:
+            raise ToolError(self._wiki_err(e), e.detail)
+        d = j.get("data") or {}
+        node = d.get("node") if isinstance(d.get("node"), dict) else d
+        obj = str(node.get("obj_token") or "").strip()
+        kind = str(node.get("obj_type") or "").strip().lower()
+        if not obj:
+            raise ToolError("知识库节点没有返回可读取的文档")
+        if kind and kind not in ("doc", "docx"):
+            title = str(node.get("title") or kind)
+            raise ToolError("这份知识库是 %s（《%s》），不能当文档正文读取" % (kind, title))
+        return obj
+
+    def _wiki_err(self, err):
+        detail = getattr(err, "detail", "") or ""
+        msg = getattr(err, "user_msg", "") or ""
+        low = detail.lower()
+        if any(s in detail for s in ("99991672", "99991679", "app_scope_not_applied", "missing_scope")) or "权限未开" in msg or "scope" in low:
+            return "这项权限未开（需要管理员在开放平台开通 wiki:node:read（或 wiki:wiki:readonly、wiki:node:retrieve）并发版）"
+        bot = (self.cfg.get("bot_names") or ["机器人"])[0]
+        if any(s in detail for s in ("131006", "91403")) or "没有访问" in msg or "forbidden" in low or "无权限" in msg or "没有权限" in msg:
+            return "这份知识库文档没对应用开放（需要把它分享给应用「%s」）" % bot
+        return msg or "知识库暂时读不了"
+
+    def _history_days(self):
+        h = self.t.get("history")
+        raw = h.get("days", 7) if isinstance(h, dict) else 7
+        try: n = int(raw)
+        except (TypeError, ValueError): return 7
+        return n if n >= 0 else 7
+
+    def _attach_quota(self):
+        spec = self.t.get("message_attachment")
+        raw = spec.get("max_per_answer", 4) if isinstance(spec, dict) else 4
+        try: n = int(raw)
+        except (TypeError, ValueError): n = 4
+        return n if n >= 0 else 4
+
+    def _message_attachment(self, a, ctx):
+        """读取当前会话里某一条历史消息的附件。下载前先核对群和天数，再复用附件下载。"""
+        mid = _safe_message_id(a.get("message_id"))
+        chat = str((ctx or {}).get("chat_id") or "")
+        if not chat: raise ToolError("没有当前会话，不能读取附件")
+        cap = self._attach_quota()
+        used = int((ctx or {}).get("_attach_used") or 0)
+        if used >= cap:
+            raise ToolError("这次回答里附件已经看了 %d 个，剩下的请分开再问。" % cap)
+        j = self.lark("message_attachment", ["im", "+messages-mget", "--message-ids", mid, "--no-reactions"])
+        msg = _pick_message(j.get("data") or {}, mid)
+        if not msg: raise ToolError("没有找到这条消息")
+        got = str(msg.get("message_id") or msg.get("id") or "")
+        if got and got != mid: raise ToolError("没有对上这条消息，不能读取附件")
+        if _msg_chat(msg) != chat:
+            raise ToolError("只能读取当前会话里的附件")
+        ts = message_ts(msg.get("create_time") if msg.get("create_time") is not None else msg.get("create_time_ms"))
+        if ts is None: raise ToolError("看不出发送时间，不能读取这条附件")
+        days = self._history_days()
+        if time.time() - ts > days * 86400:
+            raise ToolError("这条消息超过了最近 %d 天，不能读取附件" % days)
+        d, files, mtype, saved = self.fetch_attachments(mid, ctx, os.path.join(self.base, "tmp"), must_enable=False)
+        img_dir = None
+        try:
+            limits = attachment_limits(self.cfg)
+            vision = bool((self.cfg.get("features") or {}).get("vision", True))
+            kb = os.path.join(self.base, self.cfg.get("kb_dir", "kb"))
+            lines, img_dir, n, skipped = render_saved_files(
+                files, limits, vision, mtype or (saved or {}).get("msg_type") or "", kb, os.path.basename(d), cap - used)
+            if isinstance(ctx, dict):
+                ctx["_attach_used"] = used + n
+            if not lines and not files:
+                return "这条消息里没有下载到附件。"
+            if skipped:
+                lines.append("这次回答最多再读 %d 个附件，还有 %d 个没有读。" % (cap - used, skipped))
+            return "\n\n".join(x for x in lines if x) or "这条消息里没有下载到附件。"
+        finally:
+            if isinstance(ctx, dict):
+                def cleanup(folder=d, images=img_dir):
+                    shutil.rmtree(folder, ignore_errors=True)
+                    if images: shutil.rmtree(images, ignore_errors=True)
+                ctx.setdefault("_cleanups", []).append(cleanup)
 
     def _calendar_read(self, a, ctx):
         argv = ["calendar", "+agenda"]
@@ -417,8 +519,8 @@ class Tools:
         return msg
 
     # ---------- 附件（图片/文件） ----------
-    def fetch_attachments(self, message_id, ctx, tmp_root):
-        if not self.enabled("attachment"): raise ToolError("图片和文件识别还没在配置里启用")
+    def fetch_attachments(self, message_id, ctx, tmp_root, must_enable=True):
+        if must_enable and not self.enabled("attachment"): raise ToolError("图片和文件识别还没在配置里启用")
         d = os.path.join(tmp_root, "att_" + re.sub(r"\W", "", message_id)[-20:]); os.makedirs(d, exist_ok=True)
         j = self.lark("attachment", ["im", "+messages-mget", "--message-ids", message_id, "--download-resources", "--no-reactions"], cwd=d, timeout=120)
         files = []
@@ -448,7 +550,7 @@ class Tools:
         for it in items[:30]:
             it = _normalize_msg(it)
             mt = str(it.get("msg_type") or it.get("message_type") or "").lower()
-            line = _history_line(it)
+            line = _history_line(it, self.names)
             if mt in ("merge_forward", "merge_forward_msg"): line += "（内层转发不再展开）"
             lines.append(line)
         more = ("\n（还有 %d 条没有展开）" % (len(items) - 30)) if len(items) > 30 else ""
@@ -515,6 +617,13 @@ def _collect_text(obj, out, depth=0):
     tag = str(obj.get("tag") or "")
     if tag == "img": out.append("[图片]"); return
     if tag in ("file", "media"): out.append("[文件]"); return
+    if tag == "a":
+        href = obj.get("href") if isinstance(obj.get("href"), str) else ""
+        if not href and isinstance(obj.get("url"), str): href = obj.get("url")
+        label = obj.get("text") if isinstance(obj.get("text"), str) else ""
+        bit = (label + " " + href).strip()
+        if bit: out.append(bit)
+        return
     for k in ("text", "title"):
         v = obj.get(k)
         if isinstance(v, (str, dict, list)): _collect_text(v, out, depth + 1)
@@ -554,17 +663,160 @@ def _sender_name(m):
     if isinstance(s, str): return s
     return str((m or {}).get("sender_id") or "") if isinstance(m, dict) else ""
 
-def _history_line(m):
+_DOC_URL = re.compile(r"https?://[^\s<>\"']+/(?:wiki|docx|docs|doc|sheets|sheet|base|bitable|file|slides)/[A-Za-z0-9]+", re.I)
+_MSG_ID_RX = re.compile(r"^om_[A-Za-z0-9]{4,80}$")
+
+def wiki_token(doc):
+    """从知识库链接或 wik 开头的 token 里取出节点 token。普通云文档返回空。"""
+    raw = str(doc or "").strip()
+    if not raw: return ""
+    m = re.search(r"/wiki/([A-Za-z0-9]{4,80})", raw)
+    if m: return m.group(1)
+    if re.match(r"^wik[A-Za-z0-9]{4,80}$", raw): return raw
+    return ""
+
+def doc_plain(data):
+    """取出文档正文。当前 lark-cli 放在 data.document.content，旧版在 markdown 或 content。"""
+    if not isinstance(data, dict):
+        return "" if data is None else str(data)
+    doc = data.get("document")
+    if isinstance(doc, dict):
+        content = doc.get("content")
+        if isinstance(content, str) and content.strip(): return content
+        if isinstance(content, (dict, list)) and content:
+            return json.dumps(content, ensure_ascii=False)
+    for key in ("markdown", "content"):
+        val = data.get(key)
+        if isinstance(val, str) and val.strip(): return val
+    return json.dumps(data, ensure_ascii=False)
+
+def _safe_message_id(raw):
+    s = str(raw or "").strip()
+    if not _MSG_ID_RX.match(s): raise ToolError("消息编号不对")
+    return s
+
+def message_ts(raw):
+    if raw is None or raw == "": return None
+    if isinstance(raw, (int, float)):
+        n = float(raw)
+        return n / 1000.0 if n > 10_000_000_000 else n
+    s = str(raw).strip()
+    if re.match(r"^-?\d+$", s):
+        n = int(s)
+        return n / 1000.0 if n > 10_000_000_000 else float(n)
+    try: return datetime.datetime.fromisoformat(s).timestamp()
+    except Exception: return None
+
+def _msg_chat(msg):
+    if not isinstance(msg, dict): return ""
+    v = msg.get("chat_id")
+    if isinstance(v, str) and v.strip(): return v.strip()
+    chat = msg.get("chat")
+    if isinstance(chat, dict):
+        v = chat.get("chat_id")
+        if isinstance(v, str) and v.strip(): return v.strip()
+    return ""
+
+def _pick_message(data, mid):
+    msgs = []
+    if isinstance(data, dict):
+        for k in ("messages", "items"):
+            v = data.get(k)
+            if isinstance(v, list):
+                msgs = [x for x in v if isinstance(x, dict)]
+                break
+        if not msgs and (data.get("message_id") or data.get("msg_type") or data.get("body") or data.get("content") is not None):
+            msgs = [data]
+        elif not msgs and isinstance(data.get("data"), dict):
+            return _pick_message(data.get("data"), mid)
+    found = None
+    for m in msgs:
+        m = _normalize_msg(m)
+        if str(m.get("message_id") or m.get("id") or "") == mid:
+            return m
+        found = m
+    if len(msgs) == 1 and found is not None:
+        return _normalize_msg(found)
+    return None
+
+def _doc_links(msg):
+    found, seen = [], set()
+    def walk(obj, depth):
+        if depth > 12 or obj is None: return
+        if isinstance(obj, str):
+            for u in _DOC_URL.findall(obj):
+                u = u.rstrip(".,;，。)")
+                if u not in seen:
+                    seen.add(u); found.append(u)
+            s = obj.strip()
+            if s[:1] in "{[":
+                try: parsed = json.loads(s)
+                except Exception: parsed = None
+                if isinstance(parsed, (dict, list)): walk(parsed, depth + 1)
+            return
+        if isinstance(obj, list):
+            for x in obj: walk(x, depth + 1)
+            return
+        if not isinstance(obj, dict): return
+        for k in ("href", "url", "link", "text", "content", "title"):
+            if k in obj: walk(obj.get(k), depth + 1)
+        for k, v in obj.items():
+            if k in ("href", "url", "link", "text", "content", "title"): continue
+            if isinstance(v, (dict, list)): walk(v, depth + 1)
+    if isinstance(msg, dict): walk(msg.get("content"), 0)
+    return found
+
+def _attachment_marks(msg, names=None):
+    """历史里给模型看的附件标记：[文件 报名.pdf id=om_…]。文件名先脱敏。没有安全的消息编号就不写 id。"""
+    if not isinstance(msg, dict): return []
+    msg = _normalize_msg(msg)
+    mid = str(msg.get("message_id") or msg.get("id") or "").strip()
+    if not _MSG_ID_RX.match(mid): mid = ""
+    mtype = str(msg.get("msg_type") or msg.get("message_type") or "").lower()
+    marks, seen = [], set()
+    def add(bit):
+        if bit and bit not in seen:
+            seen.add(bit); marks.append(bit)
+    pairs = attachment_names(msg)
+    if pairs:
+        for key, name in pairs:
+            low = name.lower()
+            kind = "图片" if str(key).lower().startswith("img_") or mtype == "image" or low.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")) else "文件"
+            safe = guard.redact(name, names or [])
+            add("[%s %s%s]" % (kind, safe, (" id=%s" % mid) if mid else ""))
+        return marks
+    if not mid: return marks
+    if mtype == "image": add("[图片 id=%s]" % mid)
+    elif mtype in ("file", "media", "audio"): add("[文件 id=%s]" % mid)
+    elif mtype == "post":
+        plain = message_text(msg)
+        if "[图片]" in plain and "[文件]" not in plain: add("[图片 id=%s]" % mid)
+        elif "[文件]" in plain or "[图片]" in plain: add("[文件 id=%s]" % mid)
+    return marks
+
+def _history_line(m, names=None):
     if not isinstance(m, dict): return str(m or "")
     m = _normalize_msg(m)
     ts = str(m.get("create_time") or m.get("create_time_ms") or "")
-    return "%s %s：%s" % (ts, _sender_name(m), message_text(m))
+    body = message_text(m)
+    marks = _attachment_marks(m, names)
+    if marks:
+        for bare in ("[文件]", "[图片]", "[富文本]"):
+            body = body.replace(bare, " ")
+        body = re.sub(r"[ \t]{2,}", " ", body).strip()
+        extra = [mk for mk in marks if mk not in body]
+        if extra: body = (body + " " + " ".join(extra)).strip()
+    links = [u for u in _doc_links(m) if u not in body]
+    if links: body = (body + " " + " ".join(links)).strip()
+    return "%s %s：%s" % (ts, _sender_name(m), body)
 
-def _history_blob(m):
+def _history_blob(m, names=None):
     if not isinstance(m, dict): return ""
     bits = [message_text(m)]
+    bits.extend(_attachment_marks(m, names))
+    bits.extend(_doc_links(m))
     for r in (m.get("thread_replies") or m.get("replies") or []):
-        if isinstance(r, dict): bits.append(message_text(r))
+        if isinstance(r, dict): bits.append(_history_blob(r, names))
     return "\n".join(x for x in bits if x)
 
 def _allow_token(doc, allow):
@@ -815,7 +1067,7 @@ VIDEO_EXT = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".wmv", ".flv", ".m4v", ".
 OFFICE_NEW = {".docx", ".pptx", ".xlsx"}
 OFFICE_OLD = {".doc", ".ppt", ".xls"}
 _ATT_DEFAULTS = {"max_mb": 20, "zip_max_files": 30, "zip_max_read": 8, "zip_max_mb": 40, "zip_max_ratio": 80,
-                 "pdf_max_pages": 20, "pdf_scan_pages": 3, "pdf_max_images": 3}
+                 "pdf_max_pages": 20, "pdf_scan_pages": 10, "pdf_max_images": 3}
 
 def attachment_limits(cfg=None, max_chars=None):
     """附件读取上限。配置里没写的项用默认值，旧的 agents/*.json 不用改。"""
@@ -990,6 +1242,7 @@ def _read_pdf(path, limits, vision, title):
     n = min(total, limits["pdf_max_pages"])
     blocks, images = [], []
     img_used, empty_tail = 0, []
+    saw_blank = False
     scan_limit = limits["pdf_scan_pages"]
     stem = os.path.splitext(os.path.basename(path))[0][:40]
     shown = os.path.basename(path)
@@ -1007,6 +1260,7 @@ def _read_pdf(path, limits, vision, title):
         except Exception: text = ""
         if _pdf_has_text(text):
             flush_tail(); blocks.append("【第 %d 页】\n%s" % (i, text.strip())); continue
+        saw_blank = True
         if i > scan_limit:
             empty_tail.append(i); continue
         viewable, opaque = _pdf_page_images(page)
@@ -1034,8 +1288,12 @@ def _read_pdf(path, limits, vision, title):
             blocks.append("【第 %d 页】\n（这一页没有文字，也没有可查看的图片。若是扫描件，请导出成 PNG 或 JPG 再发。）" % i)
     flush_tail()
     more = ("，这里只读前 %d 页" % n) if total > n else ""
+    scan_note = ""
+    if saw_blank:
+        looked = min(max(int(scan_limit or 0), 0), total)
+        scan_note = "。扫描件，只看了前 %d 页" % looked
     body = clip_body("\n\n".join(blocks), limits["max_chars"])
-    return ["%s（PDF，共 %d 页%s）：\n%s" % (title, total, more, body)], images
+    return ["%s（PDF，共 %d 页%s%s）：\n%s" % (title, total, more, scan_note, body)], images
 
 def zip_rel_parts(name):
     """压缩包内的相对路径。绝对路径、盘符和 .. 一律拒绝。"""
@@ -1234,3 +1492,35 @@ def inspect_download(path, limits=None, msg_type="", vision=True, depth=0, displ
             else: lines.append("%s内容：\n%s" % (title, body))
         return {"lines": lines, "images": []}
     return {"lines": ["%s的类型暂不支持识别。" % title], "images": []}
+
+def render_saved_files(files, limits, vision, msg_type, kb_dir, folder_name, max_files):
+    """读已下载的附件，最多 max_files 个。图片复制到知识库 .attach，方便模型查看。返回 (文字, 图片目录, 已计入个数, 没读个数)。"""
+    parts, img_dir = [], None
+    used = 0
+    mt = str(msg_type or "").lower()
+    files = [f for f in (files or []) if f]
+    max_files = max(0, int(max_files or 0))
+    folder_name = folder_name or "hist"
+    for f in files:
+        if used >= max_files: break
+        used += 1
+        name = os.path.basename(f)
+        try:
+            if os.path.getsize(f) > limits["max_bytes"]:
+                parts.append("附件 %s 太大，已跳过。" % name); continue
+        except OSError:
+            parts.append("附件 %s 无法读取。" % name); continue
+        found = inspect_download(f, limits, msg_type=mt, vision=vision)
+        parts.extend(found["lines"])
+        for im in found["images"]:
+            img_dir = img_dir or os.path.join(kb_dir, ".attach", folder_name)
+            os.makedirs(img_dir, exist_ok=True)
+            dest_name = safe_download_name(im.get("name") or name) or "image"
+            dest = os.path.join(img_dir, dest_name)
+            stem, ext = os.path.splitext(dest_name); n = 1
+            while os.path.exists(dest):
+                dest = os.path.join(img_dir, "%s_%d%s" % (stem, n, ext)); n += 1
+            try: shutil.copy(im["path"], dest)
+            except OSError: continue
+            parts.append("%s，已放在工作区 .attach/%s/%s，请查看后回答。" % (im.get("hint") or "用户发来一张图片", folder_name, os.path.basename(dest)))
+    return parts, img_dir, used, max(0, len(files) - used)
