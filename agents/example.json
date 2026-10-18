@@ -22,6 +22,7 @@
     "min_gap_per_user": 20,
     "max_per_hour": 30
   },
+  "observability": {"journal": true},
   "features": {
     "memory": true,
     "p2p": true,

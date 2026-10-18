@@ -2037,5 +2037,35 @@ ps = prompts(o)
 check("未列入私聊名单的人看不到知识库目录",
       ps and "知识库目录" not in ps[0] and "notes/cutoff.md" not in ps[0] and "KB_BODY" not in ps[0], ps[0] if ps else o)
 
+# ---------- 本机 journal：不含原文 ----------
+def _jlines():
+    p = os.path.join(T, "logs", "journal.jsonl")
+    if not os.path.isfile(p): return []
+    return [ln for ln in open(p, encoding="utf-8").read().splitlines() if ln.strip()]
+_jn_tok = "JOURNAL_SECRET_PHRASE_77"
+_n0 = len(_jlines())
+o = run([ev("jn1", _jn_tok + " 13812345678 " + '<<FAKE_TOOL>>{"tool":"history","args":{"keyword":"%s"}}<<END>> 查一下' % _jn_tok)], name="journal_on")
+_new = _jlines()[_n0:]
+_blob = "\n".join(_new)
+check("journal 只记工具名和字数，不写问题、手机号和路径",
+      len(_new) == 1 and "history" in _blob and "in_chars" in _blob and "elapsed_ms" in _blob
+      and _jn_tok not in _blob and "13812345678" not in _blob and T not in _blob and CH not in _blob
+      and "metric kind=answer" in o, _blob + "\n" + o[-400:])
+def _joff(name):
+    c = json.loads(json.dumps(cfg)); c["observability"] = {"journal": False}
+    pth = os.path.join(T, name + ".json"); json.dump(c, open(pth, "w", encoding="utf-8"), ensure_ascii=False); return pth
+_n1 = len(_jlines())
+o = run([ev("jn2", _jn_tok + " 关掉日志")], name="journal_off", cfg_path=_joff("journal_off"))
+check("observability.journal 为 false 时不追加，metric 行还在",
+      len(_jlines()) == _n1 and "metric kind=answer" in o and _jn_tok not in "\n".join(_jlines()), o[-400:])
+def _jmiss(name):
+    c = json.loads(json.dumps(cfg)); c.pop("observability", None)
+    pth = os.path.join(T, name + ".json"); json.dump(c, open(pth, "w", encoding="utf-8"), ensure_ascii=False); return pth
+_n2 = len(_jlines())
+o = run([ev("jn3", "旧配置没写日志开关")], name="journal_default", cfg_path=_jmiss("journal_default"))
+_added = _jlines()[_n2:]
+check("旧配置没写 observability 时仍然追加一行，且没有问题原文",
+      len(_added) == 1 and "旧配置没写日志开关" not in _added[0] and "in_chars" in _added[0], _added)
+
 print("\n%d/%d passed" % (sum(r for _, r in results), len(results))); shutil.rmtree(T, ignore_errors=True)
 sys.exit(0 if all(r for _, r in results) else 1)
