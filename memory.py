@@ -70,6 +70,16 @@ class GroupMemory:
         return os.path.join(self.root, "groups", chat_id)
     def path(self, chat_id):
         d = self.gdir(chat_id); return os.path.join(d, "GROUP.md") if d else None
+    def ensure_group(self, chat_id):
+        """这个群被认下之后，给它单独建一个目录。长期记忆关着时什么都不建。"""
+        if not self.enabled: return None
+        d = self.gdir(chat_id)
+        if not d: return None
+        os.makedirs(d, exist_ok=True)
+        mp = os.path.join(d, "meta.json")
+        if not os.path.isfile(mp):
+            json.dump({"next_id": 1}, open(mp, "w", encoding="utf-8"))
+        return d
 
     # ---------- 读 ----------
     def _read(self, chat_id):

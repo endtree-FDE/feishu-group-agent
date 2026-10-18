@@ -10,7 +10,7 @@
 
 ## English
 
-A template for a Feishu (Lark) group bot that runs on your own computer. It answers @mentions and allow-listed private chats using Cursor, or any OpenAI-compatible model whose API key stays in an environment variable. It can read recent chat, docs, calendars, and Bitable, and it writes only after a one-time confirmation code. Configuration in this repository uses placeholders. Do not commit App Secrets, filled agent configs, customer-name lists, memory, logs, or real knowledge-base files. Apache-2.0.
+A template for a Feishu (Lark) group bot that runs on your own computer. It answers @mentions in `chat_ids`, or—only if that list is empty and `chats.auto_join` is on—in groups that pass the admit gate (default: an allow-listed member sends `/认群`). It also answers allow-listed private chats, using Cursor or any OpenAI-compatible model whose API key stays in an environment variable. It can read recent chat, docs, calendars, and Bitable, and it writes only after a one-time confirmation code. Configuration in this repository uses placeholders. Do not commit App Secrets, filled agent configs, customer-name lists, memory, logs, or real knowledge-base files. Apache-2.0.
 
 ## 架构
 
@@ -40,6 +40,7 @@ flowchart LR
 ## 功能
 
 - 只在被 @ 或被允许的私聊里回答，不主动发消息。
+- 群默认仍看 `chat_ids`。要改成拉进群再认，把 `chat_ids` 留空并打开 `chats.auto_join`。默认还要白名单成员在群里发「/认群」，避免被陌生人拉进乱群消耗额度。见 [agents/CONFIG.md](agents/CONFIG.md)。
 - 同一个话题接着聊；发「新话题」就清空这几轮上下文。
 - 长期记忆按群分开。白名单里的人才能记和删，删除是真删。
 - 进度卡片：先告诉你正在处理（默认关着，配置里打开）。
@@ -59,7 +60,7 @@ flowchart LR
 python tests/run_tests.py
 ```
 
-一共 147 项，全部通过就可以。
+一共 178 项，全部通过就可以。
 
 从零接到飞书：看 [docs/新建智能体.md](docs/新建智能体.md)。顺序是创建企业自建应用、申请权限、在你自己的电脑上初始化 lark-cli、复制配置、启动。
 
@@ -80,7 +81,9 @@ python tests/run_tests.py
 |---|---|
 | `profile` | 你在 lark-cli 里起的名字，不是密钥 |
 | `bot_open_id` | 机器人自己的编号 |
-| `chat_ids` | 允许回答的群 |
+| `chat_ids` | 允许回答的群。写了就只用它 |
+| `chats.auto_join` | 默认 `false`。`chat_ids` 留空后才生效 |
+| `chats.admit` | 自动认群的门槛，默认 `confirm`（要 `/认群`） |
 | `write.allowed_users` | 谁可以发起写入和改群记忆 |
 | `write.resources` | 允许新建或追加的文件夹、文档、日历、多维表格 |
 | `model_provider` | `cursor`（默认）或 `openai_compat` |
@@ -117,7 +120,7 @@ python tests/run_tests.py
 | `agents/CONFIG.md` | 每一项怎么填 |
 | `redact.example.txt` | 空的客户名名单样子，复制成 `redact.txt` 再用 |
 | `scripts/` | Windows 上的启动、停止、看门狗、计划任务 |
-| `tests/run_tests.py` | 离线测试，147 项 |
+| `tests/run_tests.py` | 离线测试，178 项 |
 | `docs/` | 给人看的说明和架构图 |
 | `SKILL.md` | 给帮忙操作的 AI 助手看的步骤 |
 

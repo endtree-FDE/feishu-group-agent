@@ -84,7 +84,9 @@ DB = sqlite3.connect(os.path.join(STATE, "state.db"), check_same_thread=False); 
 with DBL:
     DB.execute("create table if not exists seen(mid text primary key, ts real)")
     DB.execute("create table if not exists turns(sess text, ts real, role text, text text)")
-    DB.execute("create index if not exists turns_sess on turns(sess, ts)"); DB.commit()
+    DB.execute("create index if not exists turns_sess on turns(sess, ts)")
+    DB.execute("create table if not exists chats(chat_id text primary key, name text, status text, source text, inviter text, ts real, updated real)")
+    DB.commit()
 def seen_or_mark(mid):
     with DBL:
         try: DB.execute("insert into seen values(?,?)", (mid, time.time())); DB.commit(); return False
@@ -114,6 +116,220 @@ def forget(sess):
     with DBL: DB.execute("delete from turns where sess=?", (sess,)); DB.commit()
     try: get_provider().drop(sess)
     except Exception as e: log.warning("acp drop %s: %s", sess, e)
+
+# ---------- 哪些群可以回答 ----------
+# chat_ids 写了非空列表：只回答这些群，和以前一样（即使同时开了 auto_join 也忽略它）。
+# chat_ids 为空且 chats.auto_join 为 true：按安全门槛认群。默认门槛是 confirm，
+# 陌生人把机器人拉进群也不会调用模型；白名单成员在群里 @ 并发送「/认群」之后才回答。
+# 认群、移出、启动时列出的群都写进 state.db 的 chats 表。任何路径都不主动往群里发消息。
+_CHAT_RX = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
+_ADMIT_RX = re.compile(r"^/?(?:认群|admit)$", re.I)
+_REVOKE_RX = re.compile(r"^/?(?:忘群|unadmit)$", re.I)
+_MEMBER_ADDED = "im.chat.member.bot.added_v1"
+_MEMBER_DELETED = "im.chat.member.bot.deleted_v1"
+_CHAT_TEXT = {
+    "chat_pending": "这个群还没认。请白名单成员 @我 发送「/认群」。在此之前我不调用模型，也不主动发消息。",
+    "chat_admitted": "已认这个群。之后在本群 @ 我才会回答。我不会主动发消息。",
+    "chat_revoked": "已不再回答这个群。需要的话，白名单成员可以再 @我 发送「/认群」。",
+}
+
+def chats_cfg():
+    c = CFG.get("chats")
+    return c if isinstance(c, dict) else {}
+def auto_join_on():
+    return bool(chats_cfg().get("auto_join", False))
+def admit_mode():
+    m = str(chats_cfg().get("admit") or "confirm").strip().lower()
+    return m if m in ("confirm", "whitelist", "open") else "confirm"
+def static_chat_ids():
+    """非空的 chat_ids 才算「写了」。空数组或没写这一项，才可能走自动认群。"""
+    ids = CFG.get("chat_ids")
+    if not isinstance(ids, list): return None
+    out = []
+    for x in ids:
+        if isinstance(x, str) and x.strip(): out.append(x.strip())
+    return out or None
+def auto_join_active():
+    return auto_join_on() and static_chat_ids() is None
+def valid_chat(cid):
+    return bool(cid) and bool(_CHAT_RX.match(cid))
+def _clip_name(name):
+    if not isinstance(name, str): return ""
+    return re.sub(r"\s+", " ", name).strip()[:80]
+def open_id_of(op):
+    if isinstance(op, str) and _CHAT_RX.match(op.strip()): return op.strip()
+    if isinstance(op, dict):
+        v = op.get("open_id")
+        if isinstance(v, str) and _CHAT_RX.match(v.strip()): return v.strip()
+    return ""
+def is_admin(uid):
+    return uid in ((CFG.get("write") or {}).get("allowed_users") or {})
+def inviter_allow():
+    extra = chats_cfg().get("inviter_open_ids") or []
+    users = list(((CFG.get("write") or {}).get("allowed_users") or {}).keys())
+    return {u for u in users if isinstance(u, str)} | {x.strip() for x in extra if isinstance(x, str) and x.strip()}
+def chat_text(key):
+    return ((CFG.get("texts") or {}).get(key) or _CHAT_TEXT[key])
+def load_chat(cid):
+    with DBL:
+        row = DB.execute("select chat_id,name,status,source,inviter,ts,updated from chats where chat_id=?", (cid,)).fetchone()
+    if not row: return None
+    return dict(zip(("chat_id", "name", "status", "source", "inviter", "ts", "updated"), row))
+def all_chats():
+    with DBL:
+        rows = DB.execute("select chat_id,name,status,source,inviter,ts,updated from chats").fetchall()
+    return [dict(zip(("chat_id", "name", "status", "source", "inviter", "ts", "updated"), r)) for r in rows]
+def save_chat(cid, status, source, inviter="", name=""):
+    """只更新状态。名字和邀请人留空时保留原来的。返回是否和之前不同。"""
+    if not valid_chat(cid) or status not in ("pending", "admitted", "left", "revoked"): return False
+    now = time.time(); name = _clip_name(name); inviter = inviter if inviter and _CHAT_RX.match(inviter) else ""
+    with DBL:
+        row = DB.execute("select name,status,inviter,ts from chats where chat_id=?", (cid,)).fetchone()
+        old = row[1] if row else ""
+        name = name or (row[0] if row else "") or ""
+        inviter = inviter or (row[2] if row else "") or ""
+        ts = row[3] if row else now
+        DB.execute("""insert into chats(chat_id,name,status,source,inviter,ts,updated) values(?,?,?,?,?,?,?)
+            on conflict(chat_id) do update set name=excluded.name, status=excluded.status, source=excluded.source,
+            inviter=excluded.inviter, updated=excluded.updated""", (cid, name, status, source, inviter, ts, now))
+        DB.commit()
+    if old != status:
+        log.info("chat-state %s %s source=%s", cid, status, source)
+        if status == "admitted":
+            try: GMEM.ensure_group(cid)
+            except Exception as e: log.warning("ensure group %s: %s", cid, e)
+    return old != status
+def initial_status(inviter):
+    mode = admit_mode()
+    if mode == "open": return "admitted"
+    if mode == "whitelist" and inviter and inviter in inviter_allow(): return "admitted"
+    return "pending"
+def note_mention(cid):
+    """被 @ 说明机器人已经在这个群里。还没记录过、或上次已经离开，就记成待认。不发消息。"""
+    if not valid_chat(cid): return
+    row = load_chat(cid)
+    if row is None or row["status"] == "left": save_chat(cid, "pending", "mention")
+def group_gate(chat_id, sender, text):
+    """返回 allow / allow_new / silent / hint / admit / drop。silent 不回复、不调模型。"""
+    ids = static_chat_ids()
+    if ids is not None: return "allow" if chat_id in ids else "silent"
+    if not auto_join_on() or not valid_chat(chat_id): return "silent"
+    q = (text or "").strip()
+    if _ADMIT_RX.match(q): return "admit" if is_admin(sender) else "silent"
+    if _REVOKE_RX.match(q): return "drop" if is_admin(sender) else "silent"
+    row = load_chat(chat_id); status = row["status"] if row else ""
+    if status == "admitted": return "allow"
+    if status == "revoked": return "hint" if is_admin(sender) else "silent"
+    if admit_mode() == "open": return "allow_new"
+    return "hint" if is_admin(sender) else "silent"
+def describe_chats():
+    ids = static_chat_ids(); mode = admit_mode()
+    if ids is not None and auto_join_on(): return "static chat_ids=%d（auto_join 已忽略）" % len(ids)
+    if ids is not None: return "static chat_ids=%d" % len(ids)
+    if auto_join_on():
+        with DBL:
+            n = DB.execute("select count(*) from chats where status='admitted'").fetchone()[0]
+            pnd = DB.execute("select count(*) from chats where status='pending'").fetchone()[0]
+        return "auto_join admit=%s admitted=%d pending=%d" % (mode, n, pnd)
+    return "chat_ids 为空且 auto_join 关闭"
+def _member_type(obj):
+    if not isinstance(obj, dict): return ""
+    h = obj.get("header")
+    if isinstance(h, dict) and h.get("event_type"): return h["event_type"]
+    return obj.get("event_type") or ""
+def _member_body(obj):
+    inner = obj.get("event") if isinstance(obj, dict) and isinstance(obj.get("event"), dict) else None
+    if inner and (_member_type(inner) in (_MEMBER_ADDED, _MEMBER_DELETED) or isinstance(inner.get("header"), dict)):
+        return _member_body(inner)
+    if inner and inner.get("chat_id"): return inner
+    return obj if isinstance(obj, dict) else {}
+def apply_member(event_type, body):
+    """进群 / 出群只记 state.db。这里不调用 reply。"""
+    if not auto_join_active():
+        log.info("chat event ignored (auto_join inactive) %s", event_type); return
+    body = body or {}; cid = body.get("chat_id") if isinstance(body, dict) else ""
+    if not valid_chat(cid):
+        log.info("chat event ignored bad id %s", event_type); return
+    name = _clip_name(body.get("name") if isinstance(body.get("name"), str) else "")
+    inviter = open_id_of(body.get("operator_id"))
+    row = load_chat(cid)
+    if event_type == _MEMBER_DELETED:
+        if row and row["status"] == "revoked":
+            save_chat(cid, "revoked", "deleted", inviter, name); return
+        save_chat(cid, "left", "deleted", inviter, name); return
+    if row and row["status"] == "revoked":
+        save_chat(cid, "revoked", "added", inviter, name)
+        log.info("chat %s added while revoked; still waiting /认群", cid); return
+    if row and row["status"] == "admitted":
+        save_chat(cid, "admitted", "added", inviter, name); return
+    save_chat(cid, initial_status(inviter), "added", inviter, name)
+def extract_chat_rows(j):
+    found = []
+    def walk(x):
+        if isinstance(x, dict):
+            if isinstance(x.get("chat_id"), str): found.append(x); return
+            for k, v in x.items():
+                if k in ("chats", "items", "data") or (isinstance(v, list) and v and isinstance(v[0], dict) and "chat_id" in v[0]):
+                    walk(v)
+        elif isinstance(x, list):
+            for i in x: walk(i)
+    walk(j)
+    out, seen = [], set()
+    for r in found:
+        if r["chat_id"] in seen: continue
+        seen.add(r["chat_id"]); out.append(r)
+    return out
+def sync_joined_chats():
+    """启动时用 im +chat-list（GET /open-apis/im/v1/chats）记下当前所在的群。失败只记日志，不清空已有记录。"""
+    if not auto_join_active(): return
+    j, err = lark_api(["im", "+chat-list", "--page-all", "--page-size", "100", "--page-limit", "20", "--format", "json"], timeout=120)
+    if not j:
+        log.warning("chat list unavailable (groups still recorded from events and @): %s", (err or "")[-300:]); return
+    seen = set()
+    for row in extract_chat_rows(j):
+        cid = row.get("chat_id"); name = _clip_name(row.get("name") if isinstance(row.get("name"), str) else "")
+        if not valid_chat(cid): continue
+        if row.get("chat_status") in ("dissolved", "dissolved_save"):
+            cur = load_chat(cid)
+            if not cur or cur["status"] != "revoked": save_chat(cid, "left", "list", name=name)
+            continue
+        seen.add(cid); cur = load_chat(cid); status = cur["status"] if cur else ""
+        if status == "revoked":
+            save_chat(cid, "revoked", "list", name=name); continue
+        if status == "admitted":
+            save_chat(cid, "admitted", "list", name=name); continue
+        if status == "pending" and admit_mode() != "open":
+            save_chat(cid, "pending", cur["source"] or "list", name=name); continue
+        save_chat(cid, initial_status(""), "list", name=name)
+    for cur in all_chats():
+        if cur["chat_id"] in seen or cur["status"] not in ("pending", "admitted"): continue
+        save_chat(cur["chat_id"], "left", "list")
+    log.info("chat sync %s", describe_chats())
+def record_static_chats():
+    """配置里写死的群也记一笔，方便查看。回答时仍只认 chat_ids，不认这张表。"""
+    for cid in static_chat_ids() or []:
+        if valid_chat(cid): save_chat(cid, "admitted", "config")
+def consumer_keys():
+    keys = ["im.message.receive_v1"]
+    if auto_join_active(): keys += [_MEMBER_ADDED, _MEMBER_DELETED]
+    return keys
+def consume_argv(event_key):
+    return lark_exe() + ["event", "consume", event_key, "--profile", CFG["profile"], "--as", "bot"]
+def ingest(obj):
+    """一条 stdout JSON。消息事件交给 handle；进群/出群只记群，不回复。"""
+    if not isinstance(obj, dict): return
+    et = _member_type(obj)
+    if et not in (_MEMBER_ADDED, _MEMBER_DELETED):
+        inner = obj.get("event") if isinstance(obj.get("event"), dict) else None
+        if inner and not obj.get("message_id"):
+            et = _member_type(inner)
+            if et in (_MEMBER_ADDED, _MEMBER_DELETED):
+                apply_member(et, _member_body(inner)); return
+            if inner.get("message_id") or inner.get("id") or inner.get("chat_type") or inner.get("sender_id"):
+                handle(inner); return
+    if et in (_MEMBER_ADDED, _MEMBER_DELETED):
+        apply_member(et, _member_body(obj)); return
+    handle(obj)
 
 # ---------- 限流 + 并发 ----------
 RL = CFG.get("rate_limit", {}); RLL = threading.Lock(); last_user = {}; hour_hits = collections.deque()
@@ -494,16 +710,38 @@ def handle(ev):
     if not mid: return
     if (ev.get("sender_type") or "") in ("app", "bot"): return
     ctype = ev.get("chat_type") or "group"
+    uid = ev.get("sender_id") or "?"
     if ctype == "p2p":
         if not FEAT.get("p2p"): return
         # 私聊范围：p2p.allow_open_ids 优先；为空时 p2p.open_to_all=true 对所有人开放，否则只放行写入白名单里的成员
         pc = CFG.get("p2p", {}); allow = pc.get("allow_open_ids")
         if not allow and not pc.get("open_to_all", False): allow = list((CFG.get("write", {}).get("allowed_users") or {}).keys())
-        if allow and ev.get("sender_id") not in allow: return
+        if allow and uid not in allow: return
     else:
-        if ev.get("chat_id") not in CFG["chat_ids"] or not is_for_me(ev): return
+        if not is_for_me(ev): return
+        gate = group_gate(ev.get("chat_id"), uid, clean_q(ev.get("content") or ""))
+        log.info("chat gate %s %s -> %s", ev.get("chat_id"), uid, gate)
+        if gate == "silent":
+            if auto_join_active(): note_mention(ev.get("chat_id")); seen_or_mark(mid)
+            return
+        if gate == "hint":
+            if seen_or_mark(mid): return
+            note_mention(ev.get("chat_id"))
+            reply(mid, chat_text("chat_pending")); return
+        if gate == "admit":
+            if seen_or_mark(mid): return
+            save_chat(ev.get("chat_id"), "admitted", "command")
+            reply(mid, chat_text("chat_admitted")); return
+        if gate == "drop":
+            if seen_or_mark(mid): return
+            save_chat(ev.get("chat_id"), "revoked", "command")
+            reply(mid, chat_text("chat_revoked")); return
+        if gate == "allow_new":
+            save_chat(ev.get("chat_id"), "admitted", "mention")
+        elif gate != "allow":
+            return
     if seen_or_mark(mid): return
-    uid = ev.get("sender_id") or "?"; sess = session_key(ev); mtype = ev.get("message_type") or "text"
+    sess = session_key(ev); mtype = ev.get("message_type") or "text"
     ctx = {"user": uid, "chat_id": ev.get("chat_id"), "chat_type": ctype, "message_id": mid}
     q = clean_q(ev.get("content") or "")
     log.info("Q %s %s/%s sess=%s from %s: %s", mid, ctype, mtype, sess, uid, q[:200])
@@ -593,7 +831,13 @@ def self_check():
     p("lark-cli", shutil.which(lark_exe()[0]) or os.path.exists(lark_exe()[0]), lark_exe()[0])
     p("redact names", True, "%d 个（%s）" % (len(REDACT_NAMES), CFG.get("redact_file", "redact.txt")))
     w = CFG.get("write", {}); p("write whitelist", True, "users=%s" % list((w.get("allowed_users") or {}).values()))
-    p("group memory", True, "enabled=%s budget=%d profiles=%s" % (GMEM.enabled, GMEM.budget, [c for c in CFG["chat_ids"] if GMEM.path(c) and os.path.isfile(GMEM.path(c))]))
+    known = static_chat_ids() or [r["chat_id"] for r in all_chats() if r["status"] == "admitted"]
+    p("group memory", True, "enabled=%s budget=%d profiles=%s" % (GMEM.enabled, GMEM.budget, [c for c in known if GMEM.path(c) and os.path.isfile(GMEM.path(c))]))
+    p("chats", True, describe_chats())
+    if auto_join_on() and static_chat_ids() is not None:
+        print("HINT chats.auto_join 已开启，但 chat_ids 非空，仍只回答 chat_ids 里的群。要自动认群请把 chat_ids 改成空数组。")
+    if auto_join_active() and admit_mode() == "confirm" and not list(((CFG.get("write") or {}).get("allowed_users") or {})):
+        print("HINT chats.admit=confirm 但 write.allowed_users 为空，没有人能发送 /认群。")
     sks = TOOLS.skills
     p("skills", not sks.invalid, sks.status())
     for bad in sks.invalid:
@@ -603,7 +847,7 @@ def self_check():
             for k, (good, scope, err) in probe_progress().items():
                 print("%s progress %s %s" % ("OK  " if good else "DEGR", k, "" if good else "缺 %s | %s" % (scope, (err or "")[-200:].replace("\n", " "))))
         except Exception as e: print("DEGR progress probe error %s" % e)
-        ctx = {"user": "selfcheck", "chat_id": CFG["chat_ids"][0], "chat_type": "group"}
+        ctx = {"user": "selfcheck", "chat_id": (static_chat_ids() or ["selfcheck"])[0], "chat_type": "group"}
         for name, args in [("history", {}), ("calendar_read", {}), ("docs_search", {"query": "进度"})]:
             if not TOOLS.enabled(name): print("SKIP %s（未启用）" % name); continue
             try: TOOLS.run_read(name, args, ctx); print("OK   probe %s" % name)
@@ -615,30 +859,41 @@ def main():
     if not CFG.get("bot_open_id"): log.warning("dry-run：bot_open_id 为空")
     if LOCK_TEST is not None:
         acquire_lock(); log.info("lock-test holding %ss", LOCK_TEST or 30); time.sleep(float(LOCK_TEST or 30)); return
+    log.info("chats %s", describe_chats())
     if DRY:
         src = _opt("--dry-run"); f = open(src, encoding="utf-8-sig") if src else sys.stdin; ths = []
         for line in f:
             line = line.strip()
             if not line.startswith("{"): continue
-            ev = json.loads(line); ev = ev.get("event", ev)
-            if PARALLEL: t = threading.Thread(target=handle, args=(ev,)); t.start(); ths.append(t)
-            else: handle(ev)
+            obj = json.loads(line)
+            if PARALLEL: t = threading.Thread(target=ingest, args=(obj,)); t.start(); ths.append(t)
+            else: ingest(obj)
         for t in ths: t.join()
         log.info("dry-run finished peak_active=%d max_concurrency=%d", _peak, MAXC); return
     check_conflicts(); acquire_lock(); threading.Thread(target=heartbeat, daemon=True).start()
     log.info("starting %s (features=%s)", CFG["name"], json.dumps(FEAT, ensure_ascii=False))
+    if static_chat_ids() is not None: record_static_chats()
+    if auto_join_active(): sync_joined_chats()
+    keys = consumer_keys()
+    for key in keys[1:]:
+        threading.Thread(target=_consume_forever, args=(key,), daemon=True).start()
+    _consume_forever(keys[0])
+
+def _consume_forever(event_key):
     while True:
-        p = subprocess.Popen(lark_exe() + ["event", "consume", "im.message.receive_v1", "--profile", CFG["profile"], "--as", "bot"],
-                             cwd=BASE, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
-        open(os.path.join(STATE, "consumer.pid"), "w").write(str(p.pid))
-        threading.Thread(target=lambda: [log.info("[consume] %s", l.rstrip()) for l in p.stderr], daemon=True).start()
+        argv = consume_argv(event_key)
+        p = subprocess.Popen(argv, cwd=BASE, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
+        if event_key == "im.message.receive_v1":
+            open(os.path.join(STATE, "consumer.pid"), "w").write(str(p.pid))
+        log.info("consumer %s pid %s", event_key, p.pid)
+        threading.Thread(target=lambda proc=p, key=event_key: [log.info("[consume:%s] %s", key, l.rstrip()) for l in proc.stderr], daemon=True).start()
         for line in p.stdout:
             line = line.strip()
             if not line.startswith("{"): continue
-            try: ev = json.loads(line); ev = ev.get("event", ev)
+            try: obj = json.loads(line)
             except Exception: continue
-            threading.Thread(target=handle, args=(ev,), daemon=True).start()
-        log.warning("consumer exited rc=%s, restart in 10s", p.wait()); time.sleep(10)
+            threading.Thread(target=ingest, args=(obj,), daemon=True).start()
+        log.warning("consumer %s exited rc=%s, restart in 10s", event_key, p.wait()); time.sleep(10)
 
 if __name__ == "__main__":
     main()
