@@ -61,8 +61,17 @@ db = sqlite3.connect(os.path.join(T, "state", "state.db")); n = db.execute("sele
 check("话题记忆：同 root_id 归入同一会话", n == 4 and ("sess=" + _sess) in o.split("Q m7")[1], o)
 o = run([ev("m8", "/new", root_id="m6")], name="new"); n = db.execute("select count(*) from turns where sess=?", (_sess,)).fetchone()[0]
 check("/new 清空话题记忆", n == 0 and "已清空" in o, o)
+def _reply_only(o, mid):
+    key = "[dry-run] reply %s: " % mid
+    i = o.find(key)
+    if i < 0: return ""
+    lines = []
+    for ln in o[i + len(key):].splitlines():
+        if ln.startswith(("chat gate ", "Q ", "agent ", "[dry-run]", "model provider", "metric ")): break
+        lines.append(ln)
+    return "\n".join(lines)
 o = run([ev("stat1", "/状态"), ev("stat2", "状态怎么样")], name="status_on")
-_stat = o.split("[dry-run] reply stat1: ", 1)[-1].split("[dry-run]", 1)[0]
+_stat = _reply_only(o, "stat1")
 check("/状态 不调用模型，也不打印路径和编号",
       "agent start stat1" not in o and "不调用模型" in _stat and "模型接口：cursor" in _stat
       and "长期记忆：关" in _stat and "技能：关" in _stat and "确认码" in _stat
