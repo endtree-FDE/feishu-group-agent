@@ -517,9 +517,11 @@ argv0 = next((e.get("argv") or [] for e in tr if e.get("event") == "argv"), [])
 check("常驻启动参数：--mode ask、--model、子命令 acp",
       argv0[argv0.index("--mode") + 1] == "ask" and "acp" in argv0 and "--model" in argv0 and "grok-4.7-high-fast" in argv0, str(argv0))
 check("常驻握手：initialize、authenticate、session/set_mode=ask、set_config_option",
-      any(e.get("method") == "initialize" for e in tr) and any(e.get("method") == "authenticate" for e in tr)
+      any(e.get("method") == "initialize" and ((e.get("params") or {}).get("clientCapabilities") or {}).get("_meta", {}).get("parameterizedModelPicker") is True for e in tr)
+      and any(e.get("method") == "authenticate" for e in tr)
       and any(e.get("method") == "session/set_mode" and (e.get("params") or {}).get("modeId") == "ask" for e in tr)
-      and any(e.get("method") == "session/set_config_option" and (e.get("params") or {}).get("configId") == "model" and (e.get("params") or {}).get("value") == "grok-4.7-high-fast" for e in tr), str(tr)[:1500])
+      and any(e.get("method") == "session/set_config_option" and (e.get("params") or {}).get("configId") == "model"
+               and (e.get("params") or {}).get("value") == "grok-4.7-high-fast" and (e.get("params") or {}).get("type") == "id" for e in tr), str(tr)[:1500])
 def model_calls(tr):
     return [e for e in tr if e.get("method") == "session/set_config_option"]
 o, tr, rc = run_acp([ev("acp_same", "普通一句")], "acp_same", ACP_CFG, extra_env={"AGENTBOT_ACP_CONFIG_CASE": "same"})
@@ -542,7 +544,8 @@ check("当前值不一致：用返回的 configId 和可选值调用 set_config_
 o, tr, rc = run_acp([ev("acp_bad", "设模型失败")], "acp_invalid", ACP_CFG, extra_env={"AGENTBOT_ACP_CONFIG_CASE": "invalid"})
 _calls = model_calls(tr)
 check("set_config_option 失败只记 debug：这一题仍成功，日志没有这条 WARNING",
-      len(_calls) == 1 and "常驻答案" in block(o, "acp_bad") and "acp fallback" not in o
+      len(_calls) == 2 and (_calls[0].get("params") or {}).get("type") == "id" and "type" not in (_calls[1].get("params") or {})
+      and "常驻答案" in block(o, "acp_bad") and "acp fallback" not in o
       and "WARNING acp set_model" not in o and "Invalid params" not in o, o + str(_calls))
 o, tr, rc = run_acp([ev("ac2", "第一题"), ev("ac3", "第二题", root_id="ac2"), ev("ac4", "另一题")], "acp_reuse", ACP_CFG)
 ids, news = new_ids(tr)
@@ -1970,6 +1973,9 @@ _gmd = os.path.join(T, "memory", "groups", CH, "GROUP.md")
 _gtext = open(_gmd, encoding="utf-8").read() if os.path.isfile(_gmd) else ""
 check("确认后写入群记忆，并刷新已打开话题的档案快照",
       _mc and "已记" in o2 and "周四" in _gtext and "memory snapshot refreshed" in o2, o2 + "\n" + _gtext)
+
+_rt = subprocess.run([sys.executable, os.path.join(FW, "tests", "test_acp_health.py")], capture_output=True, text=True, encoding="utf-8", timeout=60)
+check("ACP 卡死检测与配置项单测", _rt.returncode == 0, (_rt.stdout or "") + (_rt.stderr or ""))
 
 print("\n%d/%d passed" % (sum(r for _, r in results), len(results))); shutil.rmtree(T, ignore_errors=True)
 sys.exit(0 if all(r for _, r in results) else 1)

@@ -57,6 +57,7 @@
     "network_retries": 2,
     "max_runtime_sec": 1800,
     "stall_sec": 300,
+    "progress_heartbeat_sec": 20,
     "max_chars": 3500,
     "body_max_chars": 20000,
     "reply_chunk_chars": 3500,

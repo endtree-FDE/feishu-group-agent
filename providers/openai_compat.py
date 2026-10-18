@@ -2,6 +2,7 @@
 # base_url 和 model 写在配置里。密钥只从环境变量读，不写进配置、日志或报错。
 import json, os, queue, re, socket, threading, time, urllib.error, urllib.request
 
+import acp_client
 from providers.base import PartialText, Provider, emit
 
 _RETRY_HTTP = {408, 409, 429, 500, 502, 503, 504}
@@ -70,7 +71,8 @@ class OpenAICompatProvider(Provider):
 
     def _limits(self):
         a = self._agent()
-        return float(a.get("max_runtime_sec", 1800) or 1800), float(a.get("stall_sec", 300) or 300), int(a.get("max_chars", 3500) or 3500)
+        max_rt, stall, _pulse = acp_client.runtime_limits(a)
+        return max_rt, stall, int(a.get("max_chars", 3500) or 3500)
 
     def _feed_line(self, line, on_stage, state):
         s = (line or "").strip()
@@ -151,7 +153,8 @@ class OpenAICompatProvider(Provider):
                 done.set()
         threading.Thread(target=rd, daemon=True).start()
         state = {"text": "", "saw_reason": False, "reason_end": False}
-        t0 = last = time.time(); why = ""; events = 0
+        _pulse = acp_client.runtime_limits(self._agent())[2]
+        t0 = last = last_pulse = time.time(); why = ""; events = 0
         try:
             while True:
                 try:
@@ -171,10 +174,14 @@ class OpenAICompatProvider(Provider):
                     if self._feed_line(item, on_stage, state):
                         break
                 if not why:
-                    if now - last > stall:
-                        why = "stall %.0fs no output" % (now - last)
-                    elif now - t0 > max_rt:
-                        why = "max_runtime %.0fs" % max_rt
+                    why = acp_client.limit_reason(now, t0, last, stall, max_rt)
+                    if not why and acp_client.pulse_due(now, last_pulse, _pulse):
+                        last_pulse = now
+                        silent = now - last
+                        self.log.info("openai pulse elapsed=%ds silent=%.0fs", int(now - t0), silent)
+                        if silent >= _pulse and on_stage:
+                            try: on_stage("已经 %d 秒没有新输出…" % int(silent))
+                            except Exception: pass
                     if why:
                         stop.set()
                         self._cut(sock)

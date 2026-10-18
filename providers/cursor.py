@@ -164,11 +164,12 @@ class CursorProvider(Provider):
             self._pool.close()
 
     def stream_agent(self, cmd, on_stage=None):
-        """流式跑 cursor-agent。正常流程不设作答时限；只有 stall_sec 秒没有任何新输出（卡死）或总时长超过 max_runtime_sec（防卡死上限）才终止。
+        """流式跑 cursor-agent。不靠总时长硬切：max_runtime_sec<=0 时不设上限。
+        只有 stall_sec 秒没有任何新输出才当成卡死。进度心跳只记日志、必要时改进度文案，不刷新「最后输出」时间。
         返回 (rc, final_text_or_None, stderr, stalled_reason, stream)"""
         import queue
         a = self._agent()
-        max_rt = float(a.get("max_runtime_sec", 1800)); stall = float(a.get("stall_sec", 300))
+        max_rt, stall, pulse = acp_client.runtime_limits(a)
         p = subprocess.Popen(cmd, cwd=self.kb, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                              text=True, encoding="utf-8", errors="replace", bufsize=1)
         q = queue.Queue(); err = []
@@ -178,15 +179,21 @@ class CursorProvider(Provider):
             finally: q.put(None)
         threading.Thread(target=rd, daemon=True).start()
         threading.Thread(target=lambda: err.extend(p.stderr), daemon=True).start()
-        st = AgentStream(on_stage); t0 = last = time.time(); why = ""
+        st = AgentStream(on_stage); t0 = last = last_pulse = time.time(); why = ""
         while True:
             try: line = q.get(timeout=1)
             except Exception: line = ""
             now = time.time()
             if line is None: break
             if line: last = now; st.feed(line)
-            if now - last > stall: why = "stall %.0fs no output" % (now - last)
-            elif now - t0 > max_rt: why = "max_runtime %.0fs" % max_rt
+            why = acp_client.limit_reason(now, t0, last, stall, max_rt)
+            if not why and acp_client.pulse_due(now, last_pulse, pulse):
+                last_pulse = now
+                silent = now - last
+                self.log.info("agent pulse elapsed=%ds silent=%.0fs", int(now - t0), silent)
+                if silent >= pulse and on_stage:
+                    try: on_stage("已经 %d 秒没有新输出…" % int(silent))
+                    except Exception: pass
             if why: kill_tree(p, self.log); break
         try: rc = p.wait(timeout=30)
         except Exception: rc = -1
