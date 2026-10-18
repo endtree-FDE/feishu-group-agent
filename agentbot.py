@@ -7,10 +7,10 @@
 #   环境变量 AGENTBOT_FAKE_AGENT=秒：用 sleep 代替模型（仅测试，优先于 model_provider）
 #   环境变量 AGENTBOT_AGENT_CMD='["python","fake.py"]'：替换 cursor-agent 可执行文件（仅测试，用来模拟 stream-json 或 ACP）
 # 模型从哪来看配置 model_provider，没写就是 cursor。cursor 的登录和额度是运行这台电脑的人自己的账号，程序里不写账号。
-import json, os, re, subprocess, sys, time, logging, collections, threading, sqlite3, hashlib, atexit, shutil, datetime
+import json, os, re, subprocess, sys, time, logging, collections, threading, sqlite3, hashlib, atexit, shutil, datetime, signal
 
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
-import acp_client, guard, memory, providers
+import acp_client, guard, lifecycle, memory, proc_identity, providers
 from providers.base import PartialText
 from tools import Tools, ToolError, TOOL_DOC, MEMORY_TOOL_DOC, READ_TOOLS, WRITE_TOOLS, run_capture, parse_cli_json, clip_body, message_text, attachment_limits, inspect_download, safe_download_name
 
@@ -53,23 +53,42 @@ def _pid_alive(pid):
         return bool(ok) and code.value == 259  # STILL_ACTIVE
     try: os.kill(pid, 0); return True
     except OSError: return False
+def _release_lock():
+    try: text = open(LOCK, encoding="utf-8", errors="replace").read()
+    except OSError: return
+    lock = proc_identity.parse_lock(text)
+    if lock and int(lock["pid"]) == os.getpid():
+        try: os.remove(LOCK)
+        except OSError: pass
 def acquire_lock():
+    snap = proc_identity.snapshot(os.getpid()) or {}
+    body = proc_identity.format_lock(os.getpid(), snap.get("created") or "", BASE).encode("utf-8")
     try:
-        fd = os.open(LOCK, os.O_CREAT | os.O_EXCL | os.O_WRONLY); os.write(fd, str(os.getpid()).encode()); os.close(fd)
-        atexit.register(lambda: os.path.exists(LOCK) and open(LOCK).read().strip() == str(os.getpid()) and os.remove(LOCK))
+        fd = os.open(LOCK, os.O_CREAT | os.O_EXCL | os.O_WRONLY); os.write(fd, body); os.close(fd)
+        atexit.register(_release_lock)
         log.info("lock acquired pid %s", os.getpid()); return
     except FileExistsError:
-        old = open(LOCK).read().strip()
-        if old and old.isdigit() and int(old) != os.getpid() and _pid_alive(int(old)):
-            log.error("REFUSED: already running pid %s (lock %s)", old, LOCK); sys.exit(3)
-        log.warning("stale lock (pid %s), taking over", old); os.remove(LOCK); return acquire_lock()
+        try: text = open(LOCK, encoding="utf-8", errors="replace").read()
+        except OSError: text = ""
+        lock = proc_identity.parse_lock(text)
+        snap = proc_identity.snapshot(lock["pid"]) if lock else None
+        # 对不上的进程一律不结束。只是这个锁已经不能代表本机器人。
+        if proc_identity.decide(lock, snap, BASE) == "ours" and lock and int(lock["pid"]) != os.getpid():
+            log.error("REFUSED: already running pid %s (lock %s)", lock["pid"], LOCK); sys.exit(3)
+        log.warning("stale lock (pid %s), taking over", (lock or {}).get("pid", "?"))
+        try: os.remove(LOCK)
+        except OSError: pass
+        return acquire_lock()
 def check_conflicts():
-    # 同一应用只能有一个 consumer：配置里列出的旧版 pid 文件若对应进程还活着，就拒绝启动
+    # 同一应用只能有一个 consumer。pid 文件里的编号若已被别的程序复用，不当成旧机器人还活着，也不结束它。
     for pf in CFG.get("conflict_pidfiles", []):
-        if os.path.exists(pf):
-            p = open(pf).read().strip()
-            if p.isdigit() and _pid_alive(int(p)):
-                log.error("REFUSED: conflicting instance still running (pid %s from %s)", p, pf); sys.exit(4)
+        if not os.path.exists(pf): continue
+        try: text = open(pf, encoding="utf-8", errors="replace").read()
+        except OSError: continue
+        lock = proc_identity.parse_lock(text)
+        if not lock: continue
+        if proc_identity.conflict_blocks(proc_identity.snapshot(lock["pid"])):
+            log.error("REFUSED: conflicting instance still running (pid %s from %s)", lock["pid"], pf); sys.exit(4)
 
 # ---------- 外部命令 ----------
 def lark_exe():
@@ -984,9 +1003,18 @@ def handle(ev):
     how = claim_message(mid, ev, replay=bool(ev.get("_replay")))
     if how == "skip": return
     if ev.get("_late") or how == "replay": LATE.note = "（延迟回复）"
-    try: _handle_claimed(ev, mid, ctype, uid)
+    finished = False
+    try:
+        _handle_claimed(ev, mid, ctype, uid); finished = True
     finally:
-        mark_answered(mid); LATE.note = ""
+        # 停机时这题还没走完：留着 received，下次启动补答。异常且并非停机，仍记成已回答，和以前一样。
+        if lifecycle.should_mark_answered(lifecycle.shutdown_requested(STATE), finished):
+            mark_answered(mid)
+            try: lifecycle.drop(STATE, mid)
+            except Exception: log.warning("inflight drop failed %s", mid)
+        else:
+            log.info("shutdown keeps inflight %s", mid)
+        LATE.note = ""
 
 def _handle_claimed(ev, mid, ctype, uid):
     global _active, _waiting, _peak
@@ -1030,6 +1058,8 @@ def _handle_claimed(ev, mid, ctype, uid):
     with SEM:
         with _AL: _waiting -= 1; _active += 1; _peak = max(_peak, _active); act = _active
         log.info("agent start %s active=%d peak=%d", mid, act, _peak); t0 = time.time(); prog.set_stage("正在思考…"); q_model = ""
+        try: lifecycle.touch(STATE, mid, "正在思考…", REDACT_NAMES)
+        except Exception: log.warning("inflight note failed %s", mid)
         try:
             if targets and FEAT.get("attachments"):
                 try: extra, cleanup = _load_context(targets, ctx, mid)
@@ -1037,9 +1067,12 @@ def _handle_claimed(ev, mid, ctype, uid):
                     log.info("attachment degraded: %s %s", e.user_msg, e.detail[:200])
                     if mtype != "text": extra = "（附件读取失败：%s。请如实告诉提问者。）" % e.user_msg
             def hook(stage, think=None, end=False, text=None):
-                # text 是回答的文字片段，由模型层拼成最终答案，不刷进进度卡片
+                # text 是回答的文字片段，由模型层拼成最终答案，不刷进进度卡片，也不写入 inflight。
                 if think is not None: prog.add_thinking(think, end)
-                elif stage: prog.set_stage(stage)
+                elif stage:
+                    prog.set_stage(stage)
+                    try: lifecycle.touch(STATE, mid, stage, REDACT_NAMES)
+                    except Exception: pass
             q_model = clip_question(q)
             a = answer(q_model, sess, ctx, extra, on_stage=hook)
         except Exception as e:
@@ -1172,11 +1205,51 @@ def catch_up_mentions():
 def startup_recover():
     recover_inflight(); catch_up_mentions()
 
+_CONSUMERS = []
+_CONSUMERS_LOCK = threading.Lock()
+_SHUTDOWN_ONCE = threading.Lock()
+def _track_consumer(proc):
+    snap = proc_identity.snapshot(proc.pid) or {}
+    with _CONSUMERS_LOCK: _CONSUMERS.append((proc, snap.get("created") or ""))
+def _stop_consumers():
+    """只结束创建时间仍对得上的那一个。对不上就跳过，避免编号被别的进程复用后误伤。"""
+    with _CONSUMERS_LOCK: items = list(_CONSUMERS)
+    for proc, created in items:
+        if proc.poll() is not None: continue
+        snap = proc_identity.snapshot(proc.pid)
+        if not created or not snap or str(snap.get("created") or "") != str(created):
+            log.warning("skip consumer pid %s (not the process we started)", proc.pid); continue
+        try: proc.terminate()
+        except OSError: pass
+def _flush_logs():
+    for h in log.handlers:
+        try: h.flush()
+        except Exception: pass
+def finish_shutdown():
+    """停掉本进程拉起的长连接，等正在答的题一小会儿。等不到就直接退出，不让收尾把题标成已回答。"""
+    if not _SHUTDOWN_ONCE.acquire(blocking=False): return
+    lifecycle.request_shutdown(STATE)
+    _stop_consumers()
+    deadline = time.time() + lifecycle.wait_sec(CFG)
+    while time.time() < deadline and (_active or _waiting): time.sleep(0.2)
+    _release_lock(); _flush_logs()
+    busy = bool(_active or _waiting)
+    log.info("shutdown done busy=%s", busy); _flush_logs()
+    if busy: os._exit(0)
+    sys.exit(0)
+def _on_signal(signum, _frame):
+    try: log.info("signal %s, shutting down", signum)
+    except Exception: pass
+    lifecycle.request_shutdown(STATE)
+    _stop_consumers()
 def heartbeat():
-    while True:
+    while not lifecycle.SHUTDOWN.is_set():
         try: open(os.path.join(STATE, "heartbeat"), "w").write(str(int(time.time())))
         except OSError: pass
-        time.sleep(60)
+        for _ in range(60):
+            if lifecycle.shutdown_requested(STATE):
+                _stop_consumers(); return
+            time.sleep(1)
 
 def self_check():
     ok = True
@@ -1235,7 +1308,17 @@ def main():
             else: ingest(obj)
         for t in ths: t.join()
         log.info("dry-run finished peak_active=%d max_concurrency=%d", _peak, MAXC); return
-    check_conflicts(); acquire_lock(); startup_recover(); threading.Thread(target=heartbeat, daemon=True).start()
+    check_conflicts(); acquire_lock()
+    lifecycle.clear_request(STATE)  # 上次停止留下的请求不能让这次刚启动就退出
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try: signal.signal(sig, _on_signal)
+        except (OSError, ValueError): pass
+    if hasattr(signal, "SIGBREAK"):
+        try: signal.signal(signal.SIGBREAK, _on_signal)
+        except (OSError, ValueError): pass
+    threading.Thread(target=heartbeat, daemon=True).start()
+    startup_recover()
+    if lifecycle.SHUTDOWN.is_set(): finish_shutdown()
     log.info("starting %s (features=%s)", CFG["name"], json.dumps(FEAT, ensure_ascii=False))
     if static_chat_ids() is not None: record_static_chats()
     if auto_join_active(): sync_joined_chats()
@@ -1245,20 +1328,30 @@ def main():
     _consume_forever(keys[0])
 
 def _consume_forever(event_key):
-    while True:
+    primary = threading.current_thread() is threading.main_thread()
+    while not lifecycle.SHUTDOWN.is_set():
         argv = consume_argv(event_key)
         p = subprocess.Popen(argv, cwd=BASE, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
+        _track_consumer(p)
         if event_key == "im.message.receive_v1":
             open(os.path.join(STATE, "consumer.pid"), "w").write(str(p.pid))
         log.info("consumer %s pid %s", event_key, p.pid)
         threading.Thread(target=lambda proc=p, key=event_key: [log.info("[consume:%s] %s", key, l.rstrip()) for l in proc.stderr], daemon=True).start()
         for line in p.stdout:
+            if lifecycle.SHUTDOWN.is_set(): break
             line = line.strip()
             if not line.startswith("{"): continue
             try: obj = json.loads(line)
             except Exception: continue
             threading.Thread(target=ingest, args=(obj,), daemon=True).start()
-        log.warning("consumer %s exited rc=%s, restart in 10s", event_key, p.wait()); time.sleep(10)
+        if lifecycle.SHUTDOWN.is_set(): break
+        log.warning("consumer %s exited rc=%s, restart in 10s", event_key, p.wait())
+        for _ in range(10):
+            if lifecycle.SHUTDOWN.is_set(): break
+            time.sleep(1)
+        else: continue
+        break
+    if primary: finish_shutdown()
 
 if __name__ == "__main__":
     main()

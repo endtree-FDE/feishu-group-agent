@@ -25,21 +25,29 @@ if (Test-Path $lock) {
   }
 }
 
-# 配置里点名的旧版 pid 还活着：拒绝启动
+# 配置里点名的旧版 pid 还活着：只有它看起来还是某个 agentbot 才拒绝启动。
+# 编号被别的程序复用则不拒绝，也不结束那个进程。读不到命令行时宁可拒绝，避免同一个应用开两个接收进程。
 foreach ($pf in @($cfg.conflict_pidfiles)) {
   if (-not $pf) { continue }
   $p = [string]$pf
   if (-not (Test-Path -LiteralPath $p)) { continue }
   $opid = (Get-Content -LiteralPath $p -ErrorAction SilentlyContinue | Select-Object -First 1)
   $opid = "$opid".Trim()
-  if ($opid -match '^\d+$' -and (Get-Process -Id ([int]$opid) -ErrorAction SilentlyContinue)) {
-    "REFUSED: conflicting instance still running (pid $opid from $pf)"; exit 4
-  }
+  if ($opid -notmatch '^\d+$') { continue }
+  $oldProc = Get-CimInstance Win32_Process -Filter "ProcessId=$([int]$opid)" -ErrorAction SilentlyContinue
+  if (-not $oldProc) { continue }
+  $cl = [string]$oldProc.CommandLine
+  if ($cl -and $cl -notmatch '(?i)agentbot\.py') { continue }
+  "REFUSED: conflicting instance still running (pid $opid from $pf)"; exit 4
 }
 
 # 只结束本配置 profile 残留的 event consume / event _bus。
 # 结束前再读一次命令行，避免编号刚被别的进程复用。工作目录若明确是另一个目录，则不动。
 Stop-LarkLeftovers $base ([string]$cfg.profile)
+
+# 上次优雅停止留下的请求只在真正启动时清掉。已经在跑时不能清，否则正在退出的进程会被当成没人要求停止。
+$shutdownReq = Join-Path $base "state\shutdown.request"
+Remove-Item -LiteralPath $shutdownReq -Force -ErrorAction SilentlyContinue
 
 $py = (Get-Command python.exe -ErrorAction SilentlyContinue).Source; if (-not $py) { $py = "C:\Program Files\Python312\python.exe" }
 New-Item -ItemType Directory -Force (Join-Path $base "logs") | Out-Null

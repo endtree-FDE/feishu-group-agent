@@ -12,6 +12,7 @@
     "inviter_open_ids": []
   },
   "conflict_pidfiles": [],
+  "shutdown_wait_sec": 15,
   "reply_in_thread": true,
   "catchup": {"enabled": true, "overlap_sec": 300, "max_messages": 20},
   "thread_followup": {"enabled": true, "who": "initiator_or_whitelist"},
