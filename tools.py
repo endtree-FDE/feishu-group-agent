@@ -31,7 +31,8 @@ SCOPE_HINT = {
     "calendar_update": "calendar:calendar.event:update", "calendar_delete": "calendar:calendar.event:delete",
     "base_create": "base:record:create", "merge_forward": "im:message:readonly",
 }
-READ_TOOLS = {"history", "docs_read", "docs_search", "calendar_read", "base_read"}
+READ_TOOLS = {"history", "docs_read", "docs_search", "calendar_read", "base_read", "kb_read"}
+_KB_EXT = {".md", ".txt", ".markdown"}
 WRITE_TOOLS = {"docs_create", "docs_append", "calendar_create", "calendar_create_batch", "calendar_update", "calendar_delete", "base_create"}
 _CAL_FOLLOW = {"calendar_create_batch", "calendar_update", "calendar_delete"}
 _NOTIFY_RX = re.compile(r"@\s*全员|@\s*所有人|通知全员|通知所有人|提醒全员|告知全员|艾特全员")
@@ -66,6 +67,7 @@ TOOL_DOC = """可用工具（飞书读写每次最多调用一个；需要时只
 - docs_read {"doc":"云文档链接或 token","keyword":"可选"}：读取飞书文档内容。file_ 或 img_ 开头的是聊天附件，不是云文档，不要传给这个工具
 - calendar_read {"start":"ISO8601","end":"ISO8601"}：查看团队日历日程
 - base_read {"keyword":"可选"}：查询团队多维表格记录
+- kb_read {"path":"知识库内的相对路径"}：读取本机器人知识库里的 md 或 txt。不要用 ..、绝对路径或盘符
 - docs_create {"title":"标题","markdown":"正文"}：在团队专用文件夹新建文档（需发起人确认）
 - docs_append {"doc":"文档 token","markdown":"追加内容"}：在白名单文档末尾追加（需确认）
 - calendar_create {"summary":"标题","start":"ISO8601","end":"ISO8601","description":"可选","notify_all":false}：在团队日历建一个日程（需确认，不邀请任何人）
@@ -79,6 +81,76 @@ TOOL_DOC = """可用工具（飞书读写每次最多调用一个；需要时只
 重要：你处于只读模式，不能改本地文件，但飞书的新建/追加/建日程/改日程/删日程/加记录不需要你自己执行——只要输出上面那一行 <<TOOL>>，机器人会代为执行（写操作先让发起人回复确认码）。用户要求写飞书时，直接输出对应工具行，绝不要回答“切换到可编辑模式”或“无法创建”。"""
 MEMORY_TOOL_DOC = """还可以提议写入群记忆（需白名单发起人确认，仍只输出一行）：
 - memory_propose {"text":"主题：内容"}：用户明确说「记住」「以后都」这类偏好时使用。不要把没经确认的内容当成已经记住。"""
+
+def kb_root(base, cfg):
+    return os.path.join(base, (cfg or {}).get("kb_dir") or "kb")
+
+def kb_index_enabled(cfg):
+    """没写 kb_index 时默认把目录放进提示词。空目录不会多出任何文字。"""
+    k = (cfg or {}).get("kb_index")
+    if not isinstance(k, dict) or "enabled" not in k: return True
+    return bool(k.get("enabled"))
+
+def kb_index_budget(cfg):
+    k = (cfg or {}).get("kb_index") if isinstance((cfg or {}).get("kb_index"), dict) else {}
+    try: n = int(k.get("budget_chars", 1000))
+    except (TypeError, ValueError): n = 1000
+    return 1000 if n <= 0 else n
+
+def _kb_title(path):
+    try:
+        with open(path, encoding="utf-8-sig", errors="replace") as f: chunk = f.read(4096)
+    except OSError:
+        return ""
+    for line in chunk.splitlines():
+        s = line.strip().lstrip("#").strip()
+        if s: return s[:80]
+    return ""
+
+def _fit_catalog(header, lines, budget):
+    note = "（知识库文件较多，目录已按字数预算截断）"
+    full = header + "\n" + "\n".join(lines)
+    if len(full) <= budget: return full
+    kept = []
+    for ln in lines:
+        trial = header + "\n" + "\n".join(kept + [ln]) + "\n" + note
+        if len(trial) <= budget: kept.append(ln)
+        else: break
+    if not kept: return (header + "\n" + note)[:budget]
+    return header + "\n" + "\n".join(kept) + "\n" + note
+
+def kb_catalog(base, cfg, names=()):
+    """知识库目录。只含相对路径和一行标题，不含正文。跳出目录的符号链接不列。"""
+    if not kb_index_enabled(cfg): return ""
+    root = kb_root(base, cfg)
+    if not os.path.isdir(root): return ""
+    root_r = os.path.realpath(root)
+    rows = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(d for d in dirnames if d and not d.startswith(".") and d != "__pycache__")
+        try:
+            if os.path.commonpath([root_r, os.path.realpath(dirpath)]) != root_r:
+                dirnames[:] = []; continue
+        except ValueError:
+            dirnames[:] = []; continue
+        for fn in sorted(filenames):
+            if not fn or fn.startswith("."): continue
+            if os.path.splitext(fn)[1].lower() not in _KB_EXT: continue
+            full = os.path.join(dirpath, fn)
+            if not os.path.isfile(full): continue
+            real = os.path.realpath(full)
+            try:
+                if os.path.commonpath([root_r, real]) != root_r: continue
+            except ValueError:
+                continue
+            rel = os.path.relpath(full, root).replace("\\", "/")
+            if ".." in rel.split("/"): continue
+            title = guard.neutralize(guard.redact(_kb_title(real), names))
+            rel_show = guard.neutralize(guard.redact(rel, names))
+            rows.append("- " + rel_show + (("：" + title) if title else ""))
+    if not rows: return ""
+    header = "知识库目录（只有文件名和标题，正文要用 kb_read 读取；没有列出的文件不要编造）："
+    return _fit_catalog(header, rows, kb_index_budget(cfg))
 
 class Tools:
     def __init__(self, cfg, base, lark_exe, log, dry=False):
@@ -95,6 +167,8 @@ class Tools:
 
     # ---------- 基础 ----------
     def enabled(self, name):
+        # 旧配置没有 kb_read 时默认可以读知识库。写成 enabled false 才关掉。
+        if name == "kb_read" and name not in self.t: return True
         spec = self.t.get(name)
         if isinstance(spec, dict) and "enabled" in spec: return bool(spec.get("enabled"))
         # 旧配置只写了 calendar_create。改、删、批量跟着它开；写了 enabled 就以写的为准。
@@ -157,6 +231,22 @@ class Tools:
         """只读技能正文。名字必须在启动时扫到的目录里，不拼接用户给的路径。"""
         try: return self.skills.read((a or {}).get("name"))
         except skills.SkillError as e: raise ToolError(str(e))
+
+    def _kb_read(self, a, ctx):
+        """只读知识库里的 md/txt。路径必须落在 kb_dir 内。"""
+        rel = (a or {}).get("path") or (a or {}).get("name") or ""
+        root = kb_root(self.base, self.cfg)
+        dest = guard.safe_path(root, rel)
+        if not dest or not os.path.isfile(dest):
+            raise ToolError("知识库里没有这个文件")
+        if os.path.splitext(dest)[1].lower() not in _KB_EXT:
+            raise ToolError("知识库只读取 md 和 txt")
+        limit = (self.t.get("kb_read") or {}).get("max_chars", 8000)
+        try:
+            raw = open(dest, encoding="utf-8-sig", errors="replace").read()
+        except OSError:
+            raise ToolError("这个文件暂时读不出来")
+        return clip_body(guard.neutralize(guard.redact(raw, self.names)), limit)
 
     def _history(self, a, ctx):
         if ctx.get("chat_type") != "group": raise ToolError("私聊里不提供群历史查询")
