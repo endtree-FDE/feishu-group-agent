@@ -31,6 +31,12 @@ SCOPE_HINT = {
 }
 READ_TOOLS = {"history", "docs_read", "docs_search", "calendar_read", "base_read"}
 WRITE_TOOLS = {"docs_create", "docs_append", "calendar_create", "base_create"}
+# 正文超过这个长度时，保留开头、中段和结尾，方便分段概括。配置没写时用这个默认值。
+DEFAULT_BODY_CHARS = 20000
+_NOT_FOUND_CODES = {3380002, 3380003, 1770002, 1770003, 1254043, 1254044}
+_PERM_CODES = {1770032, 91403, 131006, 99991663, 99991668, 99991664}
+_NAME_ATTR = re.compile(r'(?:file_name|name)\s*=\s*"([^"]+)"', re.I)
+_KEY_ATTR = re.compile(r'(?:file_key|image_key|key)\s*=\s*"([^"]+)"', re.I)
 # 旧机器人配置里的名字。读的时候当成现在的名字；两边都写了就用新的，并在 --check 里提示。
 _LEGACY_TOOLS = (("doc_search", "docs_search"), ("doc_read", "docs_read"), ("doc_create", "docs_create"), ("doc_append", "docs_append"))
 _LEGACY_RESOURCES = (("doc_folder_token", "folder_token"), ("doc_append_tokens", "docs_append_tokens"))
@@ -53,7 +59,7 @@ def apply_legacy_names(cfg):
 TOOL_DOC = """可用工具（每次最多调用一个；需要时只输出一行：<<TOOL>>{"tool":"名称","args":{...}}，不要输出别的）：
 - history {"keyword":"可选关键词"}：读取本群最近 7 天消息（仅群聊可用）
 - docs_search {"query":"关键词"}：搜索已分享给机器人的飞书文档
-- docs_read {"doc":"文档链接或 token","keyword":"可选"}：读取飞书文档内容
+- docs_read {"doc":"云文档链接或 token","keyword":"可选"}：读取飞书文档内容。file_ 或 img_ 开头的是聊天附件，不是云文档，不要传给这个工具
 - calendar_read {"start":"ISO8601","end":"ISO8601"}：查看团队日历日程
 - base_read {"keyword":"可选"}：查询团队多维表格记录
 - docs_create {"title":"标题","markdown":"正文"}：在团队专用文件夹新建文档（需发起人确认）
@@ -103,20 +109,14 @@ class Tools:
                     out = (r.stdout or "").strip(); err = r.stderr or ""
                 except subprocess.TimeoutExpired:
                     out, err = "", "timeout"
-                try: j = json.loads(out[out.find("{"):]) if "{" in out else {}
-                except Exception: j = {}
-                if not j: j = {"ok": False, "error": {"message": (out[:200] + " | " + err[-300:])}}
+                j = parse_cli_json(out, err)
+                if not j: j = {"ok": False, "error": {"message": ((out or "")[:200] + " | " + (err or "")[-300:]).strip(" |")}}
                 if j.get("ok") or not re.search(r"EOF|timeout|unreachable|connection|reset", json.dumps(j.get("error"), ensure_ascii=False), re.I): break
                 self.log.warning("lark %s retry %d: %s", " ".join(argv[:2]), attempt + 1, str(j.get("error"))[:200]); time.sleep(3 * (attempt + 1))
             if not j.get("ok"): self.log.warning("lark %s failed: %s", " ".join(argv[:2]), json.dumps(j.get("error"), ensure_ascii=False)[:400])
         if not j.get("ok"):
-            e = j.get("error") or {}
-            msg = str(e.get("message", ""))
-            if e.get("subtype") in ("app_scope_not_applied", "missing_scope") or e.get("code") in (99991672, 99991679) or "scope" in msg.lower():
-                raise ToolError("这项权限未开（需要管理员在开放平台开通 %s 并发版）" % SCOPE_HINT.get(tool, tool), msg)
-            if e.get("code") in (1770032, 91403, 131006) or "permission" in msg.lower() or "forbidden" in msg.lower() or "no access" in msg.lower():
-                raise ToolError("机器人没有访问这份资源的权限（需要把它分享给应用「%s」）" % self.cfg.get("bot_names", ["机器人"])[0], msg)
-            raise ToolError("飞书接口调用失败，请稍后再试", msg)
+            detail = json.dumps(j.get("error") or j, ensure_ascii=False)[:500]
+            raise ToolError(explain_lark_error(tool, j, (self.cfg.get("bot_names") or ["机器人"])[0]), detail)
         return j
 
     # ---------- 读 ----------
@@ -163,6 +163,8 @@ class Tools:
     def _docs_read(self, a, ctx):
         doc = str(a.get("doc") or "").strip()
         if not doc: raise ToolError("没有给出文档链接")
+        if is_chat_file_token(doc):
+            raise ToolError("这是聊天附件，不是云文档。请直接根据附件内容回答，不要把 file_key 当成文档 token")
         allow = self.t["docs_read"].get("allow_tokens")  # 为空表示：机器人能看到的都能读
         if allow and not _allow_token(doc, allow): raise ToolError("这份文档不在可读白名单里")
         argv = ["docs", "+fetch", "--doc", doc, "--doc-format", "markdown"]
@@ -170,7 +172,7 @@ class Tools:
         j = self.lark("docs_read", argv)
         d = j.get("data") or {}
         text = d.get("markdown") or d.get("content") or json.dumps(d, ensure_ascii=False)
-        return "文档内容（节选）：\n" + text[: int(self.t["docs_read"].get("max_chars", 8000))]
+        return "文档内容（节选）：\n" + clip_body(text, _cfg_int(self.t["docs_read"].get("max_chars"), DEFAULT_BODY_CHARS))
 
     def _calendar_read(self, a, ctx):
         argv = ["calendar", "+agenda"]
@@ -283,9 +285,11 @@ class Tools:
             except ValueError:
                 continue
             files.append(p)
-        self.audit(kind="read", tool="attachment", user=ctx["user"], chat=ctx["chat_id"], ok=True, n=len(files))
         msgs = (j.get("data") or {}).get("messages") or []
-        return d, files, (msgs[0].get("msg_type") if msgs else "")
+        msg = msgs[0] if msgs else {}
+        files = apply_original_names(files, msg)
+        self.audit(kind="read", tool="attachment", user=ctx["user"], chat=ctx["chat_id"], ok=True, n=len(files))
+        return d, files, (msg.get("msg_type") or msg.get("message_type") or "")
 
 def _allow_token(doc, allow):
     """白名单要整段对上，不能只是子串。doxTEST 不能放行 doxTESTxxx。链接里独立的一段可以。"""
@@ -300,3 +304,228 @@ def _allow_token(doc, allow):
 def _brief(x):
     s = json.dumps(x, ensure_ascii=False) if not isinstance(x, str) else x
     return s[:300]
+
+def _cfg_int(raw, default):
+    try: n = int(raw)
+    except (TypeError, ValueError): return default
+    return n
+
+def _json_from_text(text):
+    """从一段可能夹着日志的输出里取出 lark-cli 的 JSON。嵌套的 error 对象不要盖住外层。"""
+    if not text: return None
+    s = str(text)
+    dec = json.JSONDecoder()
+    found = None
+    i = 0
+    while True:
+        j = s.find("{", i)
+        if j < 0: break
+        try:
+            obj, _end = dec.raw_decode(s, j)
+        except Exception:
+            i = j + 1
+            continue
+        if isinstance(obj, dict) and ("ok" in obj or "error" in obj):
+            return obj
+        if found is None and isinstance(obj, dict) and obj.get("code") is not None:
+            found = obj
+        i = j + 1
+    return found
+
+def parse_cli_json(stdout, stderr):
+    """lark-cli 成功时 JSON 在 stdout；失败时经常只写在 stderr。两边都试。"""
+    j_out = _json_from_text(stdout)
+    j_err = _json_from_text(stderr)
+    if j_out and j_out.get("ok"): return j_out
+    if j_err and ("ok" in j_err or j_err.get("error") or j_err.get("code") is not None):
+        if not j_out or (j_err.get("error") and not j_out.get("error") and not j_out.get("ok")):
+            return j_err
+    return j_out or j_err
+
+def _err_code(j):
+    e = j.get("error") if isinstance(j, dict) else None
+    if not isinstance(e, dict): e = {}
+    code = e.get("code", j.get("code") if isinstance(j, dict) else None)
+    try:
+        if code is not None and str(code).lstrip("-").isdigit(): return int(code)
+    except (TypeError, ValueError): pass
+    return code
+
+def explain_lark_error(tool, j, bot_name="机器人"):
+    """把飞书错误码说成具体原因。权限、不存在、不是文档，不要都说成接口不可用。"""
+    e = (j or {}).get("error") if isinstance(j, dict) else None
+    if not isinstance(e, dict): e = {}
+    code = _err_code(j or {})
+    msg = str(e.get("message") or (j or {}).get("msg") or "")
+    low = msg.lower()
+    if e.get("subtype") in ("app_scope_not_applied", "missing_scope") or code in (99991672, 99991679) or "scope" in low:
+        return "这项权限未开（需要管理员在开放平台开通 %s 并发版）" % SCOPE_HINT.get(tool, tool)
+    if code == 3380002 or "不是文档" in msg or "not a document" in low or "not a doc" in low:
+        return "没有找到这份文档（不存在，或这个编号不是云文档）"
+    if code in _NOT_FOUND_CODES or re.search(r"not found|not exist|does not exist|doesn't exist|不存在|已被删除", low + msg):
+        return "没有找到这份资源（不存在或已被删除）"
+    if code in _PERM_CODES or "permission" in low or "forbidden" in low or "no access" in low or "无权限" in msg or "没有权限" in msg:
+        return "机器人没有访问这份资源的权限（需要把它分享给应用「%s」）" % (bot_name or "机器人")
+    short = re.sub(r"\s+", " ", msg).strip()
+    if short and short.lower() not in ("null", "none"):
+        return "飞书接口调用失败：" + short[:120]
+    return "飞书接口调用失败，请稍后再试"
+
+def is_chat_file_token(doc):
+    """聊天附件的 file_key / image_key。云文档 token 不是这种前缀。"""
+    raw = str(doc or "").strip()
+    if not raw: return False
+    if re.match(r"^(file_|img_)", raw, re.I): return True
+    return bool(re.search(r"(?:^|[/=])(?:file_|img_)[A-Za-z0-9]", raw, re.I))
+
+def clip_body(text, limit):
+    """正文没超过上限就原样返回。超过则留开头、中段和结尾，并注明总长度。limit<=0 表示不截。"""
+    text = text or ""
+    limit = _cfg_int(limit, DEFAULT_BODY_CHARS)
+    if limit <= 0 or len(text) <= limit: return text
+    note = "（全文约 %d 字，超过上限 %d 字，下面是开头、中段和结尾，请分段概括）" % (len(text), limit)
+    overhead = len(note) + len("【开头】\n\n【中段】\n\n【结尾】\n")
+    if limit <= overhead + 12:
+        return text[:max(0, limit)] + "\n" + note
+    seg = max(4, (limit - overhead) // 3)
+    mid = len(text) // 2
+    half = seg // 2
+    middle = text[max(0, mid - half): max(0, mid - half) + seg]
+    return "\n".join([note, "【开头】", text[:seg], "【中段】", middle, "【结尾】", text[-seg:]])
+
+def safe_download_name(name):
+    """只用文件名本身，去掉路径和不可见字符，避免附件名把别的文件带进来。"""
+    name = str(name or "").replace("\\", "/").split("/")[-1]
+    name = re.sub(r"[\x00-\x1f<>:\"|?*]", "", name).strip().strip(".")
+    if not name or name in (".", ".."): return None
+    if len(name) > 80:
+        base, ext = os.path.splitext(name)
+        name = base[:70] + ext[:10]
+    return name
+
+def _walk_names(obj, pairs):
+    if isinstance(obj, dict):
+        name = obj.get("file_name") or obj.get("filename") or obj.get("name")
+        key = obj.get("file_key") or obj.get("image_key") or ""
+        if isinstance(name, str) and name.strip():
+            safe = safe_download_name(name)
+            if safe: pairs.append((str(key or ""), safe))
+        for v in obj.values(): _walk_names(v, pairs)
+    elif isinstance(obj, list):
+        for v in obj: _walk_names(v, pairs)
+    elif isinstance(obj, str):
+        s = obj.strip()
+        if s[:1] in "[{":
+            try:
+                _walk_names(json.loads(s), pairs); return
+            except Exception:
+                pass
+        names = [safe_download_name(n) for n in _NAME_ATTR.findall(s)]
+        names = [n for n in names if n]
+        keys = _KEY_ATTR.findall(s)
+        if names and keys and len(names) == len(keys):
+            pairs.extend((k, n) for k, n in zip(keys, names))
+        else:
+            pairs.extend(("", n) for n in names)
+
+def attachment_names(msg):
+    pairs = []
+    if isinstance(msg, dict): _walk_names(msg.get("content"), pairs)
+    seen = set(); out = []
+    for key, name in pairs:
+        mark = (key, name)
+        if mark in seen: continue
+        seen.add(mark); out.append(mark)
+    return out
+
+def apply_original_names(files, msg):
+    """下载文件名常常是 file_key。改成消息里的原文件名，模型和提示词都不再看到 file_key。"""
+    pairs = attachment_names(msg)
+    if not files or not pairs: return files
+    used = set(); renamed = []
+    for p in files:
+        base = os.path.basename(p)
+        pick = None
+        for key, name in pairs:
+            if name in used: continue
+            if key and key in base:
+                pick = name; break
+        if pick is None and len([x for x in files]) == 1 and len(pairs) == 1 and pairs[0][1] not in used:
+            pick = pairs[0][1]
+        if not pick:
+            renamed.append(p); continue
+        used.add(pick)
+        dest = os.path.join(os.path.dirname(p), pick)
+        if os.path.abspath(dest) != os.path.abspath(p):
+            stem, ext = os.path.splitext(pick); n = 1
+            while os.path.exists(dest):
+                dest = os.path.join(os.path.dirname(p), "%s_%d%s" % (stem, n, ext)); n += 1
+            try: os.replace(p, dest); p = dest
+            except OSError: pass
+        renamed.append(p)
+    return renamed
+
+_W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+_A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+
+def _xml_root(blob):
+    import xml.etree.ElementTree as ET
+    return ET.fromstring(blob)
+
+def extract_docx(path):
+    import zipfile
+    with zipfile.ZipFile(path) as z:
+        xml = z.read("word/document.xml")
+    root = _xml_root(xml)
+    paras = []
+    for p in root.iter(_W + "p"):
+        chunks = []
+        for node in p.iter():
+            if node.tag == _W + "t" and node.text: chunks.append(node.text)
+            elif node.tag == _W + "tab": chunks.append("\t")
+            elif node.tag == _W + "br": chunks.append("\n")
+        line = "".join(chunks).strip()
+        if line: paras.append(line)
+    return "\n".join(paras)
+
+def extract_pptx(path):
+    import zipfile
+    texts = []
+    with zipfile.ZipFile(path) as z:
+        slides = sorted((n for n in z.namelist() if re.match(r"ppt/slides/slide\d+\.xml$", n)),
+                        key=lambda n: int(re.search(r"(\d+)", n).group(1)))
+        for i, name in enumerate(slides, 1):
+            root = _xml_root(z.read(name))
+            bits = [t.text for t in root.iter(_A + "t") if t.text]
+            if bits: texts.append("【第 %d 页】\n%s" % (i, "\n".join(bits)))
+    return "\n\n".join(texts)
+
+def extract_xlsx(path):
+    """有 openpyxl 就读成表格文本。没安装返回 None，调用方给出明确提示。"""
+    try: import openpyxl
+    except ImportError: return None
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    try:
+        out = []
+        for ws in wb.worksheets:
+            rows = []
+            for i, row in enumerate(ws.iter_rows(values_only=True)):
+                if i >= 200:
+                    rows.append("…（只列出前 200 行）"); break
+                cells = ["" if c is None else str(c) for c in row]
+                if any(x.strip() for x in cells): rows.append("\t".join(cells))
+            if rows: out.append("【%s】\n%s" % (ws.title, "\n".join(rows)))
+        return "\n\n".join(out)
+    finally:
+        wb.close()
+
+def office_text(path):
+    """返回 (kind, text)。text 为 None 表示 xlsx 但没有 openpyxl。kind 为 err 表示文件打不开。"""
+    ext = os.path.splitext(path)[1].lower()
+    try:
+        if ext == ".docx": return "docx", extract_docx(path)
+        if ext == ".pptx": return "pptx", extract_pptx(path)
+        if ext == ".xlsx": return "xlsx", extract_xlsx(path)
+    except Exception:
+        return "err", ""
+    return "", ""

@@ -12,7 +12,7 @@ import json, os, re, subprocess, sys, time, logging, collections, threading, sql
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import guard, memory, providers
 from providers.base import PartialText
-from tools import Tools, ToolError, TOOL_DOC, READ_TOOLS, WRITE_TOOLS, run_capture
+from tools import Tools, ToolError, TOOL_DOC, READ_TOOLS, WRITE_TOOLS, run_capture, parse_cli_json, clip_body, office_text
 
 CFG_PATH = sys.argv[1]; ARGS = sys.argv[2:]
 def _opt(name):
@@ -488,7 +488,7 @@ def answer(q, sess, ctx, extra="", on_stage=None):
     if done: return res
     if on_stage: on_stage("正在整理答案…")
     follow = _FOLLOW_SKILL if name == "skill_read" and not str(res).startswith("工具不可用") else _FOLLOW_STOP
-    out2 = run_agent(build_prompt(q, sess, ctx, extra + "\n\n工具结果（%s）：\n%s\n\n%s" % (name, res[:9000], follow)), on_stage, sess)
+    out2 = run_agent(build_prompt(q, sess, ctx, extra + "\n\n工具结果（%s）：\n%s\n\n%s" % (name, res[:body_max_chars()], follow)), on_stage, sess)
     if isinstance(out2, PartialText): return _partial_clean(out2)
     m2 = TOOL_RX.search(out2 or "")
     # 只有「刚读完一份技能、步骤还要求调飞书」才再走一轮原来的工具回合，避免连环读技能
@@ -502,28 +502,53 @@ def answer(q, sess, ctx, extra="", on_stage=None):
     res2, done2 = _run_tool(name2, args2, ctx, on_stage)
     if done2: return res2
     if on_stage: on_stage("正在整理答案…")
-    out3 = run_agent(build_prompt(q, sess, ctx, extra + "\n\n工具结果（%s）：\n%s\n\n%s" % (name2, str(res2)[:9000], _FOLLOW_STOP)), on_stage, sess)
+    out3 = run_agent(build_prompt(q, sess, ctx, extra + "\n\n工具结果（%s）：\n%s\n\n%s" % (name2, str(res2)[:body_max_chars()], _FOLLOW_STOP)), on_stage, sess)
     if isinstance(out3, PartialText): return _partial_clean(out3)
     if out3 and TOOL_RX.search(out3): out3 = TOOL_RX.sub("", out3).strip()
     return out3 or ("工具不可用：" + res2 if str(res2).startswith("工具不可用") else None)
 
 # ---------- 附件 ----------
 TEXT_EXT = {".txt", ".md", ".csv", ".json", ".log", ".tsv"}; IMG_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
+OFFICE_NEW = {".docx", ".pptx", ".xlsx"}; OFFICE_OLD = {".doc", ".ppt", ".xls"}
+def body_max_chars():
+    """工具结果送进模型的正文上限。没写 agent.body_max_chars 时默认 20000。0 表示不截。"""
+    raw = (CFG.get("agent") or {}).get("body_max_chars", 20000)
+    try: return int(raw)
+    except (TypeError, ValueError): return 20000
+def _att_chars():
+    raw = (CFG.get("tools") or {}).get("attachment", {}).get("max_chars")
+    if raw is None: return body_max_chars()
+    try: return int(raw)
+    except (TypeError, ValueError): return body_max_chars()
 def attachment_context(msg_id, ctx):
     """返回 (extra_prompt, cleanup_fn)；无权限/未启用时抛 ToolError"""
     d, files, mtype = TOOLS.fetch_attachments(msg_id, ctx, TMP)
     lim = int(CFG.get("tools", {}).get("attachment", {}).get("max_mb", 20)) * 1024 * 1024
+    chars = _att_chars()
     parts, img_dir = [], None
     for f in files[:5]:
         ext = os.path.splitext(f)[1].lower(); name = os.path.basename(f)
         if os.path.getsize(f) > lim: parts.append("附件 %s 太大，已跳过。" % name); continue
         if ext in TEXT_EXT:
-            parts.append("附件《%s》内容：\n%s" % (name, open(f, encoding="utf-8", errors="replace").read()[:8000]))
+            parts.append("附件《%s》内容：\n%s" % (name, clip_body(open(f, encoding="utf-8", errors="replace").read(), chars)))
         elif ext == ".pdf":
             try:
                 import pypdf; txt = "\n".join((p.extract_text() or "") for p in pypdf.PdfReader(f).pages[:20])
-                parts.append("附件《%s》（PDF 文本）：\n%s" % (name, txt[:8000]))
+                parts.append("附件《%s》（PDF 文本）：\n%s" % (name, clip_body(txt, chars)))
             except Exception: parts.append("附件《%s》是 PDF，当前无法解析文本。" % name)
+        elif ext in OFFICE_NEW:
+            kind, txt = office_text(f)
+            if kind == "xlsx" and txt is None:
+                parts.append("附件《%s》是 Excel 表格。当前环境没有安装 openpyxl，没法读取。可以把内容另存为 CSV，或安装 openpyxl 后再发。" % name)
+            elif kind == "err" or txt is None:
+                parts.append("附件《%s》无法解析，文件可能已损坏。" % name)
+            elif not txt:
+                parts.append("附件《%s》没有提取到文字。" % name)
+            else:
+                label = {"docx": "Word", "pptx": "PPT", "xlsx": "Excel"}.get(kind, "Office")
+                parts.append("附件《%s》（%s 文本）：\n%s" % (name, label, clip_body(txt, chars)))
+        elif ext in OFFICE_OLD:
+            parts.append("附件《%s》是旧版 Office 格式，请另存为 .docx、.pptx 或 .xlsx 后再发。" % name)
         elif ext in IMG_EXT and FEAT.get("vision", True):
             img_dir = img_dir or os.path.join(KB, ".attach", os.path.basename(d)); os.makedirs(img_dir, exist_ok=True)
             shutil.copy(f, img_dir); parts.append("用户发来一张图片，已放在工作区 .attach/%s/%s，请查看后回答。" % (os.path.basename(d), name))
@@ -601,10 +626,9 @@ def lark_api(argv, payload=None, timeout=30):
             with open(fn, "w", encoding="utf-8") as f: json.dump(payload, f, ensure_ascii=False)
             argv = [("@" + os.path.basename(fn)) if x == "@PAYLOAD" else x for x in argv]
         r = run_capture(lark_exe() + list(argv) + ["--profile", CFG["profile"], "--as", "bot"], cwd=TMP, timeout=timeout)
-        out = (r.stdout or "") + (r.stderr or "")
-        try: j = json.loads((r.stdout or "")[(r.stdout or "").find("{"):])
-        except Exception: j = {}
-        return (j if j.get("ok") else None), ("" if j.get("ok") else out[-600:])
+        raw = (r.stdout or "") + (r.stderr or "")
+        j = parse_cli_json(r.stdout or "", r.stderr or "") or {}
+        return (j if j.get("ok") else None), ("" if j.get("ok") else raw[-600:])
     except Exception as e:
         return None, str(e)
     finally:

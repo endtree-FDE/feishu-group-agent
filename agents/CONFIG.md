@@ -144,6 +144,7 @@
 | `max_runtime_sec` | 一道题最长多久（秒）。默认 `1800`（30 分钟）。到点就停。Cursor 一次性模式尽量把已经写出的部分发出去；常驻模式这一题改走一次性进程。`openai_compat` 也把已经写出的部分发出去。 |
 | `stall_sec` | 多少秒完全没有新输出，就当成卡住。默认 `300`。Cursor 常驻模式下，卡住的这一题改走一次性进程。`openai_compat` 同样把已经写出的部分发出去。 |
 | `max_chars` | 回答最多保留多少字。默认 `3500`。模型写出的更长内容会在这里截断。 |
+| `body_max_chars` | 工具结果放进提示词时最多多少字。默认 `20000`。`0` 表示不截。附件和文档还可以各自再设上限，见下面。 |
 | `reply_chunk_chars` | 一条飞书消息最多多少字。默认 `3500`。只有回答比这个长时才拆成多条，每条开头写（1/N）。`0` 表示不拆。不改 `max_chars` 时，回答本来就不超过 3500 字，仍然是一条。想发出更长的回答，先把 `max_chars` 调大。 |
 | `acp_max_sessions` | 常驻时最多保留几个话题会话。默认 `8`。超出就丢掉最久没人问的那个。只在 `mode` 为 `acp` 时有用。 |
 | `acp_idle_sec` | 一个话题多久没人问，就丢掉这个会话。默认 `1800`（30 分钟）。下一问重新开会话。 |
@@ -193,14 +194,16 @@
 |---|---|
 | `history` | 读本群最近几天的消息。`days` 默认 7，`max_pages` 默认 2。私聊里不提供。 |
 | `docs_search` | 搜索已分享给机器人的飞书文档。 |
-| `docs_read` | 读一份文档。`allow_tokens` 为空表示：分享给机器人的都能读。想限制就填文档编号。`max_chars` 是最多读多少字。 |
+| `docs_read` | 读一份文档。`allow_tokens` 为空表示：分享给机器人的都能读。想限制就填文档编号。`max_chars` 是最多读多少字，没写时默认 `20000`。超过上限时保留开头、中段和结尾，并注明全文长度，方便分段概括。聊天附件的 `file_`、`img_` 编号会被拒绝，并说明这不是云文档。 |
 | `calendar_read` | 读日历。`calendar_id` 可空，空则用下面 `write.resources.calendar_id`。 |
 | `base_read` | 读多维表格。`base_token`、`table_id` 换成你的表。`search_fields` 是可搜索的列名，没有就留 `[]`。 |
-| `attachment` | 下载图片和文件。`max_mb` 是单文件上限，默认 20。 |
+| `attachment` | 下载图片和文件。`max_mb` 是单文件上限，默认 20。`max_chars` 是提取出的正文最多多少字，没写时跟 `agent.body_max_chars`（默认 `20000`）。纯文本、PDF、`.docx`、`.pptx` 会转成文字。`.docx` 和 `.pptx` 只用标准库，不用额外安装。`.xlsx` 在装了 `openpyxl` 时读取，没装会说明读不了，并建议另存 CSV。旧格式 `.doc`、`.ppt`、`.xls` 会请对方另存为新格式。下载后的文件会尽量改成消息里的原文件名，而不是 `file_key`。 |
 | `docs_create` | 在专用文件夹新建文档。要确认码。 |
 | `docs_append` | 在白名单文档末尾追加。要确认码。 |
 | `calendar_create` | 在团队日历建日程，不邀请任何人。要确认码。 |
 | `base_create` | 在表格里加一条记录。要确认码。 |
+
+飞书接口报错时，会先看 stdout，没有 JSON 再看 stderr。文档不存在、编号不是云文档、没有权限、权限未开通，会分别说明，而不是都说成「接口暂时不可用」。
 
 工具名字是 `docs_search`、`docs_read`、`docs_create`、`docs_append`（docs 带 s）。旧名字 `doc_search`、`doc_read`、`doc_create`、`doc_append` 仍会按新名字读取。`write.resources` 里的 `doc_folder_token`、`doc_append_tokens` 同样，对应现在的 `folder_token`、`docs_append_tokens`。两边都写了就用新名字。`python agentbot.py 配置.json --check` 会打出 `HINT` 提醒改掉，这行不算失败。
 

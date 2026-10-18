@@ -56,6 +56,7 @@
     "max_runtime_sec": 1800,
     "stall_sec": 300,
     "max_chars": 3500,
+    "body_max_chars": 20000,
     "reply_chunk_chars": 3500,
     "acp_max_sessions": 8,
     "acp_idle_sec": 1800,
@@ -67,7 +68,7 @@
   "tools": {
     "history": {"enabled": true, "days": 7, "max_pages": 2},
     "docs_search": {"enabled": true},
-    "docs_read": {"enabled": true, "allow_tokens": [], "max_chars": 8000},
+    "docs_read": {"enabled": true, "allow_tokens": [], "max_chars": 20000},
     "calendar_read": {"enabled": true, "calendar_id": ""},
     "base_read": {
       "enabled": true,
@@ -75,7 +76,7 @@
       "table_id": "REPLACE_TABLE_ID",
       "search_fields": []
     },
-    "attachment": {"enabled": true, "max_mb": 20},
+    "attachment": {"enabled": true, "max_mb": 20, "max_chars": 20000},
     "docs_create": {"enabled": true},
     "docs_append": {"enabled": true},
     "calendar_create": {"enabled": true},

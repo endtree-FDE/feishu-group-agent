@@ -1409,5 +1409,107 @@ _ko = (_keys.stdout or "") + (_keys.stderr or "")
 check("不拆的回复仍用原来的幂等键，拆开后每段一个键",
       "ONE re_m" in _ko and "A re_m_0" in _ko and "B re_m_1" in _ko and "N 1" in _ko, _ko)
 
+# ---------- 附件转文本、原文件名、stderr 错误、正文上限 ----------
+sys.path.insert(0, FW)
+import tools as _tools
+_long = "头" + ("中" * 500) + "尾"
+_clipped = _tools.clip_body(_long, 200)
+check("超长正文保留开头、中段和结尾并注明字数",
+      "【开头】" in _clipped and "【中段】" in _clipped and "【结尾】" in _clipped and "头" in _clipped and "尾" in _clipped and "全文约" in _clipped and len(_clipped) < len(_long), _clipped)
+check("未超过上限的正文原样返回", _tools.clip_body("短文", 200) == "短文")
+check("docs_read 拒绝 file_ 和 img_ 开头的聊天附件编号",
+      _tools.is_chat_file_token("file_demo") and _tools.is_chat_file_token("img_demo") and not _tools.is_chat_file_token("doxTEST"))
+_stderr_only = '{"ok": false, "error": {"code": 3380002, "message": "not a document"}}'
+_parsed = _tools.parse_cli_json("", _stderr_only)
+check("stderr 里的错误 JSON 能解析出来", isinstance(_parsed, dict) and _parsed.get("ok") is False and _tools._err_code(_parsed) == 3380002, str(_parsed))
+check("3380002 说成文档不存在或不是云文档", "不是云文档" in _tools.explain_lark_error("docs_read", _parsed, "小助手"))
+check("权限不足仍是单独的提示", "没有访问这份资源的权限" in _tools.explain_lark_error("docs_read", {"ok": False, "error": {"code": 91403, "message": "forbidden"}}, "小助手"))
+_err_cli = os.path.join(T, "err_cli.py")
+open(_err_cli, "w", encoding="utf-8").write(
+    "import sys\nsys.stderr.write(%r)\nsys.exit(1)\n" % (_stderr_only + "\n"))
+_mini_cfg = {"profile": "test-profile", "name": "t", "bot_names": ["小助手"], "skills": {"enabled": False},
+             "tools": {"docs_read": {"enabled": True, "max_chars": 20000}}, "write": {}}
+_tl = _tools.Tools(_mini_cfg, T, lambda: [sys.executable, _err_cli], __import__("logging").getLogger("errtest"), dry=False)
+_tl.fake = None
+os.environ.pop("AGENTBOT_FAKE_LARK", None)
+try:
+    _tl.lark("docs_read", ["docs", "+fetch", "--doc", "file_should_not_run"])
+    _err_msg = ""
+except _tools.ToolError as _e:
+    _err_msg = _e.user_msg
+check("真实调用时只写在 stderr 的 3380002 不会说成接口不可用", "不是云文档" in _err_msg and "暂时不可用" not in _err_msg, _err_msg)
+def _mini_docx(path, paragraph):
+    xml = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+           '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+           '<w:body><w:p><w:r><w:t>%s</w:t></w:r></w:p></w:body></w:document>' % paragraph)
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("word/document.xml", xml)
+def _mini_pptx(path, line):
+    xml = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+           '<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">'
+           '<p:cSld><p:spTree><a:t>%s</a:t></p:spTree></p:cSld></p:sld>' % line)
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("ppt/slides/slide1.xml", xml)
+_docx_p = os.path.join(T, "sample.docx"); _mini_docx(_docx_p, "赛程常见问题正文")
+_kind, _txt = _tools.office_text(_docx_p)
+check("docx 用标准库抽出正文", _kind == "docx" and "赛程常见问题正文" in (_txt or ""), _txt)
+_pptx_p = os.path.join(T, "sample.pptx"); _mini_pptx(_pptx_p, "路演页标题")
+_kind, _txt = _tools.office_text(_pptx_p)
+check("pptx 用标准库抽出正文", _kind == "pptx" and "路演页标题" in (_txt or ""), _txt)
+try:
+    import openpyxl as _ox
+except ImportError:
+    _ox = None
+if _ox:
+    _wb = _ox.Workbook(); _ws = _wb.active; _ws.title = "表"; _ws["A1"] = "截止"; _ws["B1"] = "10月30日"
+    _xlsx_p = os.path.join(T, "sample.xlsx"); _wb.save(_xlsx_p); _wb.close()
+    _kind, _txt = _tools.office_text(_xlsx_p)
+    check("xlsx 在有 openpyxl 时读出单元格", _kind == "xlsx" and "截止" in (_txt or "") and "10月30日" in (_txt or ""), _txt)
+else:
+    check("xlsx 没装 openpyxl 时返回 None 而不是抛错", _tools.extract_xlsx(os.path.join(T, "missing.xlsx")) is None)
+_saved_fake = json.load(open(FP, encoding="utf-8"))
+def _with_mget(content, msg_type="file"):
+    fake = dict(_saved_fake)
+    fake["im +messages-mget"] = {"ok": True, "data": {"messages": [{"msg_type": msg_type, "content": content}]}}
+    json.dump(fake, open(FP, "w", encoding="utf-8"), ensure_ascii=False)
+def _stage_file(mid, filename, src=None, data=b"x"):
+    folder = os.path.join(T, "tmp", "att_" + re.sub(r"\W", "", mid)[-20:], "lark-im-resources", "x")
+    os.makedirs(folder, exist_ok=True)
+    dest = os.path.join(folder, filename)
+    if src: shutil.copy(src, dest)
+    else: open(dest, "wb").write(data)
+    return dest
+_stage_file("docx1", "file_demo.docx", src=_docx_p)
+_with_mget('{"file_key":"file_demo","file_name":"常见问题.docx"}')
+o = run([dict(p2p, message_id="docx1", message_type="file", content="[文件] 提炼要点")], name="docx_att", extra_env={"AGENTBOT_FAKE_DUMP_PROMPT": "1"})
+ps = prompts(o)
+check("docx 附件用原文件名并把正文交给模型",
+      ps and "常见问题.docx" in ps[0] and "赛程常见问题正文" in ps[0] and "file_demo" not in ps[0] and "类型暂不支持" not in ps[0], ps[0] if ps else o)
+_stage_file("ppt1", "file_slides.pptx", src=_pptx_p)
+_with_mget('name="路演.pptx" file_key="file_slides"')
+o = run([dict(p2p, message_id="ppt1", message_type="file", content="[文件] 看幻灯片")], name="pptx_att", extra_env={"AGENTBOT_FAKE_DUMP_PROMPT": "1"})
+ps = prompts(o)
+check("pptx 附件用原文件名并抽出页面文字",
+      ps and "路演.pptx" in ps[0] and "路演页标题" in ps[0] and "类型暂不支持" not in ps[0], ps[0] if ps else o)
+_stage_file("legacy1", "file_old.doc", data=b"\xd0\xcf\x11\xe0")
+_with_mget('{"file_key":"file_old","file_name":"旧材料.doc"}')
+o = run([dict(p2p, message_id="legacy1", message_type="file", content="[文件] 看旧文档")], name="legacy_doc", extra_env={"AGENTBOT_FAKE_DUMP_PROMPT": "1"})
+ps = prompts(o)
+check("旧版 .doc 明确要求另存为新格式", ps and "旧材料.doc" in ps[0] and "另存为" in ps[0], ps[0] if ps else o)
+_names = _tools.apply_original_names([os.path.join(T, "no_such")], {"content": 'name="../escape.txt"'})
+check("附件原名里的路径会被丢掉", _names == [os.path.join(T, "no_such")])
+o = run([ev("fk1", '<<FAKE_TOOL>>{"tool":"docs_read","args":{"doc":"file_demo_key"}}<<END>> 读附件')], name="file_token")
+check("模型把 file_key 交给 docs_read 时直接拒绝", "聊天附件" in o and "docs +fetch" not in o and "飞书接口调用失败" not in o, o)
+_cap = json.loads(json.dumps(cfg)); _cap["tools"]["attachment"]["max_chars"] = 80
+_cap_path = os.path.join(T, "attcap.json"); json.dump(_cap, open(_cap_path, "w", encoding="utf-8"), ensure_ascii=False)
+_long_docx = os.path.join(T, "long.docx"); _mini_docx(_long_docx, "头" + ("中" * 400) + "尾")
+_stage_file("long1", "file_long.docx", src=_long_docx)
+_with_mget('{"file_key":"file_long","file_name":"长文.docx"}')
+o = run([dict(p2p, message_id="long1", message_type="file", content="[文件] 总结")], name="long_doc", cfg_path=_cap_path, extra_env={"AGENTBOT_FAKE_DUMP_PROMPT": "1"})
+ps = prompts(o)
+check("附件正文超过 max_chars 时分段截取",
+      ps and "【开头】" in ps[0] and "【结尾】" in ps[0] and "全文约" in ps[0] and "头" in ps[0] and ps[0].count("中") < 400, ps[0][-500:] if ps else o)
+json.dump(_saved_fake, open(FP, "w", encoding="utf-8"), ensure_ascii=False)
+
 print("\n%d/%d passed" % (sum(r for _, r in results), len(results))); shutil.rmtree(T, ignore_errors=True)
 sys.exit(0 if all(r for _, r in results) else 1)
