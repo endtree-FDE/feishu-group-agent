@@ -192,6 +192,42 @@ def get_provider():
             if _PROVIDER is None:
                 _PROVIDER = providers.create(CFG, log, KB)
     return _PROVIDER
+def _status_cmd_on():
+    """没写 commands.status 时，/状态 不调用模型。显式 false 才把这几个字交给模型。"""
+    c = CFG.get("commands")
+    if not isinstance(c, dict) or "status" not in c: return True
+    return bool(c.get("status"))
+def status_text(sess):
+    """给人看的开关。不打印路径、profile、群号、人和密钥。"""
+    prov = str(CFG.get("model_provider") or "cursor")
+    mode = str((CFG.get("agent") or {}).get("mode") or "oneshot")
+    mode_zh = "常驻" if mode == "acp" else "一次性"
+    model = str((CFG.get("agent") or {}).get("model") or "").strip()
+    model_bit = ("，模型名 " + model) if model and "://" not in model and len(model) <= 80 else ""
+    short_on = bool(FEAT.get("memory", True))
+    n = 0
+    if short_on:
+        with DBL:
+            row = DB.execute("select count(*) from turns where sess=?", (sess,)).fetchone()
+            n = int(row[0] if row else 0)
+    long_on = bool(getattr(GMEM, "enabled", False))
+    sk = TOOLS.skills
+    if not sk.enabled:
+        skill_bit = "关"
+    else:
+        skill_bit = "开，选用 %d 个" % len(sk.valid)
+        skipped = getattr(sk, "skipped", None) or []
+        if skipped: skill_bit += "，另有 %d 个未选用" % len(skipped)
+    write_on = (CFG.get("write") or {}).get("enabled", True)
+    lines = [
+        "当前状态（这一条不调用模型）：",
+        "模型接口：%s，%s%s。" % (prov, mode_zh, model_bit),
+        "短期记忆：%s。本话题已留下 %d 条。" % ("开" if short_on else "关", n),
+        "长期记忆：%s。" % ("开" if long_on else "关"),
+        "技能：%s。" % skill_bit,
+        "写入：%s。写操作要白名单和 6 位确认码，不会邀请别人。" % ("开" if write_on else "关"),
+    ]
+    return "\n".join(lines)
 def forget(sess):
     with DBL: DB.execute("delete from turns where sess=?", (sess,)); DB.commit()
     try: get_provider().drop(sess)
@@ -1116,6 +1152,8 @@ def _handle_claimed(ev, mid, ctype, uid):
     if m:
         reply(mid, TOOLS.confirm(m.group(2), ctx, cancel=(m.group(1) == "取消"))); return
     if q in ("/new", "/reset", "新话题"): forget(sess); reply(mid, "好的，已清空本话题的上下文。"); return
+    if q in ("/状态", "/status", "状态") and _status_cmd_on():
+        reply(mid, status_text(sess)); return
     mr = GMEM.handle(q, ctx)  # 记忆命令：/记忆、记一下/记住/备忘、/忘记 N、/忘记全部、确认清空（不调 agent）
     if mr is not None: reply(mid, mr); return
     if q in ("/help", "帮助") or (len(q) <= 30 and HELP_RX.search(q)):  # 问能力/权限：直接列能力和边界，不调 agent、不翻资料
