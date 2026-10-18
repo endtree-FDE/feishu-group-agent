@@ -49,6 +49,7 @@
 ### 5. 部署检查说清下一步
 
 - **目标：** `python agentbot.py agents/<名字>.json --check` 在占位符还没换、可选依赖没装时，用 HINT 告诉下一步，而不是让新人对着日志猜。正式缺 `bot_open_id` 仍应失败。
+- **现状：** 不改 `agentbot.py` 的前提下，`python checks/check_config.py agents/<名字>.json` 已能检查类型，并拒绝把密钥写进 `api_key_env` 或 `base_url`。`REPLACE_` 在非示例文件里只提示、不失败。`--check` 里的 HINT 仍要等 `agentbot.py` 空出来再接，所以这一项还没做完。
 - **参考：** [NoneBot2](https://github.com/nonebot/nonebot2) 的脚手架、[OpenClaw 技能与配置检查](https://docs.openclaw.ai/skills)、[飞书官方插件](https://github.com/larksuite/openclaw-lark) 的安装说明。部署步骤本身仍以 [docs/新建智能体.md](新建智能体.md) 为准。
 - **验收：** 配置里还留着 `REPLACE_` 时，`--check` 打印 HINT，并指出要换成自己的值。不因为没装 `pypdf` / `openpyxl` 而失败，只提示可选。已有测试里的占位配置不会因为这条 HINT 被判失败。
 - **不做：** 不加网页安装器，不在检查时访问飞书以外的新地址。
@@ -156,6 +157,13 @@
 - **现状：** CI 用 gitleaks 8.28.0 扫描提交，配置在 `.gitleaks.toml`。`python checks/history_scan.py` 再按账号、群号、open_id、密钥和客户名查全部历史，只打印打码结果。`.gitignore` 已排除填好的配置、`redact.txt`、`.env`、记忆和日志。
 - **参考：** [gitleaks](https://github.com/gitleaks/gitleaks)。
 - **验收：** CI 里有一次密钥扫描。`agents/example.json` 的 `REPLACE_` 占位和测试里的虚构客户名不会被判失败。扫描告警里的原文不写进仓库。这一项不代替下面的公开前人工复查。
+
+### 19. 配置 JSON Schema 和可读的报错（本轮草稿）
+
+- **目标：** 新人改 JSON 时，类型写错或把密钥写进文件，能马上看到是哪一项，而不是等到启动才失败。
+- **现状：** `agents/config.schema.json` 给编辑器用。`python checks/check_config.py` 用标准库检查，不依赖第三方包。缺了的键和不认识的键不失败。`REPLACE_` 在 `example.json` 里允许，在别的文件里只提示。
+- **验收：** `agents/example.json` 通过。布尔写成文字会失败。`api_key_env` 不像变量名，或 `base_url` 里夹了密钥，失败且报错不回显那段值。不改 `agentbot.py` 的启动路径。
+- **不做：** 不在这一项里改 `--check`（那是第 5 项，还要动 `agentbot.py`）。
 
 ## 公开前清理
 

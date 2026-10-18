@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "$id": "agents/config.schema.json",
+  "title": "飞书群智能体配置",
+  "description": "缺了的键保持旧行为。不认识的键先留着，不因此判失败。密钥不要写进这个文件。",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "name": {"type": "string", "minLength": 1, "maxLength": 40},
+    "base_dir": {"type": "string"},
+    "kb_dir": {"type": "string"},
+    "profile": {"type": "string"},
+    "bot_open_id": {"type": "string"},
+    "bot_names": {"type": "array", "items": {"type": "string"}},
+    "chat_ids": {"type": "array", "items": {"type": "string"}},
+    "reply_in_thread": {"type": "boolean"},
+    "max_concurrency": {"type": "integer", "minimum": 1},
+    "max_queue": {"type": "integer", "minimum": 0},
+    "model_provider": {
+      "type": "string",
+      "enum": ["cursor", "openai_compat", "fake", "deepseek", "dashscope", "zhipu", "pangu"]
+    },
+    "dry_run_live_reads": {"type": "boolean"},
+    "redact_file": {"type": "string"},
+    "help_pattern": {"type": "string"},
+    "system_prompt": {"type": "string"},
+    "kb_index": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "budget_chars": {"type": "integer", "minimum": 0}
+      }
+    },
+    "chats": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "auto_join": {"type": "boolean"},
+        "admit": {"type": "string"},
+        "inviter_open_ids": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "catchup": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "overlap_sec": {"type": "integer", "minimum": 0},
+        "max_messages": {"type": "integer", "minimum": 0}
+      }
+    },
+    "thread_followup": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "who": {"type": "string"}
+      }
+    },
+    "rate_limit": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "min_gap_per_user": {"type": "number", "minimum": 0},
+        "max_per_hour": {"type": "integer", "minimum": 0}
+      }
+    },
+    "observability": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "journal": {"type": "boolean"}
+      }
+    },
+    "features": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "memory": {"type": "boolean"},
+        "p2p": {"type": "boolean"},
+        "tools": {"type": "boolean"},
+        "attachments": {"type": "boolean"},
+        "vision": {"type": "boolean"}
+      }
+    },
+    "memory": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "dir": {"type": "string"},
+        "profile_budget_chars": {"type": "integer", "minimum": 0},
+        "recall": {"type": "boolean"},
+        "recall_budget_chars": {"type": "integer", "minimum": 0},
+        "max_fact_chars": {"type": "integer", "minimum": 0},
+        "scope": {"type": "string"},
+        "max_turns": {"type": "integer", "minimum": 0},
+        "context_budget_chars": {"type": "integer", "minimum": 0},
+        "ttl_hours": {"type": "number", "minimum": 0},
+        "per_user": {"type": "boolean"},
+        "trim_note": {"type": "boolean"}
+      }
+    },
+    "skills": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "dir": {"type": "string"},
+        "only": {},
+        "index_budget_chars": {"type": "integer", "minimum": 0},
+        "preload": {"type": "boolean"},
+        "preload_budget_chars": {"type": "integer", "minimum": 0}
+      }
+    },
+    "p2p": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "allow_open_ids": {"type": "array", "items": {"type": "string"}},
+        "open_to_all": {"type": "boolean"}
+      }
+    },
+    "agent": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "mode": {"type": "string"},
+        "preset": {"type": "string", "enum": ["", "deepseek", "dashscope", "zhipu", "pangu"]},
+        "model": {"type": "string"},
+        "base_url": {"type": "string", "pattern": "^$|^https?://\\S+$"},
+        "api_key_env": {"type": "string", "pattern": "^$|^[A-Za-z_][A-Za-z0-9_]{0,80}$"},
+        "network_retries": {"type": "integer", "minimum": 0},
+        "max_runtime_sec": {"type": "number", "minimum": 0},
+        "stall_sec": {"type": "number", "minimum": 0},
+        "max_chars": {"type": "integer", "minimum": 0},
+        "body_max_chars": {"type": "integer", "minimum": 0},
+        "reply_chunk_chars": {"type": "integer", "minimum": 0}
+      }
+    },
+    "texts": {"type": "object", "additionalProperties": {"type": "string"}},
+    "policy": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "redlines": {"type": "array"}
+      }
+    },
+    "kb_sync": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "docs_tokens": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "write": {"type": "object", "additionalProperties": true},
+    "progress": {"type": "object", "additionalProperties": true},
+    "tools": {"type": "object", "additionalProperties": true},
+    "conflict_pidfiles": {"type": "array"}
+  }
+}
