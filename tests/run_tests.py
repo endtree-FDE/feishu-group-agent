@@ -550,9 +550,149 @@ check("同话题复用会话，不同话题分开",
       and o.count("acp session reuse") >= 1 and o.count("acp session new") >= 2, o + str(ids))
 o, tr, rc = run_acp([ev("ac5", "<<ACP_PERM>> 写一下"), ev("ac6", "<<ACP_PERM_BARE>> 再写")], "acp_perm", ACP_CFG)
 perms = [e.get("outcome") or {} for e in tr if e.get("event") == "permission_result"]
-check("权限请求一律拒绝：有拒绝项就选 reject-once，没有就 cancelled",
+check("改文件的权限请求仍拒绝：有拒绝项就选 reject-once，没有就 cancelled",
       "已拒绝权限请求" in block(o, "ac5") and "已拒绝权限请求" in block(o, "ac6") and "权限被允许" not in o
-      and any(p.get("optionId") == "reject-once" for p in perms) and any(p.get("outcome") == "cancelled" for p in perms), o + str(perms))
+      and any(p.get("optionId") == "reject-once" for p in perms) and any(p.get("outcome") == "cancelled" for p in perms)
+      and all(p.get("optionId") != "allow-always" for p in perms), o + str(perms))
+def _perm_decision(e):
+    outcome = e.get("outcome") or {}
+    return outcome.get("optionId") or outcome.get("outcome")
+class _CapLog:
+    def __init__(self):
+        self.lines = []
+    def info(self, msg, *a):
+        self.lines.append(msg % a if a else str(msg))
+    def warning(self, *a, **k):
+        pass
+    def debug(self, *a, **k):
+        pass
+_opts3 = [
+    {"optionId": "allow-once", "kind": "allow_once"},
+    {"optionId": "allow-always", "kind": "allow_always"},
+    {"optionId": "reject-once", "kind": "reject_once"},
+]
+_old_lookup = _acp._lookup_host
+def _fake_lookup(host):
+    table = {
+        "example.com": [(None, None, None, None, ("93.184.216.34", 0))],
+        "inside.test": [(None, None, None, None, ("10.2.3.4", 0))],
+        "outside.test": [(None, None, None, None, ("1.1.1.1", 0))],
+        "loop.test": [(None, None, None, None, ("127.0.0.1", 0))],
+        "v6.test": [(None, None, None, None, ("::1", 0))],
+        "mapped.test": [(None, None, None, None, ("::ffff:192.168.0.9", 0))],
+        "link.test": [(None, None, None, None, ("169.254.169.254", 0))],
+        "both.test": [(None, None, None, None, ("1.1.1.1", 0)), (None, None, None, None, ("172.16.5.5", 0))],
+        "lan.test": [(None, None, None, None, ("172.31.1.1", 0))],
+        "notlan.test": [(None, None, None, None, ("172.32.1.1", 0))],
+    }
+    if host not in table:
+        raise OSError(host)
+    return table[host]
+_acp._lookup_host = _fake_lookup
+_bad = []
+def _expect(cond, label):
+    if not cond:
+        _bad.append(label)
+try:
+    _pub = _acp._public_http_url
+    _expect(_pub("https://example.com/news"), "example.com")
+    _expect(_pub("http://1.1.1.1/news"), "1.1.1.1")
+    _expect(_pub("http://8.8.8.8/"), "8.8.8.8")
+    _expect(_pub("https://outside.test/a"), "outside")
+    _expect(_pub("http://172.15.5.5/"), "172.15")
+    _expect(_pub("http://172.32.0.1/"), "172.32")
+    _expect(_pub("http://11.0.0.1/"), "11")
+    _expect(_pub("http://192.169.1.1/"), "192.169")
+    _expect(_pub("http://notlan.test/"), "notlan")
+    _expect(_pub("http://missing.test/a"), "missing-dns")
+    for u in (
+        "http://127.0.0.1/", "http://127.0.0.1:8080/a", "http://127.255.1.1/",
+        "http://10.0.0.1/", "http://10.255.255.255/",
+        "http://172.16.0.1/", "http://172.31.255.255/",
+        "http://192.168.1.1/", "http://169.254.169.254/",
+        "http://[::1]/", "http://[::ffff:127.0.0.1]/", "http://[::ffff:10.1.2.3]/",
+        "http://localhost/", "http://localhost:8080/a", "http://LocalHost/a", "http://foo.localhost/a",
+        "http://2130706433/", "http://example.com@127.0.0.1/", "https://user:pass@192.168.0.8/a",
+        "file:///etc/passwd", "http://inside.test/", "http://loop.test/", "http://v6.test/",
+        "http://mapped.test/", "http://link.test/", "http://both.test/", "http://lan.test/",
+    ):
+        _expect(not _pub(u), u)
+    _expect(_acp._is_public_web_tool({"kind": "search", "toolCallId": "web_search_0", "title": "Web search: 今日要闻"}), "search-id")
+    _expect(_acp._is_public_web_tool({"kind": "search", "toolCallId": "other", "title": "Web search: 新闻"}), "search-title")
+    _expect(_acp._is_public_web_tool({"kind": "fetch", "toolCallId": "web_fetch_0", "title": "Fetch https://example.com/news"}), "fetch-pub")
+    _expect(_acp._is_public_web_tool({"kind": "fetch", "toolCallId": "x", "title": "Fetch https://1.1.1.1/a"}), "fetch-title")
+    _expect(not _acp._is_public_web_tool({"kind": "search", "toolCallId": "grep_0", "title": "grep 知识库"}), "grep")
+    _expect(not _acp._is_public_web_tool({"kind": "search", "toolCallId": "find_0", "title": "Find 文件"}), "find")
+    _expect(not _acp._is_public_web_tool({"kind": "edit", "toolCallId": "web_search_0", "title": "Web search: x"}), "edit-pretend")
+    _expect(not _acp._is_public_web_tool({"kind": "execute", "toolCallId": "exec_0", "title": "Run command"}), "exec")
+    for k in ("delete", "move", "switch_mode", "other", "read"):
+        _expect(not _acp._is_public_web_tool({"kind": k, "toolCallId": "web_search_0", "title": "Web search: x"}), k)
+    _expect(not _acp._is_public_web_tool({"kind": "fetch", "toolCallId": "web_fetch_1", "title": "Fetch http://127.0.0.1/secret"}), "fetch-priv")
+    _expect(not _acp._is_public_web_tool({"kind": "fetch", "toolCallId": "web_fetch_9", "title": "Fetch http://inside.test/a"}), "fetch-dns")
+    _expect(not _acp._is_public_web_tool({"kind": "fetch", "toolCallId": "web_fetch_8", "title": "Fetch https://example.com/ok", "rawInput": {"url": "http://10.1.2.3/"}}), "raw-priv")
+    _expect(_acp._allow_once_option(_opts3) == "allow-once", "pick-once")
+    _expect(_acp._allow_once_option([{"optionId": "allow-always", "kind": "allow_always"}, {"optionId": "reject-once", "kind": "reject_once"}]) == "", "no-once")
+    _expect(_acp._reject_option(_opts3) == "reject-once", "pick-reject")
+finally:
+    _acp._lookup_host = _old_lookup
+check("只有 web search 和公网 web fetch 算上网，内网和会解析到内网的主机名拒绝", not _bad, " ".join(_bad))
+_plog = _CapLog()
+_pool = _acp.Pool(lambda: [], {}, T, _plog)
+_pool._write = lambda obj: _plog.lines.append("WRITE " + json.dumps(obj, ensure_ascii=False))
+def _ask_perm(pool, i, tool, options=None, sid="s"):
+    pool._reply_permission({"id": i, "params": {"sessionId": sid, "toolCall": tool, "options": options if options is not None else _opts3}})
+for _i in range(15):
+    _ask_perm(_pool, _i, {"toolCallId": "web_search_%d" % _i, "title": "Web search: n%d" % _i, "kind": "search"})
+_ask_perm(_pool, 15, {"toolCallId": "web_search_15", "title": "Web search: over", "kind": "search"})
+_long = "Web search: " + ("啊" * 200)
+_ask_perm(_pool, 16, {"toolCallId": "web_search_long", "title": _long, "kind": "search"}, sid="other")
+_writes = [json.loads(l[6:]) for l in _plog.lines if l.startswith("WRITE ")]
+_chosen = [((w.get("result") or {}).get("outcome") or {}).get("optionId") or ((w.get("result") or {}).get("outcome") or {}).get("outcome") for w in _writes]
+_off_log = _CapLog()
+_off = _acp.Pool(lambda: [], {"acp_allow_web": False, "acp_web_max_per_turn": 2}, T, _off_log)
+_off._write = lambda obj: _off_log.lines.append("WRITE " + json.dumps(obj, ensure_ascii=False))
+_ask_perm(_off, 1, {"toolCallId": "web_search_0", "title": "Web search: 关掉", "kind": "search"})
+_ask_perm(_off, 2, {"toolCallId": "web_fetch_0", "title": "Fetch https://1.1.1.1/news", "kind": "fetch"})
+check("默认每轮放行 15 次上网，超出拒绝并截断标题；开关关闭则搜索和网页都拒绝",
+      _pool.allow_web is True and _pool.web_max == 15
+      and _chosen[:15] == ["allow-once"] * 15 and _chosen[15] == "reject-once" and _chosen[16] == "allow-once"
+      and all(c != "allow-always" for c in _chosen)
+      and any("acp permission allowed kind=search toolCallId=web_search_0 title=Web search:" in l for l in _plog.lines)
+      and any("rejected" in l and "toolCallId=web_search_15" in l and "why=limit" in l for l in _plog.lines)
+      and any("toolCallId=web_search_long" in l and _acp._clip(_long) in l and _long not in l for l in _plog.lines)
+      and _off.allow_web is False and _off.web_max == 2
+      and any("why=off" in l and "rejected" in l and "kind=search" in l for l in _off_log.lines)
+      and any("why=off" in l and "kind=fetch" in l for l in _off_log.lines)
+      and "option=allow-always" not in "\n".join(_plog.lines + _off_log.lines),
+      "\n".join(_plog.lines + _off_log.lines))
+_web_q = " ".join(["<<ACP_WEB_SEARCH>>", "<<ACP_WEB_FETCH_PUB>>", "<<ACP_WEB_FETCH_PRIV>>", "<<ACP_WEB_FETCH_LOCAL>>", "<<ACP_GREP>>", "<<ACP_EDIT>>", "<<ACP_EXEC>>", "<<ACP_WEB_NO_ONCE>>", "<<ACP_WEB_ALWAYS_BARE>>", "上网"])
+o, tr, rc = run_acp([ev("web1", _web_q)], "acp_web", ACP_CFG)
+_wperms = [e for e in tr if e.get("event") == "permission_result"]
+_wdec = [_perm_decision(e) for e in _wperms]
+_wids = [e.get("toolCallId") for e in _wperms]
+check("上网：web_search 与公网 web_fetch 只放行 allow-once；内网、grep、edit、execute 拒绝；从不选 allow-always",
+      rc == 0 and _wids == ["web_search_0", "web_fetch_0", "web_fetch_1", "web_fetch_2", "grep_0", "call_edit_1", "exec_0", "web_search_always", "web_search_bare"]
+      and _wdec == ["allow-once", "allow-once", "reject-once", "reject-once", "reject-once", "reject-once", "reject-once", "reject-once", "cancelled"]
+      and all(d != "allow-always" for d in _wdec) and "option=allow-always" not in o
+      and "acp permission allowed kind=search toolCallId=web_search_0 title=Web search:" in o
+      and "acp permission allowed kind=fetch toolCallId=web_fetch_0 title=Fetch https://example.com/news" in o
+      and "acp permission rejected kind=fetch toolCallId=web_fetch_1" in o and "why=private" in o
+      and "toolCallId=web_fetch_2" in o and "localhost" in o
+      and "acp permission rejected kind=search toolCallId=grep_0 title=grep" in o and "why=kind" in o
+      and "kind=edit" in o and "kind=execute" in o and "why=no-allow-once" in o
+      and "权限被允许" in block(o, "web1"),
+      o[-2000:] + str(list(zip(_wids, _wdec))))
+o, tr, rc = run_acp([ev("lim1", "<<ACP_WEB_BURST:3>> 连续"), ev("lim2", "<<ACP_WEB_SEARCH>> 下一轮", root_id="lim1")], "acp_web_lim", acfg("acp_web_lim", acp_web_max_per_turn=2))
+_ldec = [_perm_decision(e) for e in tr if e.get("event") == "permission_result"]
+check("每轮上网超过 acp_web_max_per_turn 就拒绝，下一轮重新计数",
+      rc == 0 and _ldec == ["allow-once", "allow-once", "reject-once", "allow-once"]
+      and "why=limit" in o and "option=allow-always" not in o and o.count("acp permission allowed") >= 3, o[-1500:] + str(_ldec))
+o, tr, rc = run_acp([ev("off1", "<<ACP_WEB_SEARCH>> <<ACP_WEB_FETCH_PUB>> 上网")], "acp_web_off", acfg("acp_web_off", acp_allow_web=False))
+_odec = [_perm_decision(e) for e in tr if e.get("event") == "permission_result"]
+check("acp_allow_web 关闭时上网搜索和网页一律拒绝",
+      rc == 0 and _odec == ["reject-once", "reject-once"]
+      and "acp permission allowed" not in o and "why=off" in o and "option=allow-always" not in o
+      and "已拒绝权限请求" in block(o, "off1") and "权限被允许" not in block(o, "off1"), o[-1500:] + str(_odec))
 o, tr, rc = run_acp([ev("ac7", "<<ACP_STALL>> 卡住")], "acp_stall", acfg("acp_stall", stall_sec=2, max_runtime_sec=30))
 check("卡住后这一题回退到 -p，不把半截常驻输出当答案",
       "acp fallback: stall" in o and "一次性回退答案" in block(o, "ac7") and "卡住前的片段" not in block(o, "ac7")

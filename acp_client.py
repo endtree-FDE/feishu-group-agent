@@ -9,7 +9,8 @@
 #   https://agentclientprotocol.com/protocol/session-modes
 #   https://agentclientprotocol.com/protocol/schema
 # Cursor 官方示例的 protocolVersion 是 1。v2 草稿（/protocol/v2/）不在这条路径上。
-import json, os, subprocess, threading, time
+import ipaddress, json, os, re, socket, subprocess, threading, time
+from urllib.parse import unquote, urlparse
 
 PROFILE_MARK = "以下是本群的长期档案"
 # 和 skills.PRELOAD_MARK 是同一句。预放正文会变，快照必须在这句之前结束。
@@ -192,6 +193,218 @@ def _describe_tool(upd):
     return "正在查资料…"
 
 
+# 这些网段和名字一律当内网。主机名会再解析一次，解析到这里也拒绝；解析失败就放过（尽力拦）。
+_BLOCKED_NETS = (
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("::1/128"),
+)
+_HTTP_URL = re.compile(r"https?://[^\s<>\"'\\]+", re.I)
+
+
+def _clip(text, n=80):
+    text = " ".join(str(text or "").split())
+    if len(text) <= n:
+        return text
+    return text[:n] + "..."
+
+
+def _flag(cfg, key, default):
+    if not isinstance(cfg, dict) or key not in cfg:
+        return default
+    v = cfg[key]
+    if isinstance(v, str):
+        return v.strip().lower() in ("1", "true", "yes", "on")
+    return bool(v)
+
+
+def _pos_int(cfg, key, default):
+    if not isinstance(cfg, dict) or key not in cfg or cfg[key] is None or cfg[key] == "":
+        return default
+    try:
+        n = int(cfg[key])
+    except (TypeError, ValueError):
+        return default
+    return n if n >= 0 else 0
+
+
+def _ip_is_blocked(value):
+    try:
+        addr = value if isinstance(value, (ipaddress.IPv4Address, ipaddress.IPv6Address)) else ipaddress.ip_address(str(value))
+    except ValueError:
+        return False
+    mapped = getattr(addr, "ipv4_mapped", None)
+    if mapped is not None:
+        addr = mapped
+    for net in _BLOCKED_NETS:
+        if addr.version == net.version and addr in net:
+            return True
+    return False
+
+
+def _parse_ip(host):
+    try:
+        return ipaddress.ip_address(host)
+    except ValueError:
+        pass
+    # 十进制写法的 IPv4，例如 2130706433 就是 127.0.0.1。
+    if host.isdigit() and len(host) <= 10:
+        n = int(host)
+        if n <= 0xFFFFFFFF:
+            return ipaddress.IPv4Address(n)
+    return None
+
+
+def _lookup_host(host):
+    """解析主机名。失败或超时返回空列表，调用方按「没解析出来」处理。"""
+    box = {}
+
+    def run():
+        try:
+            box["infos"] = socket.getaddrinfo(host, None)
+        except Exception as e:
+            box["err"] = e
+
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    t.join(1.5)
+    if t.is_alive() or box.get("err") is not None:
+        return []
+    return box.get("infos") or []
+
+
+def _host_is_blocked(host):
+    host = unquote(str(host or "")).strip().lower().rstrip(".")
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
+    if not host or host == ".":
+        return True
+    if any(c in host for c in "/\\@?# \t\r\n\x00"):
+        return True
+    if host == "localhost" or host.endswith(".localhost"):
+        return True
+    ip = _parse_ip(host)
+    if ip is not None:
+        return _ip_is_blocked(ip)
+    try:
+        infos = _lookup_host(host)
+    except Exception:
+        return False
+    if not infos:
+        return False
+    for item in infos:
+        try:
+            addr = item[4][0]
+        except Exception:
+            continue
+        if isinstance(addr, str) and "%" in addr:
+            addr = addr.split("%", 1)[0]
+        if _ip_is_blocked(addr):
+            return True
+    return False
+
+
+def _first_http_url(text):
+    m = _HTTP_URL.search(text or "")
+    if not m:
+        return ""
+    return m.group(0).rstrip(").,;]}>\"'")
+
+
+def _public_http_url(url):
+    raw = (url or "").strip()
+    if not raw or any(c in raw for c in "\\\x00\r\n\t"):
+        return False
+    parts = urlparse(raw)
+    if (parts.scheme or "").lower() not in ("http", "https"):
+        return False
+    host = parts.hostname
+    if not host:
+        return False
+    return not _host_is_blocked(host)
+
+
+def _tool_text(tool, key):
+    return str((tool or {}).get(key) or "").strip()
+
+
+def _web_search_identity(tool):
+    kind = _tool_text(tool, "kind").lower()
+    tid = _tool_text(tool, "toolCallId").lower()
+    title = _tool_text(tool, "title").lower()
+    return kind == "search" and (tid.startswith("web_search") or title.startswith("web search"))
+
+
+def _web_fetch_identity(tool):
+    kind = _tool_text(tool, "kind").lower()
+    tid = _tool_text(tool, "toolCallId").lower()
+    title = _tool_text(tool, "title").lower()
+    return kind == "fetch" and (tid.startswith("web_fetch") or title.startswith("fetch http"))
+
+
+def _fetch_urls(tool):
+    found = []
+    seen = set()
+
+    def add(text):
+        u = _first_http_url(text if isinstance(text, str) else "")
+        if u and u not in seen:
+            seen.add(u)
+            found.append(u)
+
+    add(_tool_text(tool, "title"))
+    raw = tool.get("rawInput") if isinstance(tool, dict) else None
+    if isinstance(raw, dict):
+        for key in ("url", "uri", "href"):
+            add(raw.get(key))
+    locs = tool.get("locations") if isinstance(tool, dict) else None
+    if isinstance(locs, list):
+        for loc in locs:
+            if isinstance(loc, dict):
+                for key in ("url", "uri"):
+                    add(loc.get(key))
+    return found
+
+
+def _is_public_web_tool(tool):
+    """上网搜索，或打开公网 http(s)。改文件、执行命令、内网网页都返回 False。"""
+    if not isinstance(tool, dict):
+        return False
+    if _web_search_identity(tool):
+        return True
+    if not _web_fetch_identity(tool):
+        return False
+    urls = _fetch_urls(tool)
+    return bool(urls) and all(_public_http_url(u) for u in urls)
+
+
+def _allow_once_option(opts):
+    """只认 kind 为 allow_once 的项。optionId 写成 allow-always 的跳过。"""
+    for o in opts or []:
+        if not isinstance(o, dict) or o.get("kind") != "allow_once":
+            continue
+        oid = str(o.get("optionId") or "")
+        if oid.replace("_", "-") == "allow-always":
+            continue
+        return oid or "allow-once"
+    return ""
+
+
+def _reject_option(opts):
+    """选 reject_once，其次 reject_always。没有拒绝项就返回空，调用方回 cancelled。"""
+    for kind in ("reject_once", "reject_always"):
+        for o in opts or []:
+            if not isinstance(o, dict):
+                continue
+            oid = o.get("optionId") or ""
+            if o.get("kind") == kind or str(oid).replace("_", "-") == kind.replace("_", "-"):
+                return oid or kind.replace("_", "-")
+    return ""
+
+
 class _Turn:
     """把 session/update 收成一段最终文字，同时回调 on_stage（和 AgentStream 同一形状）。"""
 
@@ -286,6 +499,9 @@ class Pool:
         self.stall_sec = float(self.cfg.get("stall_sec", 300) or 300)
         self.max_runtime = float(self.cfg.get("max_runtime_sec", 1800) or 1800)
         self.model = (self.cfg.get("model") or "").strip()
+        self.allow_web = _flag(self.cfg, "acp_allow_web", True)
+        self.web_max = _pos_int(self.cfg, "acp_web_max_per_turn", 15)
+        self.web_used = {}
         self.state_lock = threading.Lock()
         self.pending_lock = threading.Lock()
         self.write_lock = threading.Lock()
@@ -413,7 +629,14 @@ class Pool:
     def _on_request(self, msg):
         method = msg.get("method")
         if method == "session/request_permission":
-            self._reject_permission(msg)
+            try:
+                self._reply_permission(msg)
+            except Exception as e:
+                self.log.warning("acp permission error: %s", e)
+                try:
+                    self._write({"jsonrpc": "2.0", "id": msg["id"], "result": {"outcome": {"outcome": "cancelled"}}})
+                except Exception:
+                    pass
             return
         if method == "cursor/ask_question":
             self._write({"jsonrpc": "2.0", "id": msg["id"], "result": {"outcome": {"outcome": "cancelled"}}})
@@ -424,27 +647,56 @@ class Pool:
         # 没回答的请求会把对方卡住。不认识的一律回方法不存在，写操作不会被放行。
         self._write({"jsonrpc": "2.0", "id": msg["id"], "error": {"code": -32601, "message": "method not supported"}})
 
-    def _reject_permission(self, msg):
-        """只读：一律拒绝。选 reject_once；没有拒绝项就回 cancelled，绝不选 allow。"""
-        params = msg.get("params") or {}
-        opts = params.get("options") or []
-        chosen = None
-        for kind in ("reject_once", "reject_always"):
-            for o in opts:
-                if not isinstance(o, dict):
-                    continue
-                oid = o.get("optionId") or ""
-                if o.get("kind") == kind or oid.replace("_", "-") == kind.replace("_", "-"):
-                    chosen = oid or kind.replace("_", "-")
-                    break
-            if chosen:
-                break
-        if chosen:
-            result = {"outcome": {"outcome": "selected", "optionId": chosen}}
+    def _reply_permission(self, msg):
+        """上网搜索和公网网页可以选 allow_once。其他一律拒绝，绝不选 allow_always。"""
+        params = msg.get("params") if isinstance(msg.get("params"), dict) else {}
+        tool = params.get("toolCall") if isinstance(params.get("toolCall"), dict) else {}
+        kind = str(tool.get("kind") or "")
+        tid = str(tool.get("toolCallId") or "")
+        title = str(tool.get("title") or "")
+        opts = params.get("options") if isinstance(params.get("options"), list) else []
+        allowed = False
+        chosen = ""
+        web = _is_public_web_tool(tool)
+        if web and not self.allow_web:
+            why = "off"
+        elif web:
+            oid = _allow_once_option(opts)
+            if not oid:
+                why = "no-allow-once"
+            else:
+                sid = str(params.get("sessionId") or "")
+                with self.state_lock:
+                    used = int(self.web_used.get(sid, 0) or 0)
+                    if used >= self.web_max:
+                        why = "limit"
+                    else:
+                        self.web_used[sid] = used + 1
+                        allowed = True
+                        chosen = oid
+                        why = "web"
+        elif _web_fetch_identity(tool):
+            why = "private"
         else:
-            result = {"outcome": {"outcome": "cancelled"}}
-            chosen = "cancelled"
-        self.log.info("acp permission rejected option=%s", chosen)
+            why = "kind"
+        if not allowed:
+            chosen = _reject_option(opts)
+            if chosen:
+                result = {"outcome": {"outcome": "selected", "optionId": chosen}}
+            else:
+                result = {"outcome": {"outcome": "cancelled"}}
+                chosen = "cancelled"
+        else:
+            result = {"outcome": {"outcome": "selected", "optionId": chosen}}
+        self.log.info(
+            "acp permission %s kind=%s toolCallId=%s title=%s option=%s why=%s",
+            "allowed" if allowed else "rejected",
+            kind or "-",
+            tid or "-",
+            _clip(title),
+            chosen,
+            why,
+        )
         self._write({"jsonrpc": "2.0", "id": msg["id"], "result": result})
 
     def _rpc(self, method, params, timeout):
@@ -666,6 +918,7 @@ class Pool:
         turn = _Turn(on_stage)
         with self.state_lock:
             self.handlers[sid] = turn.update
+            self.web_used[sid] = 0
         self.last_io = time.time()
         t0 = time.time()
         with self.pending_lock:

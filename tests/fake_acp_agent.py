@@ -94,6 +94,90 @@ def answer_for(text):
     return "常驻答案"
 
 
+def perm_options(once=True, always=False, reject=True):
+    opts = []
+    if once:
+        opts.append({"optionId": "allow-once", "name": "Allow once", "kind": "allow_once"})
+    if always:
+        opts.append({"optionId": "allow-always", "name": "Allow always", "kind": "allow_always"})
+    if reject:
+        opts.append({"optionId": "reject-once", "name": "Reject", "kind": "reject_once"})
+    return opts
+
+
+def _burst_n(text):
+    key = "<<ACP_WEB_BURST:"
+    i = text.find(key)
+    if i < 0:
+        return 0
+    j = text.find(">>", i)
+    if j < 0:
+        return 0
+    try:
+        n = int(text[i + len(key):j].strip())
+    except ValueError:
+        return 0
+    if n < 1:
+        return 0
+    return n if n < 30 else 30
+
+
+def current_question(text):
+    """只看这一题的「提问：」后面，避免上一轮原文里的标记再触发一次。"""
+    key = "提问："
+    i = (text or "").rfind(key)
+    return text[i + len(key):] if i >= 0 else (text or "")
+
+
+def permission_calls(text):
+    """按提示词里的标记排队权限请求。选项里可以有 allow-always，客户端不该选它。"""
+    calls = []
+    web = perm_options(once=True, always=True, reject=True)
+    if "<<ACP_WEB_SEARCH>>" in text:
+        calls.append(({"toolCallId": "web_search_0", "title": "Web search: 今日要闻", "kind": "search", "status": "pending"}, web))
+    if "<<ACP_WEB_FETCH_PUB>>" in text:
+        calls.append(({"toolCallId": "web_fetch_0", "title": "Fetch https://example.com/news", "kind": "fetch", "status": "pending"}, web))
+    if "<<ACP_WEB_FETCH_PRIV>>" in text:
+        calls.append(({"toolCallId": "web_fetch_1", "title": "Fetch http://127.0.0.1/secret", "kind": "fetch", "status": "pending"}, web))
+    if "<<ACP_WEB_FETCH_LOCAL>>" in text:
+        calls.append(({"toolCallId": "web_fetch_2", "title": "Fetch http://localhost/admin", "kind": "fetch", "status": "pending"}, web))
+    if "<<ACP_GREP>>" in text:
+        calls.append(({"toolCallId": "grep_0", "title": "grep 知识库", "kind": "search", "status": "pending"}, web))
+    if "<<ACP_PERM>>" in text:
+        calls.append(({"toolCallId": "call_edit_1", "title": "写文件", "kind": "edit", "status": "pending"}, perm_options(once=True, always=False, reject=True)))
+    if "<<ACP_PERM_BARE>>" in text:
+        calls.append(({"toolCallId": "call_edit_1", "title": "写文件", "kind": "edit", "status": "pending"}, perm_options(once=True, always=False, reject=False)))
+    if "<<ACP_EDIT>>" in text:
+        calls.append(({"toolCallId": "call_edit_1", "title": "写文件", "kind": "edit", "status": "pending"}, web))
+    if "<<ACP_EXEC>>" in text:
+        calls.append(({"toolCallId": "exec_0", "title": "Run command", "kind": "execute", "status": "pending"}, web))
+    if "<<ACP_WEB_NO_ONCE>>" in text:
+        calls.append(({"toolCallId": "web_search_always", "title": "Web search: 只给 always", "kind": "search", "status": "pending"}, perm_options(once=False, always=True, reject=True)))
+    if "<<ACP_WEB_ALWAYS_BARE>>" in text:
+        calls.append(({"toolCallId": "web_search_bare", "title": "Web search: 没有拒绝项", "kind": "search", "status": "pending"}, perm_options(once=False, always=True, reject=False)))
+    for i in range(_burst_n(text)):
+        calls.append(({"toolCallId": "web_search_%d" % i, "title": "Web search: 连续查询", "kind": "search", "status": "pending"}, web))
+    return calls
+
+
+def send_perm(state, wait):
+    global PERM_ID
+    if not state["left"]:
+        rejected = all(x["rejected"] for x in state["results"]) if state["results"] else True
+        finish(state["req_id"], state["sid"], "已拒绝权限请求" if rejected else "权限被允许")
+        return
+    tool, options = state["left"].pop(0)
+    PERM_ID += 1
+    pid = PERM_ID
+    send({"jsonrpc": "2.0", "id": pid, "method": "session/request_permission", "params": {
+        "sessionId": state["sid"],
+        "toolCall": tool,
+        "options": options,
+    }})
+    state["current"] = tool
+    wait[pid] = state
+
+
 def handle_prompt(req_id, sid, text, wait):
     trace({"event": "prompt", "sessionId": sid, "text": text})
     # 人设里就有「工具结果」四个字。只有工具回注（带括号）才不算这一题本身。
@@ -114,19 +198,9 @@ def handle_prompt(req_id, sid, text, wait):
             time.sleep(0.25)
         finish(req_id, sid, "慢答案")
         return
-    if "<<ACP_PERM>>" in text or "<<ACP_PERM_BARE>>" in text:
-        global PERM_ID
-        PERM_ID += 1
-        bare = "<<ACP_PERM_BARE>>" in text
-        opts = [{"optionId": "allow-once", "name": "Allow once", "kind": "allow_once"}]
-        if not bare:
-            opts.append({"optionId": "reject-once", "name": "Reject", "kind": "reject_once"})
-        send({"jsonrpc": "2.0", "id": PERM_ID, "method": "session/request_permission", "params": {
-            "sessionId": sid,
-            "toolCall": {"toolCallId": "call_edit_1", "title": "写文件", "kind": "edit", "status": "pending"},
-            "options": opts,
-        }})
-        wait[PERM_ID] = (req_id, sid)
+    calls = permission_calls(current_question(text))
+    if calls:
+        send_perm({"req_id": req_id, "sid": sid, "left": calls, "results": [], "current": None}, wait)
         return
     if "<<ACP_PROGRESS>>" in text:
         finish(req_id, sid, "常驻答案", thought=True, read=True, pause=2.2)
@@ -135,14 +209,15 @@ def handle_prompt(req_id, sid, text, wait):
 
 
 def on_perm(msg, wait):
-    item = wait.pop(msg.get("id"), None)
-    if not item:
+    state = wait.pop(msg.get("id"), None)
+    if not state:
         return
-    req_id, sid = item
     outcome = ((msg.get("result") or {}).get("outcome") or {})
-    trace({"event": "permission_result", "outcome": outcome})
+    tool = state.get("current") or {}
+    trace({"event": "permission_result", "outcome": outcome, "toolCallId": tool.get("toolCallId"), "kind": tool.get("kind"), "title": tool.get("title")})
     rejected = outcome.get("outcome") == "cancelled" or outcome.get("optionId") in ("reject-once", "reject-always")
-    finish(req_id, sid, "已拒绝权限请求" if rejected else "权限被允许")
+    state["results"].append({"rejected": rejected})
+    send_perm(state, wait)
 
 
 def _model_arg():
