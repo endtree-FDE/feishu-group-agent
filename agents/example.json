@@ -65,6 +65,7 @@
   "skills": {
     "enabled": false,
     "dir": "skills",
+    "only": [],
     "index_budget_chars": 800,
     "preload": true,
     "preload_budget_chars": 3000
