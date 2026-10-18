@@ -109,7 +109,17 @@ def history(sess):
     if n <= 0 or not FEAT.get("memory", True): return []
     with DBL:
         rows = DB.execute("select role,text from turns where sess=? and ts>? order by ts desc limit ?", (sess, time.time() - ttl, n * 2)).fetchall()
-    return rows[::-1]
+    rows = rows[::-1]
+    raw = m.get("context_budget_chars", 8000)
+    try: budget = int(raw)
+    except (TypeError, ValueError): budget = 8000
+    if budget <= 0: return rows
+    kept, total = [], 0
+    for role, text in reversed(rows):
+        # 最新一条即使超预算也留下，更早的整段丢掉。
+        if kept and total + len(text or "") > budget: break
+        kept.append((role, text)); total += len(text or "")
+    return list(reversed(kept))
 def remember(sess, role, text):
     with DBL: DB.execute("insert into turns values(?,?,?,?)", (sess, time.time(), role, text[:2000])); DB.commit()
 _PROVIDER = None
@@ -525,13 +535,46 @@ def attachment_context(msg_id, ctx):
     return "\n\n".join(parts), cleanup
 
 # ---------- 回复 ----------
+def reply_chunk_limit():
+    raw = (CFG.get("agent") or {}).get("reply_chunk_chars", 3500)
+    try: return int(raw)
+    except (TypeError, ValueError): return 3500
+def split_reply(text):
+    """超过 reply_chunk_chars 才拆。0 表示不拆。优先在换行处切开。"""
+    text = text or ""
+    n = reply_chunk_limit()
+    if n <= 0 or len(text) <= n: return [text]
+    parts, rest = [], text
+    while rest:
+        if len(rest) <= n:
+            parts.append(rest); break
+        cut = rest.rfind("\n", 0, n + 1)
+        if cut < max(1, n // 2): cut = n
+        piece, rest = rest[:cut].rstrip("\n"), rest[cut:].lstrip("\n")
+        if piece: parts.append(piece)
+        elif not rest: break
+        else:
+            parts.append(rest[:n]); rest = rest[n:]
+    return parts or [text]
+def reply_key(mid, index, total):
+    """一条回复沿用原来的 re_消息编号。拆开之后每段用 re_消息编号_序号，避免重试时重复发送。"""
+    if total <= 1: return ("re_" + str(mid))[:50]
+    return ("re_%s_%d" % (mid, index))[:50]
 def reply(mid, text):
     text = guard.redact(text, REDACT_NAMES)
+    chunks = split_reply(text)
+    total = len(chunks)
+    ok_all = True
+    for i, chunk in enumerate(chunks):
+        body = chunk if total == 1 else "（%d/%d）\n%s" % (i + 1, total, chunk)
+        if not _reply_one(mid, body, reply_key(mid, i, total)): ok_all = False
+    return ok_all
+def _reply_one(mid, text, key):
     if DRY: log.info("[dry-run] reply %s: %s", mid, text[:600]); return True
-    fn = os.path.join(TMP, "r_%s.json" % hashlib.md5(mid.encode()).hexdigest()[:12])
+    fn = os.path.join(TMP, "r_%s.json" % hashlib.md5(("%s:%s" % (mid, key)).encode()).hexdigest()[:12])
     with open(fn, "w", encoding="utf-8") as f: json.dump({"text": text}, f, ensure_ascii=False)
     cmd = lark_exe() + ["im", "+messages-reply", "--profile", CFG["profile"], "--as", "bot", "--message-id", mid,
-                        "--msg-type", "text", "--content", "@" + os.path.basename(fn), "--idempotency-key", ("re_" + mid)[:50]]
+                        "--msg-type", "text", "--content", "@" + os.path.basename(fn), "--idempotency-key", key]
     if CFG.get("reply_in_thread", True): cmd.insert(cmd.index("--msg-type"), "--reply-in-thread")
     ok = False; out = ""
     for i in range(4):
@@ -833,7 +876,7 @@ def handle(ev):
     except Exception as e: log.warning("progress start error (ignored): %s", e)
     with SEM:
         with _AL: _waiting -= 1; _active += 1; _peak = max(_peak, _active); act = _active
-        log.info("agent start %s active=%d peak=%d", mid, act, _peak); t0 = time.time(); prog.set_stage("正在思考…")
+        log.info("agent start %s active=%d peak=%d", mid, act, _peak); t0 = time.time(); prog.set_stage("正在思考…"); q_model = ""
         try:
             if att_src and FEAT.get("attachments") and (mtype != "text" or ev.get("reply_to") or ev.get("parent_id")):
                 try: extra, cleanup = attachment_context(att_src, ctx)
@@ -860,6 +903,9 @@ def handle(ev):
         else: a = CFG["texts"].get("stall", "这题比较复杂，没在时间内答完，可以拆成更小的问题再问我。")
     elif a: remember(sess, "user", guard.neutralize(guard.redact(q_model, REDACT_NAMES))); remember(sess, "bot", a)
     final = a or CFG["texts"]["fail"]
+    log.info("metric kind=answer chat=%s limited=%d in_chars=%d out_chars=%d elapsed=%.1fs ok=%d partial=%d",
+             "p2p" if ctype == "p2p" else "group", 1 if ctx.get("limited") else 0,
+             len(q_model or ""), len(final or ""), time.time() - t0, 1 if a else 0, 1 if partial else 0)
     try: replaced = prog.finish(final)
     except Exception as e: log.warning("progress finish error (ignored): %s", e); replaced = False
     if replaced: log.info("reply %s ok=True via status edit", mid); return
@@ -895,6 +941,11 @@ def self_check():
         print("HINT chats.auto_join 已开启，但 chat_ids 非空，仍只回答 chat_ids 里的群。要自动认群请把 chat_ids 改成空数组。")
     if auto_join_active() and admit_mode() == "confirm" and not list(((CFG.get("write") or {}).get("allowed_users") or {})):
         print("HINT chats.admit=confirm 但 write.allowed_users 为空，没有人能发送 /认群。")
+    pc = CFG.get("p2p") or {}
+    if pc.get("open_to_all") and not (pc.get("allow_open_ids") or []):
+        print("HINT p2p.open_to_all 已打开且私聊名单为空。任何人都能私聊；不在写入白名单里的人不能用飞书工具，但模型工作区仍是知识库。")
+    if auto_join_active() and admit_mode() == "open":
+        print("HINT chats.admit=open：别人第一次 @ 就会认群并回答。不想这样请改成 confirm 或 whitelist。")
     sks = TOOLS.skills
     p("skills", not sks.invalid, sks.status())
     for bad in sks.invalid:

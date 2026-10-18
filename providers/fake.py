@@ -21,6 +21,9 @@ class FakeProvider(Provider):
         m = re.search(r"<<FAKE_TOOL>>(\{.*?\})<<END>>", prompt)
         if m and "工具结果（" not in prompt:
             return "<<TOOL>>" + m.group(1)
+        long = re.search(r"<<FAKE_REPLY>>([\s\S]*?)<<END>>", prompt)
+        if long and "工具结果（" not in prompt:
+            return long.group(1)
         # 测试用：如果用户要求照搬工具结果里的 <<TOOL>>，而结果里真有，就照搬。正文被消掉标记时不照搬。
         if "<<COPY_TOOL>>" in prompt and "工具结果（" in prompt:
             region = prompt.split("工具结果（", 1)[1]
