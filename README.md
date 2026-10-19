@@ -18,8 +18,8 @@ A template for a Feishu (Lark) group bot that runs on your own computer. It answ
 
 ```mermaid
 flowchart LR
-  feishu["飞书群 @ / 私聊"] --> lark["lark-cli 长连接"]
-  lark --> guard["门卫：去重、白名单、限流、脱敏"]
+  feishu["飞书群 @ / 私聊"] --> ch["渠道适配器（默认飞书 / lark-cli）"]
+  ch --> guard["门卫：去重、白名单、限流、脱敏"]
   guard --> pack["拼装：人设、群记忆、技能目录、知识库"]
   pack --> model["Cursor 或 OpenAI 兼容模型"]
   model --> tools["只读工具，可连续多轮"]
@@ -27,9 +27,11 @@ flowchart LR
   tools --> model
   confirm --> feishu
   model --> out["出口脱敏后回复"]
-  out --> feishu
+  out --> ch
   pack --- store["memory / kb / state.db"]
 ```
+
+渠道这一层收事件、发消息、改卡片、读历史和成员。没写 `channel` 时就是飞书，行为与以前相同。别的渠道缺某项能力时，核心会跳过，不会假装做成了。说明在 [docs/渠道.md](docs/渠道.md)。企业微信接哪一种官方接口，见 [docs/渠道-企业微信.md](docs/渠道-企业微信.md)。
 
 `--doctor` 不在这条路上。它只在本机做诊断，不发消息。本机还有两份不含问题原文的日志：`logs/events.jsonl` 和 `logs/journal.jsonl`。
 
@@ -72,7 +74,7 @@ python agentbot.py agents/example.json --doctor
 
 ## English guide
 
-The purpose, the write lock, and the “do not commit” rule are in the English paragraph at the top. The diagram in [架构](#架构) is the path from a Feishu message to a redacted reply. [docs/arch-now.mmd](docs/arch-now.mmd) is that same path with the model choice. [docs/arch-full.mmd](docs/arch-full.mmd) is the longer design, including jobs that are not on by default.
+The purpose, the write lock, and the “do not commit” rule are in the English paragraph at the top. The diagram in [架构](#架构) is the path from a Feishu message to a redacted reply. Omitting `channel` keeps that Feishu path. [docs/渠道.md](docs/渠道.md) is the adapter boundary; [docs/渠道-企业微信.md](docs/渠道-企业微信.md) is the WeCom design and is not enabled by default. [docs/arch-now.mmd](docs/arch-now.mmd) is the current path with the model choice. [docs/arch-full.mmd](docs/arch-full.mmd) is the longer design, including jobs that are not on by default.
 
 A 15-minute offline start is in [docs/快速开始.md](docs/快速开始.md). Troubleshooting is in [docs/排障.md](docs/排障.md). `--doctor` only prints a local diagnosis and does not send messages.
 
@@ -135,6 +137,7 @@ A screenshot placeholder, with rules for hiding ids, is in [docs/demo/README.md]
 | 文件 | 作用 |
 |---|---|
 | `agentbot.py` | 主程序：收消息、决定回不回、叫模型、回复 |
+| `channels/` | 渠道接口。默认飞书；`memory` 只给测试；企业微信是实验骨架，默认不连接 |
 | `providers/` | 模型接口。默认 `cursor`；`openai_compat` 接你自己的账号；`fake` 只给测试用 |
 | `acp_client.py` | 可选的常驻进程。默认不用 |
 | `tools.py` | 动飞书的手：只读，以及要确认码的写入 |

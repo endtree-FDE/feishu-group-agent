@@ -1,0 +1,17 @@
+flowchart TB
+  classDef ch fill:#E8F1FF,stroke:#3370FF,color:#1F2329
+  classDef core fill:#FFF1E8,stroke:#F77234,color:#1F2329
+  classDef model fill:#F5EEFF,stroke:#7F3BF5,color:#1F2329
+  classDef later fill:#F2F3F5,stroke:#8F959E,color:#1F2329
+
+  IN["归一化事件<br/>message_id · chat_id · sender_id"]:::ch --> GUARD["核心：去重、认群、限流、私聊规则、脱敏"]:::core
+  GUARD --> PACK["核心：人设、记忆、技能、知识库、确认码"]:::core
+  PACK --> MODEL["模型：Cursor 或 OpenAI 兼容"]:::model
+  MODEL --> TOOLS["核心按能力表决定工具能不能用"]:::core
+  TOOLS --> ADAPTER{"channel"}:::ch
+  ADAPTER -->|"不写或 feishu"| FEISHU["飞书 / lark-cli<br/>长连接、卡片、历史、成员、文档、日历、表格"]:::ch
+  ADAPTER -->|"memory / fake，仅测试"| MEM["内存渠道"]:::later
+  ADAPTER -->|"wecom 且 experimental"| WECOM["企业微信骨架<br/>默认不连接"]:::later
+  FEISHU --> OUT["出口脱敏后的回复"]:::core
+  MEM --> OUT
+  WECOM --> OUT

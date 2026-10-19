@@ -12,6 +12,7 @@
 
 - 六份创作流程技能，沿用原来的 `skills/<名字>/SKILL.md`、目录和触发词预放。分别是选题打分（`topic-ideation`）、短视频口播稿（`short-video-script`）、分镜表（`storyboard`）、不绑定某一家工具的提示词包（`aigc-prompt-pack`）、项目策划书（`creative-brief`）、创作复盘（`post-mortem`）。用户明确要求保存时，才提议已有的 `docs_create`、`docs_append` 或 `base_create`，确认码和写入白名单不变。
 - `agents/example.json` 的 `skills.enabled` 仍是 `false`，`skills.only` 仍是 `[]`。不改配置时，提示词和没有这些文件时一样。只启用创作技能的写法在 [docs/技能.md](docs/技能.md) 和 [agents/CONFIG.md](agents/CONFIG.md)。
+- 渠道适配器。收事件、发消息、改卡片、读历史和附件、查成员、认身份都从 `channels/` 出去。飞书（lark-cli）是第一个适配器。没写 `channel` 的旧配置仍走飞书，命令和配置键不变。渠道缺少的能力（例如卡片刷新或日历）不会进提示词，模型硬调用时直接说明，不打到传输层。测试用内存渠道。企业微信只放了实验骨架和设计说明，默认不加载，也不连接。见 [docs/渠道.md](docs/渠道.md) 和 [docs/渠道-企业微信.md](docs/渠道-企业微信.md)。
 
 ## [0.4.1] - 2026-10-19
 
