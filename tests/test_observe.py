@@ -1,5 +1,5 @@
 # 结构化日志和只读诊断。不连飞书，不发消息，不结束进程。
-import json, os, shutil, subprocess, sys, tempfile
+import base64, json, os, shutil, subprocess, sys, tempfile
 
 FW = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, FW)
@@ -146,7 +146,10 @@ def run_user_scopes(argv):
     if "status" in argv:
         return 0, json.dumps({"identity": "user", "identities": {"bot": {"available": False, "status": "missing"}}}) + "\n", ""
     if "scopes" in argv:
-        return 0, json.dumps({"tokenType": "user", "userScopes": doctor.required_scopes(cfg_min)}) + "\n", ""
+        # 1.0.98：已登录时应用权限在 userScopes，tokenType 固定写成 user。
+        body = {"appId": "cli_placeholder", "brand": "feishu", "tokenType": "user",
+                "userScopes": doctor.required_scopes(cfg_min), "count": len(doctor.required_scopes(cfg_min))}
+        return 0, json.dumps(body) + "\n", "Querying app scopes...\n\n"
     return 1, "", "unexpected"
 
 
@@ -154,18 +157,114 @@ lines, code = doctor.report(cfg_min, r"D:\bots\placeholder", ["lark-cli"], run_u
                             lambda host: [("1.2.3.4", 443)], lambda host, port: True,
                             {"pypdf": True, "openpyxl": True, "PIL": True}, {"NO_PROXY": "open.feishu.cn"})
 text = "\n".join(lines)
-check("用户令牌的 userScopes 不算应用权限，bot 明确不可用是 FAIL",
-      code == 1 and "应用身份未就绪" in text and "没有解析到应用权限列表" in text and "缺少" not in text, text)
+check("1.0.98 的 userScopes 是应用权限；bot 明确不可用仍是 FAIL",
+      code == 1 and "应用身份未就绪" in text and "没有解析到应用权限列表" not in text and "缺少" not in text
+      and "scopes" in text, text)
+
+need = doctor.required_scopes(cfg_min)
+check("scopes 和 userScopes 同时存在时用 scopes",
+      doctor.app_scopes(json.dumps({"scopes": need, "userScopes": ["contact:user.id:readonly"]})) == need)
+check("嵌套的 appScopes 和对象列表也能读",
+      doctor.app_scopes(json.dumps({"data": {"appScopes": [{"scope": item} for item in need]}})) == need)
+pretty = (
+    "Querying app scopes...\n\nApp ID: cli_placeholder\nEnabled scopes (%d):\n\n" % len(need)
+    + "".join(" • %s\n" % item for item in need)
+)
+check("pretty 的圆点列表能读出权限", doctor.app_scopes(pretty) == need, pretty)
+table = "SCOPE                              STATUS\n" + "".join("%-34s enabled\n" % item for item in need)
+check("文本表格能读出权限", doctor.app_scopes(table) == need, table)
+check("Enabled scopes (0) 是空列表，不是没解析到", doctor.app_scopes("Enabled scopes (0):\n\n") == [])
+short = [item for item in need if item != "im:message:send_as_bot"]
+
+
+def run_user_missing(argv):
+    if argv[1:2] == ["--version"] or (len(argv) > 1 and argv[1] == "--version"):
+        return 0, "lark-cli test\n", ""
+    if "show" in argv:
+        return 0, "profile ok\n", ""
+    if "status" in argv:
+        return 0, json.dumps({"identities": {"bot": {"available": True}}}) + "\n", ""
+    if "scopes" in argv:
+        body = {"tokenType": "user", "userScopes": short, "count": len(short)}
+        return 0, json.dumps(body), ""
+    return 1, "", "unexpected"
+
+
+lines, code = doctor.report(cfg_min, r"D:\bots\placeholder", ["lark-cli"], run_user_missing, lambda: [],
+                            lambda host: [("1.2.3.4", 443)], lambda host, port: True,
+                            {"pypdf": True, "openpyxl": True, "PIL": True}, {"NO_PROXY": "open.feishu.cn"})
+text = "\n".join(lines)
+check("userScopes 里缺发送权限是 FAIL",
+      code == 1 and "缺少" in text and "im:message:send_as_bot" in text, text)
 
 win_argv = doctor.windows_process_argv()
+win_script = base64.b64decode(win_argv[win_argv.index("-EncodedCommand") + 1]).decode("utf-16-le")
 check("Windows 进程列表走 powershell 的 Win32_Process，不用 pwsh",
       win_argv[0] == "powershell" and "-NoProfile" in win_argv and "-NonInteractive" in win_argv
-      and "Get-CimInstance Win32_Process" in win_argv[-1] and "pwsh" not in win_argv)
-raw16 = "12\tC:\\Python\\python.exe C:\\bots\\a\\agentbot.py cfg.json\n".encode("utf-16")
-parsed = doctor.parse_cim_lines(doctor.decode_process_output(raw16))
-check("能读 PowerShell 5.1 的 UTF-16 进程行，并丢掉无关进程",
-      parsed == [{"pid": 12, "cmdline": r"C:\Python\python.exe C:\bots\a\agentbot.py cfg.json"}]
+      and "-EncodedCommand" in win_argv and "pwsh" not in win_argv
+      and "Get-CimInstance Win32_Process" in win_script and "[char]9" in win_script
+      and "#count=" in win_script and "'{0}`t{1}'" not in win_script, win_script)
+
+mimi_py = '"C:\\Program Files\\Python311\\python.exe" "D:\\bots\\mimi\\agentbot.py" "D:\\bots\\mimi\\agents\\mimi.json"'
+mimi_cli = '"C:\\Program Files\\lark-cli\\lark-cli.exe" event consume im.message.receive_v1 --profile mimi --as bot'
+mimi_text = "#count=87\n4812\t%s\n5021\t%s\n" % (mimi_py, mimi_cli)
+mimi_procs, mimi_visible = doctor.parse_process_snapshot(doctor.decode_process_output(mimi_text.encode("utf-16-le")))
+mimi_found = doctor.duplicate_findings(mimi_procs, r"D:\bots\mimi", "mimi")
+check("UTF-16 的 Win32_Process 行能认出带空格的 python.exe，Mimi 算 1 个服务进程和 1 个接收进程",
+      mimi_visible and mimi_procs[0]["pid"] == 4812 and "Program Files" in mimi_procs[0]["cmdline"]
+      and "agentbot.py" in mimi_procs[0]["cmdline"] and any("serving=1 consume=1" in info for _level, info in mimi_found),
+      str(mimi_procs) + "\n" + str(mimi_found))
+broken = '4812`t%s\n9`tC:\\Windows\\System32\\notepad.exe\n' % mimi_py
+broken_procs, broken_visible = doctor.parse_process_snapshot(broken)
+check("PowerShell 5.1 单引号留下的字面 `t 仍能解析，路径里的空格留在命令行里",
+      broken_visible and broken_procs == [{"pid": 4812, "cmdline": mimi_py}], str(broken_procs))
+fmt_list = (
+    'ProcessId   : 4812\n'
+    'Name        : python.exe\n'
+    'CommandLine : "C:\\Program Files\\Python311\\python.exe" "D:\\bots\\mimi\\agent\n'
+    '              bot.py" "D:\\bots\\mimi\\agents\\mimi.json"\n'
+    '\n'
+    'ProcessId   : 5021\n'
+    'CommandLine : %s\n' % mimi_cli
+)
+list_procs, list_visible = doctor.parse_process_snapshot(fmt_list)
+check("Format-List 折行后仍能拼出 agentbot.py",
+      list_visible and len(list_procs) == 2 and "agentbot.py" in list_procs[0]["cmdline"]
+      and "Program Files" in list_procs[0]["cmdline"], str(list_procs))
+fmt_table = (
+    "ProcessId CommandLine\n"
+    "--------- -----------\n"
+    "     4812 %s\n"
+    "     5021 %s\n"
+    "        9 C:\\Windows\\System32\\notepad.exe\n" % (mimi_py, mimi_cli)
+)
+table_procs, table_visible = doctor.parse_process_snapshot(fmt_table)
+check("Format-Table 的对齐行能认出机器人和接收进程，记事本不算",
+      table_visible and [item["pid"] for item in table_procs] == [4812, 5021], str(table_procs))
+cim_csv = (
+    '"ProcessId","CommandLine"\n'
+    '"4812","""C:\\Program Files\\Python311\\python.exe"" ""D:\\bots\\mimi\\agentbot.py"" ""D:\\bots\\mimi\\agents\\mimi.json"""\n'
+    '"9","C:\\Windows\\System32\\notepad.exe"\n'
+    '"5021","""C:\\Program Files\\lark-cli\\lark-cli.exe"" event consume im.message.receive_v1 --profile mimi --as bot"\n'
+)
+csv_procs, csv_visible = doctor.parse_process_snapshot(cim_csv)
+check("ConvertTo-Csv 的引号字段能认出带空格的命令行",
+      csv_visible and [item["pid"] for item in csv_procs] == [4812, 5021]
+      and "Program Files" in csv_procs[0]["cmdline"] and "agentbot.py" in csv_procs[0]["cmdline"], str(csv_procs))
+check("没输出或进程数为 0 是看不见，不是 serving=0",
+      doctor.interpret_process_output(0, b"") is None
+      and doctor.interpret_process_output(1, b"") is None
+      and doctor.interpret_process_output(0, "#count=0\n".encode("utf-16")) is None)
+check("枚举到了别的进程但没有机器人，列表为空，调用方可以报 serving=0",
+      doctor.interpret_process_output(0, b"#count=40\n") == []
       and doctor.parse_cim_lines("9\tnotepad.exe\n") == [])
+
+lines, code = doctor.report(cfg_min, r"D:\bots\mimi", ["lark-cli"], run, lambda: None,
+                            lambda host: [("1.2.3.4", 443)], lambda host, port: True,
+                            {"pypdf": True, "openpyxl": True, "PIL": True}, {"NO_PROXY": "open.feishu.cn"})
+text = "\n".join(lines)
+check("看不到进程时报 WARN，不报 OK serving=0",
+      code == 0 and "列不出进程" in text and "serving=0" not in text and "FAIL" not in text, text)
 
 secret_cfg = dict(cfg_min, app_secret="supersecretvalue123")
 lines, code = doctor.report(secret_cfg, r"D:\bots\placeholder", ["lark-cli"], run, lambda: [],
