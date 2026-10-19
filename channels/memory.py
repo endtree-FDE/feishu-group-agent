@@ -57,6 +57,11 @@ class MemoryChannel(Channel):
             self.outbox.append({"op": "send_text", "mid": mid, "text": text, "key": key})
         return True
 
+    def push_text(self, kind, target, text, key):
+        with self._lock:
+            self.outbox.append({"op": "push_text", "kind": kind, "target": target, "text": text, "key": key})
+        return "ok"
+
     def reply_message(self, mid, msg_type, payload, idempotency_key, reply_in_thread):
         with self._lock:
             self.outbox.append({"op": "reply", "mid": mid, "msg_type": msg_type, "payload": payload,

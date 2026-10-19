@@ -399,6 +399,42 @@ python checks/check_config.py agents/example.json
 
 `python agentbot.py agents/<名字>.json --doctor` 只做只读诊断：登录、权限、事件订阅、网络、依赖、是不是已经有一份在跑。不发消息，不启动收消息的进程。Windows 上部署之后可以用 `powershell.exe -File scripts\verify_windows.ps1` 再看一遍本机进程和最近的 `logs\events.jsonl`。这个脚本只在 Windows 上读本机进程。
 
+## 断线提醒 alerts
+
+默认关。不写这一段，或 `enabled` 不是 `true`，就不会发私聊，也不会写 `logs/alerts.log`。长连接断了而进程还在时，心跳文件仍会更新，看门狗不会因此重启。打开后，进程每隔大约 15 秒看一次连接；连续不健康达到阈值才通知主人，恢复后再发一条。发送走当前渠道的主动发送。飞书是 `im +messages-send`，不依赖事件长连接，也不启动收消息进程。看门狗只在进程不在或心跳超过 3 分钟、并且这项开着时，于重启前再通知一次。
+
+| 键 | 默认 | 填什么 |
+|---|---|---|
+| `enabled` | `false` | `true` 才通知。 |
+| `owner_open_ids` | `[]` | 主人的 open_id，可以多位。空着只写本机日志。`REPLACE_` 开头的会丢掉。 |
+| `unhealthy_after_sec` | `180` | 连续不健康多少秒才发第一条。`0`、负数或写错仍按 180。不要写得比 180 大，否则进程死掉时看门狗会先重启，死亡告警可能来不及发。 |
+| `repeat_sec` | `1800` | 仍未恢复时，最少隔多少秒再提醒。`0`、负数或写错仍按 1800。 |
+| `local_log` | `true` | 写 `logs/alerts.log`。里面没有 open_id。 |
+| `windows_toast` | `false` | `true` 且飞书没发给每一位主人时，Windows 上再弹一次本地通知。 |
+
+权限仍是回复消息已经需要的 `im:message:send_as_bot`。不用打开 `features.p2p`。主人要在可用范围里；如果提示不在会话里，先让主人给机器人发一条私聊。细节见 [docs/断线提醒与晨报.md](../docs/断线提醒与晨报.md)。
+
+## 早晨摘要 digest
+
+默认关。这是框架会主动发到群里的唯一一种消息，只有 `enabled` 为 `true` 才发。到点后每个群、每个本地日最多一条，重启也不会再发。正文不调用模型，不点名所有人。`chat_ids` 还得落在服务范围内：顶层 `chat_ids` 非空时只用那份；留空时用已经认下的群。
+
+| 键 | 默认 | 填什么 |
+|---|---|---|
+| `enabled` | `false` | `true` 才到点发送。 |
+| `time` | `08:30` | `HH:MM`。写错就不发。 |
+| `timezone` | `Asia/Shanghai` | 认不出来的时区不发。Windows 上没有时区数据时，上海、重庆、哈尔滨仍按东八区。 |
+| `chat_ids` | `[]` | 要接收的群。空着不发。`REPLACE_` 开头的会丢掉。 |
+| `window_min` | `30` | 到点之后多少分钟内还可以补发。`0` 表示只在那一分钟。负数按 30。 |
+| `include_calendar` | `true` | 读今天的团队日历。编号用 `tools.calendar_read.calendar_id`，没有再用 `write.resources.calendar_id`。 |
+| `include_tasks` | `true` | 读任务表里还没完成的行。编号用 `tools.base_read` 的 `base_token` 和 `table_id`。 |
+| `status_field` | `状态` | 用这一列判断完成了没有。必须整格相同，不会把「未完成」当成「完成」。 |
+| `title_field` | 空 | 空着就从「任务 / 标题 / 名称 / 事项」里找。 |
+| `done_values` | 见例子 | 算作做完的状态。不写这个键时用例子里的那一份。 |
+
+日历或任务表是空的、或仍是 `REPLACE_` 时，当成没配置，不会去读。两段都没有就不发。读失败不会把接口原文发进群。
+
+群里需要机器人已经在里面。权限：`im:message:send_as_bot`。日历编号是真的才需要 `calendar:calendar.event:read`；任务表编号是真的才需要 `base:record:read`。改完要发布版本。演练、自检和 `--doctor` 不发摘要。
+
 ## 知识库目录 kb_index
 
 模型每次回答前，如果知识库里有 `.md` 或 `.txt`，提示词里会多一份目录：只有相对路径和第一行标题，没有正文。正文要模型输出 `kb_read` 才会读。

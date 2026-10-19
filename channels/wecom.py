@@ -52,6 +52,9 @@ class WeComChannel(Channel):
     def send_text(self, mid, text, key):
         raise ChannelError(self.blocked_reason())
 
+    def push_text(self, kind, target, text, key):
+        return "fail"
+
     def consume_argv(self, event_key):
         raise ChannelError(self.blocked_reason())
 

@@ -4,15 +4,25 @@
 
 程序不读取 `VERSION` 或本文件。删掉它们时，机器人的行为与现在相同。
 
-当前 `VERSION` 是 `0.4.1`，发布日期是 2026-10-19。发布说明见 [docs/release-0.4.1.md](docs/release-0.4.1.md)。从 0.4.0 升上来见 [docs/升级到0.4.1.md](docs/升级到0.4.1.md)。说明里不要写密钥、群号、open_id 或客户名。
+当前 `VERSION` 是 `0.5.0`，发布日期是 2026-10-19。发布说明见 [docs/release-0.5.0.md](docs/release-0.5.0.md)。从 0.4.1 升上来见 [docs/升级到0.5.0.md](docs/升级到0.5.0.md)。说明里不要写密钥、群号、open_id 或客户名。
 
 ## [Unreleased]
+
+还没有新的未发布改动。
+
+## [0.5.0] - 2026-10-19
+
+下面是用户能看到的变化。没写进旧配置的键，仍用各项自己的默认值。发布说明见 [docs/release-0.5.0.md](docs/release-0.5.0.md)。这一版新加的开关默认都关着。
 
 ### 添加
 
 - 六份创作流程技能，沿用原来的 `skills/<名字>/SKILL.md`、目录和触发词预放。分别是选题打分（`topic-ideation`）、短视频口播稿（`short-video-script`）、分镜表（`storyboard`）、不绑定某一家工具的提示词包（`aigc-prompt-pack`）、项目策划书（`creative-brief`）、创作复盘（`post-mortem`）。用户明确要求保存时，才提议已有的 `docs_create`、`docs_append` 或 `base_create`，确认码和写入白名单不变。
 - `agents/example.json` 的 `skills.enabled` 仍是 `false`，`skills.only` 仍是 `[]`。不改配置时，提示词和没有这些文件时一样。只启用创作技能的写法在 [docs/技能.md](docs/技能.md) 和 [agents/CONFIG.md](agents/CONFIG.md)。
 - 渠道适配器。收事件、发消息、改卡片、读历史和附件、查成员、认身份都从 `channels/` 出去。飞书（lark-cli）是第一个适配器。没写 `channel` 的旧配置仍走飞书，命令和配置键不变。渠道缺少的能力（例如卡片刷新或日历）不会进提示词，模型硬调用时直接说明，不打到传输层。测试用内存渠道。企业微信只放了实验骨架和设计说明，默认不加载，也不连接。见 [docs/渠道.md](docs/渠道.md) 和 [docs/渠道-企业微信.md](docs/渠道-企业微信.md)。
+- 断线提醒 `alerts`，默认关。不写或 `enabled` 为 `false` 时不发消息，也不写 `logs/alerts.log`。打开后，长连接连续中断或心跳超过 `unhealthy_after_sec`（不写是 180 秒）才私聊 `owner_open_ids`，恢复后再发一条。`repeat_sec` 不写是 1800 秒。私聊和早晨摘要都交给当前渠道的 `push_text`。飞书在适配器里调用 `im +messages-send`，不依赖事件长连接，也不启动收消息的进程。企业微信骨架这项直接失败，不会去连接。看门狗仍按 3 分钟重启；只有这项开着时，才在重启前通知，失败也不挡住重启。`windows_toast` 默认 `false`。
+- 早晨摘要 `digest`，默认关。这是框架会主动发到群里的唯一一种消息。`enabled` 为 `true` 时，按 `time` 和 `timezone`（不写是 08:30、`Asia/Shanghai`）往 `chat_ids` 里、并且已经在服务范围内的群发一条今天的日历和未完成任务。每个群每个本地日最多一条，重启也不再发。不点名所有人。正文先走原来的脱敏。没配日历或任务表就不读。打开后，提示词稳定前缀里多一句固定说明，不随问题和日期变化。
+
+旧配置不用改。`/状态` 只在对应开关打开时多一行。
 
 ## [0.4.1] - 2026-10-19
 
@@ -78,4 +88,6 @@
 
 ## English
 
-The version is the `VERSION` file (`0.4.1`), released on 2026-10-19. Do not put secrets or Feishu IDs in release notes. The program does not read this file. Missing keys keep the previous behavior. Unreleased: six creative-workflow skills are opt-in. `skills.enabled` stays false in `agents/example.json`, and an empty `skills.only` still means every valid skill once skills are turned on. Writes still need the allow-list and a confirmation code. (#58) Confirmation codes are bound to the initiator, chat, and topic. Used or cancelled codes are stored in `used_writes` before they run and cannot be replayed after a restart. Untrusted text cannot become a tool call or a confirmation code. Redirect checks connect only to addresses that were already validated. One Feishu app has one receiver. Lock files become visible only after they are fully written. Confirm, status, help, and memory commands skip the per-user gap and use `rate_limit.max_commands_per_min` (default 40). (#59) `p2p.allow_group_members` defaults to false. When enabled, current members of served groups may use private chat, which needs `im:chat.members:read`. `open_to_all` still wins, and a failed or truncated member list fails closed. Upgrade steps are in `docs/升级到0.4.1.md`. 0.4.0 still includes several read-only tool calls per round, configurable read caps, and the (#57) doctor and UTF-8 fixes.
+The version is the `VERSION` file (`0.5.0`), released on 2026-10-19. Do not put secrets or Feishu IDs in release notes. The program does not read this file. Missing keys keep the previous behavior. 0.5.0 adds six creative-workflow skills, a channel adapter (Feishu is the first implementation; WeCom is an experimental skeleton and does not connect), optional disconnect alerts, and an optional morning digest. `skills.enabled`, `alerts.enabled`, and `digest.enabled` stay false when omitted. An empty `skills.only` still means every valid skill once skills are turned on. Writes still need the allow-list and a confirmation code. Alert DMs and digest posts go through the channel `push_text` method. On Feishu that is `im +messages-send` and does not start the event consumer. The digest posts at most once per local day per configured chat and never mentions everyone. Upgrade and rollback steps are in `docs/升级到0.5.0.md`. Rolling back to v0.4.1 (`deb498f`) also drops the channel adapter and the creative skills.
+
+0.4.1 remains the previous release. (#58) Confirmation codes are bound to the initiator, chat, and topic. Used or cancelled codes are stored in `used_writes` before they run and cannot be replayed after a restart. Untrusted text cannot become a tool call or a confirmation code. Redirect checks connect only to addresses that were already validated. One Feishu app has one receiver. Lock files become visible only after they are fully written. Confirm, status, help, and memory commands skip the per-user gap and use `rate_limit.max_commands_per_min` (default 40). (#59) `p2p.allow_group_members` defaults to false. When enabled, current members of served groups may use private chat, which needs `im:chat.members:read`. `open_to_all` still wins, and a failed or truncated member list fails closed. Those upgrade steps are in `docs/升级到0.4.1.md`. 0.4.0 still includes several read-only tool calls per round, configurable read caps, and the (#57) doctor and UTF-8 fixes.

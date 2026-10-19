@@ -44,14 +44,14 @@ flowchart LR
 
 ## 功能
 
-- 只在被 @ 或被允许的私聊里回答，不主动发消息。
+- 只在被 @ 或被允许的私聊里回答。断线私聊和早晨摘要默认关，打开方式见 [docs/断线提醒与晨报.md](docs/断线提醒与晨报.md)。
 - 群默认仍看 `chat_ids`。要改成拉进群再认，把 `chat_ids` 留空并打开 `chats.auto_join`。默认还要白名单成员在群里发「/认群」，避免被陌生人拉进乱群消耗额度。见 [agents/CONFIG.md](agents/CONFIG.md)。
 - 同一个话题接着聊；发「新话题」就清空这几轮上下文。
 - 长期记忆按群分开。白名单里的人才能记和删，删除是真删。
 - 进度卡片：先告诉你正在处理（默认关着，配置里打开）。
 - 客户名按你的名单打成「某客户」。手机号、证件号、邮箱、密钥样子的字符串和电脑路径自动隐藏。
 - 话题红线默认不设。要限制什么，写在自己的配置里。
-- 同一个应用只跑一个进程。看门狗发现卡住会在本机重启，不往群里说话。
+- 同一个应用只跑一个进程。看门狗发现进程不在或心跳超过 3 分钟会在本机重启。默认只写 `logs/watchdog.log`。打开 `alerts` 后，重启前可以私聊主人。
 - 知识库可以定时收进来，先放待审区，你确认后才换上。
 - 技能默认关着。打开后，提示词里只放一行目录，命中触发词才放入步骤。创作流程（选题、口播、分镜、提示词、策划书、复盘）也在 `skills/` 里，默认不启用；要只用这几份时，在配置里点名。见 [docs/技能.md](docs/技能.md)。
 - 常驻模式默认关着。`agent.mode` 写成 `acp` 后，Cursor 只启动一次。见 [docs/常驻模式.md](docs/常驻模式.md)。
@@ -76,7 +76,7 @@ python agentbot.py agents/example.json --doctor
 
 The purpose, the write lock, and the “do not commit” rule are in the English paragraph at the top. The diagram in [架构](#架构) is the path from a Feishu message to a redacted reply. Omitting `channel` keeps that Feishu path. [docs/渠道.md](docs/渠道.md) is the adapter boundary; [docs/渠道-企业微信.md](docs/渠道-企业微信.md) is the WeCom design and is not enabled by default. [docs/arch-now.mmd](docs/arch-now.mmd) is the current path with the model choice. [docs/arch-full.mmd](docs/arch-full.mmd) is the longer design, including jobs that are not on by default.
 
-A 15-minute offline start is in [docs/快速开始.md](docs/快速开始.md). Troubleshooting is in [docs/排障.md](docs/排障.md). `--doctor` only prints a local diagnosis and does not send messages.
+A 15-minute offline start is in [docs/快速开始.md](docs/快速开始.md). Troubleshooting is in [docs/排障.md](docs/排障.md). `--doctor` only prints a local diagnosis and does not send messages. Disconnect alerts and the morning digest are off unless `alerts.enabled` and `digest.enabled` are true. See [docs/断线提醒与晨报.md](docs/断线提醒与晨报.md).
 
 Quick start on a machine that will really talk to Feishu:
 
@@ -117,6 +117,8 @@ A screenshot placeholder, with rules for hiding ids, is in [docs/demo/README.md]
 | `link_jump_sec` | 休眠多久后重连。不写是 `20` 秒 |
 | `catchup.max_age_sec` | 补答最多回溯多久。不写是 12 小时 |
 | `redact_file` | 客户名名单，默认 `redact.txt`，不要提交 |
+| `alerts` | 长连接或心跳不健康时私聊主人。不写或 `enabled` 为 `false` 时不发 |
+| `digest` | 到点往指定群发一条今日摘要。不写或 `enabled` 为 `false` 时不发。不会点名所有人 |
 
 `REPLACE_` 开头的值必须换成你自己的，留着不能启动。
 
@@ -154,11 +156,17 @@ A screenshot placeholder, with rules for hiding ids, is in [docs/demo/README.md]
 | `observe.py` | 本机 `logs/events.jsonl` |
 | `lifecycle.py` | 单实例锁和优雅停机 |
 | `feishu_link.py` | 长连接，以及休眠后的重连 |
+| `outbound.py` | 飞书渠道主动发送时调用的 `im +messages-send`。断线私聊和早晨摘要经 `push_text` 走到这里 |
+| `health_alert.py` | 断线提醒。默认关 |
+| `digest.py` | 早晨摘要。默认关。每个群每天最多一条 |
+| `docs/断线提醒与晨报.md` | 这两项怎么开，以及飞书要哪些权限 |
 | `setup_agent.py` | 干跑生成配置。不加 `--write` 不写文件 |
 | `scripts/` | Windows 上的启动、停止、看门狗、计划任务、`verify_windows.ps1` |
 | `tests/run_tests.py` | 离线测试。通过时最后一行打印条数 |
 | `docs/快速开始.md` | 新人 15 分钟跑起来 |
 | `docs/排障.md` | 常见问题 |
+| `docs/release-0.5.0.md` | v0.5.0 发布说明（2026-10-19） |
+| `docs/升级到0.5.0.md` | 从 0.4.1 升到 0.5.0：默认不用改配置；可选打开技能、断线提醒、早晨摘要 |
 | `docs/release-0.4.1.md` | v0.4.1 发布说明（2026-10-19） |
 | `docs/升级到0.4.1.md` | 从 0.4.0 升到 0.4.1：可选打开按群成员私聊，确认码表自动建 |
 | `docs/release-0.4.0.md` | v0.4.0 发布说明（2026-10-19） |
