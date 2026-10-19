@@ -10,10 +10,13 @@
 
 ## [Unreleased]
 
-这一节已经在 `main` 上，还没有收成 `0.4.0` 标签。还没有 GitHub Release。发布草稿见 [docs/release-0.4.0.md](docs/release-0.4.0.md)。`VERSION` 仍是 `0.4.0-dev`。
+还没有收成 `0.4.0` 标签，也还没有 GitHub Release。发布草稿见 [docs/release-0.4.0.md](docs/release-0.4.0.md)。`VERSION` 仍是 `0.4.0-dev`。下面先写相对当前 `main` 新加的，再保留已经在 `main` 上、尚未打标签的内容。
 
 ### 添加
 
+- `skills.only`：不写、`[]` 或 `false` 时，文件夹里合法的技能仍然全部可用。写成名字列表后，目录、触发词预放和 `skill_read` 只认这些名字。写错的名字在 `--check` 里提示，不因此失败。
+- `commands.status`：不写或为 `true` 时，`/状态`、`/status` 或单独一个「状态」直接回复当前开关，不调用模型。写成 `false` 时，这几个字仍交给模型。「状态怎么样」不是这条命令。
+- `memory.trim_note`：不写或为 `true` 时，短期对话超过字数预算会在提示词里注明省略了几条，本地记录还在。写成 `false` 时仍丢掉旧对话，但不再写这句话。没超过预算时不加。
 - 集成保留已在 `main` 上的能力：只读工具连续多轮（`agent.max_tool_rounds`，不写是 4）、当前会话历史附件（`tools.message_attachment`）、`stall_sec`、`shutdown_wait_sec`、`link_jump_sec`、`catchup.max_age_sec`、`logs/events.jsonl`、`--doctor`、`scripts/verify_windows.ps1`。旧配置没写这些键时行为与现在的默认相同。
 - 模型预设 `deepseek`、`dashscope`、`zhipu`、`pangu`。只补空着的地址、模型名和变量名。密钥仍只读环境变量。没写 `model_provider` 时仍是 Cursor。
 - 新人 15 分钟说明、排障、行为准则，以及 v0.4.0 发布说明草稿。例子都是编的。
@@ -34,4 +37,4 @@
 
 ## English
 
-The version is the `VERSION` file (`0.4.0-dev`). There is no GitHub Release yet. When publishing, drop the `-dev` suffix, tag that version, and keep this file in sync. Do not put secrets or Feishu IDs in release notes. The program does not read this file.
+The version is the `VERSION` file (`0.4.0-dev`). There is no GitHub Release yet. When publishing, drop the `-dev` suffix, tag that version, and keep this file in sync. Do not put secrets or Feishu IDs in release notes. The program does not read this file. New on this branch: `skills.only`, `commands.status`, and `memory.trim_note`. Missing keys keep the previous behavior.

@@ -2,8 +2,10 @@
 name: 飞书群机器人模板
 description: >-
   用本仓库帮不会写程序的人从零搭一个飞书群机器人，或把他已有的简单飞书机器人升级成这套
-  （长期记忆、进度卡片、确认码写入、看门狗）。模型从配置读取，默认 grok-4.7-high-fast。
-  登录和额度用对方自己电脑上的 cursor-agent login。不要把应用密钥或真实编号写进仓库。
+  （长期记忆、进度卡片、确认码写入、看门狗）。模型从配置读取。没写
+  model_provider 时用对方电脑上的 Cursor；只有这条路在 agent.model 留空时才用
+  grok-4.7-high-fast。换成别的模型接口时以配置里的模型名为准。登录和额度用对方自己
+  电脑上的 cursor-agent login，或对方自己的环境变量。不要把应用密钥或真实编号写进仓库。
 ---
 
 # 飞书群机器人模板
@@ -13,7 +15,7 @@ description: >-
 ## 你必须遵守
 
 - 应用密钥（App Secret）不进 json、不进仓库、不进你的回复、不进群。让对方本人在自己电脑上运行：`lark-cli config init --app-id 对方的应用ID --app-secret-stdin --brand feishu`，然后自己粘贴密钥并回车。你不要代贴。
-- 模型只在配置 `agent.model` 里写名字。默认 `grok-4.7-high-fast`。不写时程序也用这个默认值。额度是这台电脑上 `cursor-agent login` 的账号。不要写死任何 Cursor 账号，不要改用你自己的登录去顶替对方。
+- 模型看 `model_provider` 和 `agent.model`。没写 `model_provider` 时用这台电脑上的 Cursor。只有这条路在 `agent.model` 留空时才用 `grok-4.7-high-fast`。DeepSeek、通义、智谱、盘古或别的 OpenAI 兼容地址以配置里的模型名为准，不会套这个名字。额度是对方自己电脑上 `cursor-agent login` 的账号，或对方自己的环境变量。不要写死任何账号，不要改用你自己的登录去顶替对方。
 - 不往群里发测试消息。验收请一位真人私聊一次、在群里 @ 一次。
 - 不删除、不覆盖正文、不改权限、不邀请他人。写操作只有白名单的人、白名单的资源、白名单的命令，加上本人 6 位确认码。
 - 不主动发消息。看门狗只写本地日志。
