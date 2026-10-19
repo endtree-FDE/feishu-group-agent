@@ -1,5 +1,5 @@
 # 部署后验证只做判断。不连飞书，不发消息，不结束进程。
-import json, os, subprocess, sys
+import json, os, re, subprocess, sys
 
 FW = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, FW)
@@ -118,6 +118,21 @@ big = {"processes": [], "bots": [bot(A, None, None, logs=[{"name": "stdout.log",
 big_rows = verify_report.build_report(big)
 check("日志超过约 2MB 且没有备份时警告轮转没生效",
       any(level == "WARN" and "轮转可能没生效" in info for level, _n, info in big_rows))
+empty_logs = {"processes": [], "bots": [bot(A, None, None, logs=[
+    {"name": "events.jsonl", "exists": False, "size": 0, "backups": 0},
+    {"name": "watchdog.log", "exists": False, "size": 0, "backups": 0},
+    {"name": "stdout.log", "exists": False, "size": 0, "backups": 0},
+    {"name": "bot.log", "exists": False, "size": 0, "backups": 0},
+], events=[])]}
+empty_rows = verify_report.build_report(empty_logs)
+empty_text = verify_report.render(empty_rows)
+check("events.jsonl 和 watchdog.log 不存在是 OK（空），另外的日志不存在仍是 WARN",
+      any(level == "OK" and info == "events.jsonl 不存在（空）" for level, name, info in empty_rows if name == "rotate")
+      and any(level == "OK" and info == "watchdog.log 不存在（空）" for level, name, info in empty_rows if name == "rotate")
+      and any(level == "WARN" and "stdout.log 不存在" in info for level, name, info in empty_rows if name == "rotate")
+      and any(level == "WARN" and "bot.log 不存在" in info for level, name, info in empty_rows if name == "rotate")
+      and not any(level == "WARN" and name == "rotate" and ("events.jsonl" in info or "watchdog.log" in info) for level, name, info in empty_rows),
+      empty_text)
 
 err_line = json.dumps({"kind": "tool", "mid": "m1", "tool": "docs_read", "ok": False, "code": "99991672", "err": "手机号 13812345678"})
 ok_line = json.dumps({"kind": "answer", "mid": "m1", "ok": False, "tools": [{"tool": "docs_read", "ok": False, "code": "99991672"}]})
@@ -148,10 +163,46 @@ for word in ("Stop-Process", "taskkill", "Remove-Item", "Set-Content", "Add-Cont
     check("验证脚本不含 %s" % word, word not in body)
 check("验证脚本会跑 --doctor，并把结果交给只读判断",
       "--doctor" in body and "verify_report.py" in body and "Get-CimInstance" in body and "bot.lock" in body)
+check("Generic.List 用 ToArray，不再放进 @()",
+      ".ToArray()" in body and "@($processes)" not in body and "@($bots)" not in body and "@($doctors)" not in body)
+check("旧版没有 --doctor 时跳过，退出码 0，不启动",
+      "Test-HasDoctor" in body and "没有 --doctor" in body and "已跳过，没有启动" in body and "code = 0" in body)
+upgrade = open(os.path.join(FW, "docs", "升级三个机器人.md"), encoding="utf-8").read()
+after = open(os.path.join(FW, "docs", "部署后验证.md"), encoding="utf-8").read()
+doctor_doc = open(os.path.join(FW, "docs", "升级诊断.md"), encoding="utf-8").read()
 check("说明里写了三个机器人的升级和回退",
-      "逐个" in open(os.path.join(FW, "docs", "升级三个机器人.md"), encoding="utf-8").read()
-      and "created=" in open(os.path.join(FW, "docs", "升级三个机器人.md"), encoding="utf-8").read()
-      and "不发" in open(os.path.join(FW, "docs", "部署后验证.md"), encoding="utf-8").read())
+      "逐个" in upgrade and "created=" in upgrade and "不发" in after)
+check("停机前先在旁边克隆并跑完测试，避免看门狗半路拉起",
+      "看门狗" in upgrade and "克隆" in upgrade and "run_tests.py" in upgrade
+      and upgrade.find("临时克隆") < upgrade.find("停这一个"))
+check("轮转和诊断说明与真机误报一致",
+      "不存在（空）" in after and "还没有" in after and "--doctor" in after and "event list" in after
+      and "--as" in doctor_doc and "auth scopes" in doctor_doc and "开放平台" in doctor_doc)
+
+
+def ps1_bom_or_ascii(path):
+    raw = open(path, "rb").read()
+    if raw.startswith(b"\xef\xbb\xbf"):
+        return True
+    try:
+        raw.decode("ascii")
+    except UnicodeDecodeError:
+        return False
+    return True
+
+
+for dirpath, _dirs, names in os.walk(os.path.join(FW, "scripts")):
+    for name in sorted(names):
+        if not name.lower().endswith(".ps1"):
+            continue
+        path = os.path.join(dirpath, name)
+        check("ps1 带 BOM 或纯 ASCII：%s" % name, ps1_bom_or_ascii(path), path)
+        text = open(path, encoding="utf-8-sig").read()
+        wrapped = []
+        for listed in re.findall(r"\$(\w+)\s*=\s*New-Object System\.Collections\.Generic\.List", text):
+            if "@($%s)" % listed in text:
+                wrapped.append(listed)
+        check("ps1 不用 @() 包 Generic.List：%s" % name, not wrapped, " ".join(wrapped))
 
 print("\n%d/%d passed" % (sum(1 for _, ok in results if ok), len(results)))
 sys.exit(0 if all(ok for _, ok in results) else 1)

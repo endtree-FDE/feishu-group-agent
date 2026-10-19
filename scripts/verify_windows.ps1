@@ -1,4 +1,4 @@
-# 部署后只读验证。用法:
+﻿# 部署后只读验证。用法:
 #   powershell -File scripts\verify_windows.ps1 [-Config 路径1,路径2]
 # 不发飞书消息，不启动 event consume，不写心跳，不删锁，不结束任何进程。
 # 输出每一行都是 OK、WARN 或 FAIL。没有 FAIL 时退出码 0。
@@ -194,6 +194,13 @@ foreach ($proc in $processes) {
   Add-Bot $dir $cfgPath $profile
 }
 
+function Test-HasDoctor([string]$AgentPath) {
+  # 旧版不认识 --doctor，会把它当成普通启动。先读源码，没有这个参数就不要执行。
+  if (-not (Test-Path -LiteralPath $AgentPath)) { return $false }
+  try { $text = [IO.File]::ReadAllText($AgentPath) } catch { return $false }
+  return $text.Contains("--doctor")
+}
+
 $doctors = New-Object System.Collections.Generic.List[object]
 foreach ($bot in $bots) {
   $cfgPath = [string]$bot.config
@@ -206,6 +213,10 @@ foreach ($bot in $bots) {
   }
   $agent = Join-Path $dir "agentbot.py"
   if (-not (Test-Path -LiteralPath $agent)) { $agent = Join-Path $root "agentbot.py" }
+  if (-not (Test-HasDoctor $agent)) {
+    $doctors.Add(@{ label = $label; config = $cfgPath; code = 0; output = "WARN version 这一版没有 --doctor，已跳过，没有启动" }) | Out-Null
+    continue
+  }
   $psi = New-Object System.Diagnostics.ProcessStartInfo
   $psi.FileName = $py
   $psi.Arguments = "`"$agent`" `"$cfgPath`" --doctor"
@@ -226,11 +237,12 @@ foreach ($bot in $bots) {
   $doctors.Add(@{ label = $label; config = $cfgPath; code = [int]$child.ExitCode; output = $text }) | Out-Null
 }
 
+# PS 5.1 把 Generic.List 放进 @() 再塞进哈希表，会报 Argument types do not match。用 ToArray()。
 $payload = @{
   process_error = [bool]$processError
-  processes = @($processes)
-  bots = @($bots)
-  doctors = @($doctors)
+  processes = $processes.ToArray()
+  bots = $bots.ToArray()
+  doctors = $doctors.ToArray()
 }
 $json = $payload | ConvertTo-Json -Depth 8 -Compress
 $psi = New-Object System.Diagnostics.ProcessStartInfo

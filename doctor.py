@@ -1,6 +1,6 @@
 # 只读诊断。不启动 event consume，不发消息，不写心跳。
 # 外部命令、进程列表、域名解析都由调用方传入，测试不必连真的飞书。
-import os, re, socket, subprocess
+import json, os, re, socket, subprocess
 
 _SCOPE_RX = re.compile(r"\b[a-z][a-z0-9_.]*(?::[a-z0-9_.]+){1,8}\b")
 _SECRET_KEY = re.compile(r"^(app_secret|api_key|api_secret|password|passwd)$", re.I)
@@ -113,6 +113,58 @@ def logged_in(code, text):
     return not any(item in low for item in bad)
 
 
+def usage_error(code, text):
+    """退出码 2，或文本写明不认识这个参数。这是命令写法问题，不是飞书拒绝。"""
+    if code == 2:
+        return True
+    if code == 0:
+        return False
+    low = (text or "").lower()
+    marks = ("unknown flag", "unknown command", "unknown shorthand", "required flag",
+             "invalid argument", "flag provided but not defined", "参数错误", "accepts ")
+    return any(item in low for item in marks)
+
+
+def _json_obj(text):
+    raw = text or ""
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    try:
+        obj = json.loads(raw[start:end + 1])
+    except Exception:
+        return None
+    return obj if isinstance(obj, dict) else None
+
+
+def bot_ready(text):
+    """True 应用身份就绪，False 明确没有，None 这一版输出里看不出来。"""
+    obj = _json_obj(text)
+    if not isinstance(obj, dict):
+        return None
+    identities = obj.get("identities")
+    if isinstance(identities, dict) and isinstance(identities.get("bot"), dict):
+        bot = identities["bot"]
+        if "available" in bot:
+            return bool(bot.get("available"))
+        return str(bot.get("status") or "") == "ready"
+    if obj.get("identity") == "bot":
+        return True
+    return None
+
+
+def app_scopes(text):
+    """auth scopes 里应用已开通的权限。用户令牌的 userScopes 不算。"""
+    obj = _json_obj(text)
+    if not isinstance(obj, dict):
+        return None
+    scopes = obj.get("scopes")
+    if isinstance(scopes, list):
+        return [str(item) for item in scopes]
+    return None
+
+
 def duplicate_findings(procs, base, profile):
     """只描述重复，不结束任何进程。--doctor / --check / --dry-run 不算正在服务的机器人。"""
     lines = []
@@ -181,32 +233,33 @@ def report(cfg, base, exe, run, processes, resolve, connect, modules, env):
     if profile:
         code, out, err = run(list(exe) + ["config", "show"])
         add("OK" if code == 0 else "FAIL", "lark config", "能读到" if code == 0 else "config show 失败")
-        code, out, err = run(list(exe) + ["auth", "status", "--as", "bot", "--profile", profile])
+        # lark-cli 1.0.98 的 auth status / auth check / event list 不接受 --as。
+        # 带上会退出码 2。那是参数错误，不是登录失败。
+        code, out, err = run(list(exe) + ["auth", "status", "--json", "--profile", profile])
         auth_text = (out or "") + "\n" + (err or "")
-        if logged_in(code, auth_text):
-            add("OK", "auth", "bot")
+        ready = bot_ready(auth_text)
+        if usage_error(code, auth_text):
+            add("WARN", "auth", "参数不被这一版接受，没有因此判失败")
+        elif ready is True or (ready is None and logged_in(code, auth_text)):
+            add("OK", "auth", "bot" if ready is True else "status 成功")
         else:
-            add("FAIL", "auth", "未登录或 status 失败")
-        scope_code, scope_out, scope_err = run(list(exe) + ["auth", "check", "--as", "bot", "--profile", profile])
-        found = scopes_in((scope_out or "") + "\n" + (scope_err or ""))
-        if scope_code != 0 and not found:
-            add("WARN", "scopes", "auth check 没有列出权限，请在开放平台核对")
+            add("FAIL", "auth", "应用身份未就绪或 status 失败")
+        scope_code, scope_out, scope_err = run(list(exe) + ["auth", "scopes", "--profile", profile])
+        scope_text = (scope_out or "") + "\n" + (scope_err or "")
+        found = app_scopes(scope_text)
+        if usage_error(scope_code, scope_text) or (scope_code != 0 and found is None):
+            add("WARN", "scopes", "列不出应用权限，请在开放平台核对")
+        elif found is None:
+            add("WARN", "scopes", "没有解析到应用权限列表，请在开放平台核对")
         else:
             missing = [item for item in required_scopes(cfg) if item not in found]
             if missing:
                 add("FAIL", "scopes", "缺少 " + ", ".join(missing))
             else:
                 add("OK", "scopes", "%d 项" % len(found))
-        ev_code, ev_out, ev_err = run(list(exe) + ["event", "list", "--as", "bot", "--profile", profile])
-        ev_text = (ev_out or "") + "\n" + (ev_err or "")
-        if ev_code != 0:
-            add("FAIL", "events", "event list 失败")
-        else:
-            missing_ev = [item for item in required_events(cfg) if item not in ev_text]
-            if missing_ev:
-                add("FAIL", "events", "未订阅 " + ", ".join(missing_ev))
-            else:
-                add("OK", "events", "已订阅")
+        # event list 列的是命令行认识的全部事件，不是这个应用在开放平台的订阅。不能据此判失败。
+        need_ev = required_events(cfg)
+        add("OK", "events", "需要 %s。订阅请在开放平台核对，这里不根据 event list 判断" % ", ".join(need_ev))
 
     try:
         addresses = list(resolve("open.feishu.cn"))
@@ -269,9 +322,46 @@ def default_connect(host, port):
     return True
 
 
-def default_processes():
-    if not os.path.isdir("/proc"):
-        return None
+def windows_process_argv():
+    """Windows PowerShell 5.1。不用 pwsh。命令是固定的，不拼用户输入。"""
+    script = (
+        "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false; "
+        "$OutputEncoding = [Console]::OutputEncoding; "
+        "Get-CimInstance Win32_Process | "
+        "Where-Object { $_.CommandLine -and ($_.CommandLine -match 'agentbot\\.py|lark-cli') } | "
+        "ForEach-Object { '{0}`t{1}' -f $_.ProcessId, (($_.CommandLine -replace '[`r`n`t]', ' ')) }"
+    )
+    return ["powershell", "-NoProfile", "-NonInteractive", "-Command", script]
+
+
+def decode_process_output(raw):
+    if not raw:
+        return ""
+    if raw.startswith(b"\xff\xfe") or raw.startswith(b"\xfe\xff"):
+        return raw.decode("utf-16", "replace")
+    if raw.count(b"\x00") > max(1, len(raw) // 4):
+        return raw.decode("utf-16-le", "replace")
+    return raw.decode("utf-8", "replace")
+
+
+def parse_cim_lines(text):
+    out = []
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if "\t" not in line:
+            continue
+        pid, cmd = line.split("\t", 1)
+        pid = pid.strip()
+        cmd = cmd.strip()
+        if not pid.isdigit() or not cmd:
+            continue
+        if "agentbot.py" not in cmd and "lark-cli" not in cmd:
+            continue
+        out.append({"pid": int(pid), "cmdline": cmd})
+    return out
+
+
+def _linux_processes():
     out = []
     for name in os.listdir("/proc"):
         if not name.isdigit():
@@ -284,6 +374,23 @@ def default_processes():
         if "agentbot.py" in cmd or "lark-cli" in cmd:
             out.append({"pid": int(name), "cmdline": cmd})
     return out
+
+
+def _windows_processes():
+    try:
+        got = subprocess.run(windows_process_argv(), capture_output=True, timeout=25)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    text = decode_process_output(got.stdout or b"")
+    if got.returncode != 0 and not text.strip():
+        return None
+    return parse_cim_lines(text)
+
+
+def default_processes():
+    if os.path.isdir("/proc"):
+        return _linux_processes()
+    return _windows_processes()
 
 
 def default_modules():

@@ -1,4 +1,4 @@
-# 日志超过大约 2MB 时改名为 .1、.2 … 最多留 5 份。
+﻿# 日志超过大约 2MB 时改名为 .1、.2 … 最多留 5 份。
 # 文件正被别的进程占用、改名失败时什么都不做，也不结束任何进程。
 function Rotate-LogFile([string]$Path, [int]$MaxBytes = 2000000, [int]$Backups = 5) {
   if (-not (Test-Path -LiteralPath $Path)) { return }
