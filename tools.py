@@ -62,9 +62,9 @@ def apply_legacy_names(cfg):
     take((cfg.get("write") or {}).get("resources"), _LEGACY_RESOURCES, "write.resources")
     return hints
 
-TOOL_DOC = """可用工具（每一轮只输出一行：<<TOOL>>{"tool":"名称","args":{...}}，不要输出别的。只读工具可以连续多轮；写入类每轮只提议一个，并要发起人确认）：
+TOOL_DOC = """可用工具（只读工具同一轮可以输出多行，每行一个 <<TOOL>>{"tool":"名称","args":{...}}，不要夹别的说明。只读工具可以连续多轮；写入类每轮只提议一个，并要发起人确认）：
 - history {"keyword":"可选关键词"}：读取本群最近几天的消息，包含话题里的回复（仅群聊可用）。文件和图片会写成 [文件 文件名 id=om_…]，文档链接会保留
-- message_attachment {"message_id":"om_消息编号"}：读取当前会话里这条消息的附件（文件、图片、富文本里的文件）。只能读当前会话、且在 history.days 天以内的消息
+- message_attachment {"message_id":"om_消息编号"} 或 {"message_ids":["om_甲","om_乙"]}：读取当前会话里这些消息的附件（文件、图片、富文本里的文件）。多条会逐个核对会话和时间，结果分别标注。只能读当前会话、且在 history.days 天以内的消息
 - docs_search {"query":"关键词"}：搜索已分享给机器人的飞书文档
 - docs_read {"doc":"云文档链接、知识库链接或 token","keyword":"可选"}：读取飞书文档或知识库。file_ 或 img_ 开头的是聊天附件，不是云文档，不要传给这个工具；聊天附件用 message_attachment
 - calendar_read {"start":"ISO8601","end":"ISO8601"}：查看团队日历日程
@@ -80,8 +80,8 @@ TOOL_DOC = """可用工具（每一轮只输出一行：<<TOOL>>{"tool":"名称"
 上面这些只是飞书读写。联网搜索和打开网页是你自带的能力，不在这张表里，需要时直接用，不要拒绝。
 多个日程用 calendar_create_batch，仍然只输出一行。notify_all 只在对方明确说要 @全员 或通知所有人时才设为 true，不要自己写 at 标签，也不要邀请任何人。
 没有必要就不要调用工具，直接回答。
-被问到本群里的文件、图片、飞书文档或知识库时，要真的去读，不要只看发送记录：先用 history 看 [文件 文件名 id=om_…] 和文档链接，再用 message_attachment 按消息编号读取附件，用 docs_read 读取文档或知识库，读完再总结。回答用户时不要复述消息编号。
-重要：你处于只读模式，不能改本地文件，但飞书的新建/追加/建日程/改日程/删日程/加记录不需要你自己执行——只要输出上面那一行 <<TOOL>>，机器人会代为执行（写操作先让发起人回复确认码）。用户要求写飞书时，直接输出对应工具行，绝不要回答“切换到可编辑模式”或“无法创建”。"""
+被问到本群里的文件、图片、飞书文档或知识库时，要真的去读，不要只看发送记录：先用 history 看 [文件 文件名 id=om_…] 和文档链接，再用 message_attachment 按消息编号读取附件（多个编号放进 message_ids，或在同一轮里输出多行），用 docs_read 读取文档或知识库，读完再总结。回答用户时不要复述消息编号。
+重要：你处于只读模式，不能改本地文件，但飞书的新建/追加/建日程/改日程/删日程/加记录不需要你自己执行——只要输出对应的 <<TOOL>> 行，机器人会代为执行（写操作先让发起人回复确认码）。用户要求写飞书时，直接输出对应工具行，绝不要回答“切换到可编辑模式”或“无法创建”。"""
 MEMORY_TOOL_DOC = """还可以提议写入群记忆（需白名单发起人确认，仍只输出一行）：
 - memory_propose {"text":"主题：内容"}：用户明确说「记住」「以后都」这类偏好时使用。不要把没经确认的内容当成已经记住。"""
 
@@ -198,8 +198,19 @@ class Tools:
             raise ToolError("参数里含有不安全字符，已拒绝执行", "unsafe char for .cmd launcher")
         fk = os.environ.get("AGENTBOT_FAKE_LARK")  # 测试：JSON 文件 {"im +chat-messages-list": {...响应...}}
         if fk and not self.fake:
-            m = json.load(open(fk, encoding="utf-8")); key = " ".join(argv[:2])
-            self.fake = lambda av: m.get(" ".join(av[:2]), {"ok": True, "data": {}})
+            m = json.load(open(fk, encoding="utf-8"))
+            by_id = {}
+            idp = os.environ.get("AGENTBOT_FAKE_LARK_BY_ID")
+            if idp:
+                try: by_id = json.load(open(idp, encoding="utf-8"))
+                except Exception: by_id = {}
+            def _pick(av, table=m, ids=by_id):
+                if ids and "--message-ids" in av:
+                    i = list(av).index("--message-ids")
+                    mid = av[i + 1] if i + 1 < len(av) else ""
+                    if mid in ids: return ids[mid]
+                return table.get(" ".join(av[:2]), {"ok": True, "data": {}})
+            self.fake = _pick
         if self.fake:
             j = self.fake(argv)
             # 测试用来假装附件下载很慢。生产环境没有这个变量。下载发生在模型调用之外，不刷新、也不触发静默检测。
@@ -266,8 +277,9 @@ class Tools:
         if ctx.get("chat_type") != "group": raise ToolError("私聊里不提供群历史查询")
         days = int(self.t["history"].get("days", 7))
         start = (datetime.datetime.now().astimezone() - datetime.timedelta(days=days)).isoformat(timespec="seconds")
+        page = history_page_size(self.cfg)
         j = self.lark("history", ["im", "+chat-messages-list", "--chat-id", ctx["chat_id"], "--start", start,
-                                  "--page-size", "50", "--page-all", "--page-limit", str(self.t["history"].get("max_pages", 2)), "--no-reactions"])
+                                  "--page-size", str(page), "--page-all", "--page-limit", str(self.t["history"].get("max_pages", 2)), "--no-reactions"])
         msgs = (j.get("data") or {}).get("messages") or []
         kw = (a.get("keyword") or "").strip(); kw_l = kw.lower(); lines = []
         for m in msgs:
@@ -276,13 +288,19 @@ class Tools:
             lines.append(_history_line(m, self.names))
             for r in (m.get("thread_replies") or m.get("replies") or []):
                 if isinstance(r, dict): lines.append("  回复 " + _history_line(r, self.names))
-        return "本群最近 %d 天消息（%d 条%s）：\n" % (days, len(lines), "，关键词=" + kw if kw else "") + "\n".join(lines[:150])
+        cap = history_max_lines(self.cfg)
+        shown, note = lines, ""
+        if cap > 0 and len(lines) > cap:
+            shown = lines[:cap]
+            note = "\n（还有 %d 行没有列出）" % (len(lines) - cap)
+        return "本群最近 %d 天消息（%d 条%s）：\n" % (days, len(lines), "，关键词=" + kw if kw else "") + "\n".join(shown) + note
 
     def _docs_search(self, a, ctx):
         q = (a.get("query") or "")[:30]
         j = self.lark("docs_search", ["drive", "+search", "--query", q, "--page-size", "10"])
         items = (j.get("data") or {}).get("items") or (j.get("data") or {}).get("docs") or []
-        return "文档搜索结果：\n" + json.dumps(items, ensure_ascii=False)[:4000]
+        cap = text_cap(self.t.get("docs_search"), "max_chars", 4000)
+        return "文档搜索结果：\n" + clip_chars(json.dumps(items, ensure_ascii=False), cap)
 
     def _docs_read(self, a, ctx):
         doc = str(a.get("doc") or "").strip()
@@ -304,7 +322,12 @@ class Tools:
                 raise ToolError("这份知识库文档没对应用开放（需要把它分享给应用「%s」）" % bot, e.detail)
             raise
         text = doc_plain(j.get("data") or {})
-        return "文档内容（节选）：\n" + clip_body(text, _cfg_int(self.t["docs_read"].get("max_chars"), DEFAULT_BODY_CHARS))
+        limit = text_cap(self.t.get("docs_read"), "max_chars", DEFAULT_BODY_CHARS)
+        body = clip_body(text, limit)
+        # 没超过上限时不要标「节选」，否则模型会以为正文不完整。
+        if limit > 0 and len(text or "") > limit:
+            return "文档内容（节选）：\n" + body
+        return "文档内容：\n" + body
 
     def _resolve_wiki(self, token):
         """知识库链接先换成底层文档 token。权限不足时说明缺的是知识库 scope，还是文档没对应用开放。"""
@@ -349,8 +372,27 @@ class Tools:
         return n if n >= 0 else 4
 
     def _message_attachment(self, a, ctx):
-        """读取当前会话里某一条历史消息的附件。下载前先核对群和天数，再复用附件下载。"""
-        mid = _safe_message_id(a.get("message_id"))
+        """一条用 message_id。多条用 message_ids：逐个核对，失败的只标在自己那条上。"""
+        a = a or {}
+        many = a.get("message_ids")
+        if isinstance(many, str) and many.strip():
+            many = [many]
+        if isinstance(many, (list, tuple)) and len(many) > 0:
+            blocks = []
+            for i, raw in enumerate(many, 1):
+                label = "（编号无效）"
+                try:
+                    mid = _safe_message_id(raw)
+                    label = mid
+                    text = self._read_one_attachment(mid, ctx)
+                except ToolError as e:
+                    text = e.user_msg
+                blocks.append("【第 %d 条 %s】\n%s" % (i, label, text))
+            return "\n\n".join(blocks)
+        return self._read_one_attachment(_safe_message_id(a.get("message_id")), ctx)
+
+    def _read_one_attachment(self, mid, ctx):
+        """读取当前会话里某一条历史消息的附件。下载前先核对群和天数，下载后再核对编号和会话。"""
         chat = str((ctx or {}).get("chat_id") or "")
         if not chat: raise ToolError("没有当前会话，不能读取附件")
         cap = self._attach_quota()
@@ -403,7 +445,8 @@ class Tools:
         for k in ("start", "end"):
             if a.get(k): argv += ["--" + k, str(a[k])]
         j = self.lark("calendar_read", argv)
-        return "日程：\n" + json.dumps(j.get("data"), ensure_ascii=False)[:4000]
+        cap = text_cap(self.t.get("calendar_read"), "max_chars", 4000)
+        return "日程：\n" + clip_chars(json.dumps(j.get("data"), ensure_ascii=False), cap)
 
     def _base_read(self, a, ctx):
         b = self.t["base_read"]
@@ -414,7 +457,8 @@ class Tools:
         if a.get("keyword") and b.get("search_fields"):
             for f in b["search_fields"]: argv += ["--search-field", f]
         j = self.lark("base_read", argv)
-        return "表格记录：\n" + json.dumps(j.get("data"), ensure_ascii=False)[:5000]
+        cap = text_cap(self.t.get("base_read"), "max_chars", 5000)
+        return "表格记录：\n" + clip_chars(json.dumps(j.get("data"), ensure_ascii=False), cap)
 
     # ---------- 写：先登记待确认，确认后执行 ----------
     def propose_write(self, name, args, ctx):
@@ -938,6 +982,39 @@ def _cfg_int(raw, default):
     except (TypeError, ValueError): return default
     return n
 
+def _tool_spec(cfg, name):
+    t = (cfg or {}).get("tools")
+    spec = t.get(name) if isinstance(t, dict) else None
+    return spec if isinstance(spec, dict) else {}
+
+def history_page_size(cfg):
+    """拉群消息时每页条数。没写、写错或小于 1 时是 50。history 和停机补答用同一个值。"""
+    raw = _tool_spec(cfg, "history").get("page_size", 50)
+    try: n = int(raw)
+    except (TypeError, ValueError): return 50
+    return n if n >= 1 else 50
+
+def history_max_lines(cfg):
+    """交给模型的历史最多几行。没写是 150。0 表示不截。写错或负数按 150。"""
+    return text_cap(_tool_spec(cfg, "history"), "max_lines", 150)
+
+def text_cap(spec, key, default):
+    """一段文字或行数的上限。缺键、写错、负数用 default。0 表示不截。"""
+    if not isinstance(spec, dict) or key not in spec or spec.get(key) in (None, ""):
+        return default
+    try: n = int(spec.get(key))
+    except (TypeError, ValueError): return default
+    if n < 0: return default
+    return n
+
+def clip_chars(text, limit):
+    """只留开头。limit<=0 表示整段都留。"""
+    text = "" if text is None else str(text)
+    try: n = int(limit)
+    except (TypeError, ValueError): return text
+    if n <= 0 or len(text) <= n: return text
+    return text[:n]
+
 def _json_from_text(text):
     """从一段可能夹着日志的输出里取出 lark-cli 的 JSON。嵌套的 error 对象不要盖住外层。"""
     if not text: return None
@@ -1387,19 +1464,21 @@ def _read_pdf(path, limits, vision, title):
             blocks.append("【第 %d 页】\n（这一页没有文字。识图没打开，没法查看扫描页。请打开 features.vision，或把这一页导出成 PNG 或 JPG 再发。）" % i)
             continue
         saved = False
-        if viewable and img_used < limits["pdf_max_images"]:
+        img_cap = limits["pdf_max_images"]
+        if viewable and img_used < img_cap:
             ext, blob = viewable[0]
             fn = safe_download_name("%s_p%d%s" % (stem, i, ext)) or ("page_%d%s" % (i, ext))
             try: dest = _save_beside(path, fn, blob)
             except OSError: dest = None
             if dest:
                 img_used += 1; saved = True
-                images.append({"path": dest, "name": os.path.basename(dest), "hint": "PDF《%s》第 %d 页的图片" % (shown, i)})
+                images.append({"path": dest, "name": os.path.basename(dest),
+                               "hint": "PDF《%s》第 %d 页的图片（扫描页最多送 %d 张）" % (shown, i, img_cap)})
         flush_tail()
         if saved:
-            blocks.append("【第 %d 页】\n（这一页没有文字，已抽出其中的图片。）" % i)
+            blocks.append("【第 %d 页】\n（这一页没有文字，已抽出其中的图片。扫描页最多送 %d 张。）" % (i, img_cap))
         elif viewable:
-            blocks.append("【第 %d 页】\n（这一页没有文字。抽出的图片张数已到上限。）" % i)
+            blocks.append("【第 %d 页】\n（这一页没有文字。扫描页图片已到上限 %d 张，没有继续送。）" % (i, img_cap))
         elif opaque:
             blocks.append("【第 %d 页】\n（这一页没有文字，页面里的图片不是常见的 JPG、PNG 或 BMP，没法交给模型看。请把这一页导出成 PNG 或 JPG 再发。）" % i)
         else:

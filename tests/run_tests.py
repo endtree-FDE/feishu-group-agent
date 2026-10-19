@@ -1726,6 +1726,27 @@ if _PdfWriter:
     _got = _tools.inspect_download(_pdf_scan, _limits(), vision=True)
     check("扫描 PDF 无文字时抽出内嵌 JPG", _got["lines"] and "没有文字" in _got["lines"][0] and "已抽出" in _got["lines"][0]
           and _got["images"] and _got["images"][0]["path"].endswith(".jpg") and open(_got["images"][0]["path"], "rb").read()[:3] == b"\xff\xd8\xff", _got)
+    _scan_blob = "\n".join(_got["lines"]) + "\n" + "\n".join((im.get("hint") or "") for im in _got["images"])
+    check("扫描页发图说明使用 pdf_max_images 的默认值", "最多送 3 张" in _scan_blob, _scan_blob)
+    _pdf_many = os.path.join(T, "manyscan.pdf")
+    _mw = PdfWriter()
+    for _ in range(4):
+        _mw.add_blank_page(width=200, height=200)
+        _pg = _mw.pages[-1]
+        _im = StreamObject(); _im._data = _jpeg
+        _im.update({NameObject("/Type"): NameObject("/XObject"), NameObject("/Subtype"): NameObject("/Image"),
+                    NameObject("/Width"): NumberObject(1), NameObject("/Height"): NumberObject(1),
+                    NameObject("/ColorSpace"): NameObject("/DeviceRGB"), NameObject("/BitsPerComponent"): NumberObject(8),
+                    NameObject("/Filter"): NameObject("/DCTDecode"), NameObject("/Length"): NumberObject(len(_jpeg))})
+        _pg[NameObject("/Resources")] = DictionaryObject({NameObject("/XObject"): DictionaryObject({NameObject("/Im1"): _mw._add_object(_im)})})
+        _ct = DecodedStreamObject(); _ct.set_data(b"q 100 0 0 100 20 20 cm /Im1 Do Q")
+        _pg[NameObject("/Contents")] = _mw._add_object(_ct)
+    _mw.write(_pdf_many)
+    _cap2 = _tools.attachment_limits({"tools": {"attachment": {"pdf_max_images": 2, "pdf_scan_pages": 10, "pdf_max_pages": 20}}})
+    _got2 = _tools.inspect_download(_pdf_many, _cap2, vision=True)
+    _blob2 = "\n".join(_got2["lines"]) + "\n" + "\n".join((im.get("hint") or "") for im in _got2["images"])
+    check("扫描页发图张数和说明都用配置的 pdf_max_images",
+          len(_got2["images"]) == 2 and "最多送 2 张" in _blob2 and "上限 2 张" in _blob2 and "最多送 3 张" not in _blob2, _blob2)
     _pdf_blank = os.path.join(T, "blank.pdf")
     _bw = PdfWriter(); _bw.add_blank_page(width=200, height=200); _bw.write(_pdf_blank)
     _got = _tools.inspect_download(_pdf_blank, _limits(), vision=True)
@@ -1975,6 +1996,43 @@ _ht = _th._history({"keyword": "OpenJiuwen"}, _hctx)
 _hall = _th._history({}, _hctx)
 check("群历史关键词不区分大小写，并带上话题回复", "openjiuwen" in _ht.lower() and "回复" in _ht and "丙" not in _ht, _ht)
 check("群历史给图片留占位", "[图片]" in _hall, _hall)
+_many_seen = []
+_many_msgs = [{"create_time": "2026-10-16 19:00", "content": "行%d" % i, "sender": {"name": "甲"}} for i in range(5)]
+def _many_fake(argv):
+    _many_seen.append(list(argv))
+    return {"ok": True, "data": {"messages": _many_msgs}}
+_th2 = _tl(); _th2.fake = _many_fake
+_th2.t["history"]["max_lines"] = 2
+_th2.t["history"]["page_size"] = 11
+_cut_hist = _th2._history({}, _hctx)
+check("历史超过 max_lines 时注明还剩几行", "还有 3 行没有列出" in _cut_hist and "行4" not in _cut_hist and "行0" in _cut_hist, _cut_hist)
+check("history 使用配置的 page_size", any("--page-size" in a and a[a.index("--page-size") + 1] == "11" for a in _many_seen), str(_many_seen))
+_th2.t["history"]["max_lines"] = 0
+_all_hist = _th2._history({}, _hctx)
+check("history.max_lines 为 0 时不截断", "行4" in _all_hist and "没有列出" not in _all_hist, _all_hist)
+def _cap_fake(argv):
+    return {"ok": True, "data": {"items": [{"title": "甲" * 80}], "events": [{"title": "乙" * 80}], "records": [{"f": "丙" * 80}]}}
+_tc = _tl(); _tc.fake = _cap_fake
+_tc.t["docs_search"]["max_chars"] = 30
+_sres = _tc._docs_search({"query": "甲"}, _hctx)
+_sbody = _sres.split("\n", 1)[1]
+check("docs_search 按 max_chars 截断", _sres.startswith("文档搜索结果：") and len(_sbody) == 30, _sres)
+_tc.t["calendar_read"]["max_chars"] = 20
+_cres = _tc._calendar_read({}, _hctx)
+check("calendar_read 按 max_chars 截断", _cres.startswith("日程：") and len(_cres.split("\n", 1)[1]) == 20, _cres)
+_tc.t["base_read"]["max_chars"] = 25
+_bres = _tc._base_read({}, _hctx)
+check("base_read 按 max_chars 截断", _bres.startswith("表格记录：") and len(_bres.split("\n", 1)[1]) == 25, _bres)
+_bare_cfg = json.loads(json.dumps(cfg))
+for _k in ("page_size", "max_lines"): _bare_cfg["tools"]["history"].pop(_k, None)
+for _name in ("docs_search", "calendar_read", "base_read"): _bare_cfg["tools"][_name].pop("max_chars", None)
+check("缺键时读取上限仍是原来的默认值",
+      _tools.history_page_size(_bare_cfg) == 50 and _tools.history_max_lines(_bare_cfg) == 150
+      and _tools.text_cap(_bare_cfg["tools"]["docs_search"], "max_chars", 4000) == 4000
+      and _tools.text_cap(_bare_cfg["tools"]["calendar_read"], "max_chars", 4000) == 4000
+      and _tools.text_cap(_bare_cfg["tools"]["base_read"], "max_chars", 5000) == 5000
+      and _tools.text_cap({"max_chars": 0}, "max_chars", 4000) == 0
+      and _tools.clip_chars("甲乙丙丁", 0) == "甲乙丙丁" and _tools.clip_chars("甲乙丙丁", 2) == "甲乙")
 _file_msg = {"message_id": "om_histfile1", "msg_type": "file", "create_time": "2026-10-16 19:00",
              "content": json.dumps({"file_key": "file_hist1", "file_name": "杭州某某科技有限公司-报名.pdf"}, ensure_ascii=False),
              "sender": {"name": "小李"}}
@@ -2015,6 +2073,14 @@ check("普通云文档不查知识库节点，正文用 document.content",
       "云文档正文甲" in _pres and "旧字段不该用" not in _pres
       and not any(a[:2] == ["wiki", "+node-get"] for a in _seen_doc)
       and any(a[:2] == ["docs", "+fetch"] and "doxPLAIN1" in a for a in _seen_doc), _pres + "\n" + str(_seen_doc))
+check("没超过上限的文档不标节选", "文档内容：" in _pres and "节选" not in _pres, _pres)
+_tdoc.t["docs_read"]["max_chars"] = 3
+_cut = _tdoc._docs_read({"doc": "doxPLAIN1"}, _hctx)
+check("超过上限的文档才标节选", _cut.startswith("文档内容（节选）：") and "全文约" in _cut, _cut)
+_tdoc.t["docs_read"]["max_chars"] = 0
+_alldoc = _tdoc._docs_read({"doc": "doxPLAIN1"}, _hctx)
+check("docs_read 的 max_chars 为 0 时不截也不标节选", "云文档正文甲" in _alldoc and "节选" not in _alldoc and "全文约" not in _alldoc, _alldoc)
+_tdoc.t["docs_read"]["max_chars"] = 20000
 _seen_doc.clear()
 def _scope_fake(argv):
     _seen_doc.append(list(argv))
@@ -2113,6 +2179,19 @@ _att_calls.clear()
 _stage_file("om_noidload1", "plain.txt", data="沿用第一次核对的正文".encode("utf-8"))
 _noid = _tatt._message_attachment({"message_id": "om_noidload1"}, _actx)
 check("历史附件：下载结果没有编号时沿用第一次核对", "沿用第一次核对的正文" in _noid, _noid)
+_att_calls.clear()
+_stage_file("om_lista1", "a.txt", data="列表甲文".encode("utf-8"))
+_list_ctx = {"chat_type": "group", "chat_id": CH, "user": "user_sender"}
+_list = _tatt._message_attachment({"message_ids": ["om_otherchat", "om_lista1", "not-an-id", "om_oldfile1"]}, _list_ctx)
+_list_tail = _list.split("【第 2 条", 1)[-1]
+check("message_ids 逐条核对并分别标注，对不上的不下载",
+      "【第 1 条 om_otherchat】" in _list and "当前会话" in _list.split("【第 2 条")[0]
+      and "【第 2 条 om_lista1】" in _list and "列表甲文" in _list_tail.split("【第 3 条")[0]
+      and "【第 3 条 （编号无效）】" in _list and "消息编号不对" in _list
+      and "【第 4 条 om_oldfile1】" in _list and "超过了最近" in _list
+      and any("--download-resources" in a and "om_lista1" in a for a in _att_calls)
+      and not any("--download-resources" in a and ("om_otherchat" in a or "om_oldfile1" in a) for a in _att_calls),
+      _list + "\n" + str(_att_calls))
 _bare_dir = os.path.join(T, "tmp", "bare_customer"); os.makedirs(_bare_dir, exist_ok=True)
 _bare_path = os.path.join(_bare_dir, "杭州某某科技有限公司-备注.txt")
 open(_bare_path, "w", encoding="utf-8").write("备注正文")
@@ -2297,6 +2376,10 @@ check("只读工具连续三轮：先查历史，再读知识库，再读附件"
       and any("工具结果（message_attachment）" in p and "赛程常见问题正文" in p for p in _ps)
       and "不该出现的旧字段" not in _joined and "file_chain1" not in _joined
       and "[fake] 已根据工具结果回答" in o, o[-2500:])
+check("每一轮提示还剩几轮只读工具",
+      len(_ps) >= 4 and "还可以再用 4 轮" in _ps[0] and "还可以再用 4 轮" not in _ps[1]
+      and "还可以再用 3 轮" in _ps[1] and "还可以再用 2 轮" in _ps[2] and "还可以再用 1 轮" in _ps[3],
+      "\n---\n".join((p[-180:] if p else "") for p in _ps))
 _q2 = "<<FAKE_SEQ_FORCE>>" + json.dumps(_seq, ensure_ascii=False) + "<<END>> 再总结一次"
 o2 = run([ev("chain2", _q2)], name="chain_cap", cfg_path=_rounds_cfg("chain_cap", max_tool_rounds=2), extra_env=_chain_env)
 _ps2 = prompts(o2)
@@ -2537,5 +2620,58 @@ o = run([ev("rc7", "彩排口令是什么", chat_id=RA)], name="recall_fit", cfg
 ps = prompts(o)
 check("档案放得下时事实只在档案里，不再单独召回", ps and "RECALLME" in ps[0] and "没放进上面档案的事实" not in ps[0], ps[0][-300:] if ps else o)
 
+_lim_src = r'''
+import os, sys
+sys.argv = ["agentbot.py", os.environ["CFG"], "--dry-run", os.environ["EMPTY"]]
+import agentbot
+agentbot.CFG.setdefault("memory", {})["max_turn_chars"] = 5
+agentbot.remember("turncap", "user", "ABCDEFGHIJ")
+agentbot.CFG["memory"]["max_turn_chars"] = 0
+agentbot.remember("turnall", "user", "ABCDEFGHIJ")
+agentbot.CFG["memory"].pop("max_turn_chars", None)
+agentbot.remember("turndef", "user", "甲" * 2500)
+rows = dict(agentbot.DB.execute("select sess, text from turns").fetchall())
+print("CAP", rows.get("turncap"))
+print("ALL", rows.get("turnall"))
+print("DEF", len(rows.get("turndef") or ""))
+parts = ["工具结果（history）：\n" + ("甲" * 300), "工具结果（docs_read）：\n" + ("乙" * 300)]
+out = agentbot.compress_tool_context(parts, 220)
+full = agentbot.compress_tool_context(parts, 0)
+tiny = agentbot.compress_tool_context(parts, 20)
+print("FIT", len(out) <= 220 and "已压缩" in out and "已截断" in out and "乙" in out)
+print("ZERO", len(full) > 500 and "已截断" not in full)
+print("TINY", isinstance(tiny, str) and len(tiny) <= 20)
+print("BUDGET", agentbot.tool_context_budget())
+agentbot.CFG.setdefault("agent", {}).pop("tool_context_budget_chars", None)
+print("BUDGET0", agentbot.tool_context_budget())
+'''
+_lim_o = _bot_py(_lim_src, {"EMPTY": _empty})
+check("短期记忆 max_turn_chars 只留开头，0 留整段，缺键仍是 2000",
+      "CAP ABCDE" in _lim_o and "ALL ABCDEFGHIJ" in _lim_o and "DEF 2000" in _lim_o, _lim_o)
+check("工具结果超预算时压缩并截断，不抛错；0 不设预算；缺键是 120000",
+      "FIT True" in _lim_o and "ZERO True" in _lim_o and "TINY True" in _lim_o
+      and "BUDGET 120000" in _lim_o and "BUDGET0 120000" in _lim_o, _lim_o)
+_page_src = r'''
+import os, sys, time
+sys.argv = ["agentbot.py", os.environ["CFG"], "--dry-run", os.environ["EMPTY"]]
+os.environ["AGENTBOT_CATCHUP"] = "1"
+import agentbot
+seen = []
+def fake(argv):
+    seen.append(list(argv))
+    return {"ok": True, "data": {"messages": []}}
+agentbot.TOOLS.fake = fake
+agentbot.CFG.setdefault("tools", {}).setdefault("history", {})["page_size"] = 11
+open(os.path.join(agentbot.STATE, "heartbeat"), "w", encoding="utf-8").write(str(int(time.time())))
+agentbot.catch_up_mentions()
+hit = [a for a in seen if "chat-messages-list" in " ".join(a[:2])]
+page = hit[0][hit[0].index("--page-size") + 1] if hit and "--page-size" in hit[0] else ""
+print("PAGE", page)
+'''
+_page_o = _bot_py(_page_src, {"EMPTY": _empty, "AGENTBOT_CATCHUP": "1"})
+check("停机补答拉消息使用 history.page_size", "PAGE 11" in _page_o, _page_o)
+_se = subprocess.run([sys.executable, os.path.join(FW, "tests", "sim_e2e.py")], capture_output=True, text=True, encoding="utf-8", timeout=300)
+_se_out = (_se.stdout or "") + (_se.stderr or "")
+check("模拟端到端：一轮多读和预算压缩", _se.returncode == 0, _se_out[-2000:])
 print("\n%d/%d passed" % (sum(r for _, r in results), len(results))); shutil.rmtree(T, ignore_errors=True)
 sys.exit(0 if all(r for _, r in results) else 1)

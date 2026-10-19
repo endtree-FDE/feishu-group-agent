@@ -4,6 +4,31 @@ import json, os, re, time
 from providers.base import Provider, emit
 
 
+def _script_file_step():
+    """测试用：AGENTBOT_FAKE_SCRIPT 指向 {"rounds":[...]}。每一项是一轮模型输出。
+    字符串原样返回；对象或对象列表拼成多行 <<TOOL>>。轮次记在同名 .step 文件里。"""
+    path = os.environ.get("AGENTBOT_FAKE_SCRIPT")
+    if not path: return None
+    try: data = json.load(open(path, encoding="utf-8"))
+    except Exception: return "[fake] 脚本读不了"
+    rounds = data.get("rounds") if isinstance(data, dict) else data
+    if not isinstance(rounds, list): return "[fake] 脚本不是列表"
+    state = path + ".step"
+    try: n = int(open(state, encoding="utf-8").read().strip() or "0")
+    except Exception: n = 0
+    try: open(state, "w", encoding="utf-8").write(str(n + 1))
+    except Exception: pass
+    if n >= len(rounds): return "[fake] 已根据工具结果回答"
+    item = rounds[n]
+    if isinstance(item, str): return item
+    if isinstance(item, dict): item = [item]
+    if not isinstance(item, list): return "[fake] 已根据工具结果回答"
+    lines = []
+    for call in item:
+        if isinstance(call, str): lines.append(call)
+        elif isinstance(call, dict): lines.append("<<TOOL>>" + json.dumps(call, ensure_ascii=False))
+    return "\n".join(lines)
+
 def _scripted_steps(prompt):
     """测试用：<<FAKE_SEQ>>[...]<<END>> 按已经出现的工具结果条数取下一步。
     <<FAKE_SEQ_FORCE>> 即使上一轮已经要求直接回答，也继续吐出带前缀的工具行，用来确认多出来的调用不会被执行。
@@ -32,6 +57,8 @@ class FakeProvider(Provider):
             time.sleep(float(delay))
         if os.environ.get("AGENTBOT_FAKE_DUMP_PROMPT"):
             self.log.info("fake prompt: %s", json.dumps(prompt, ensure_ascii=False))
+        scripted = _script_file_step()
+        if scripted is not None: return scripted
         steps, mode = _scripted_steps(prompt)
         if steps is not None:
             done = prompt.count("工具结果（")

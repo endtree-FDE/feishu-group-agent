@@ -14,6 +14,9 @@
 
 ### 添加
 
+- 同一轮可以按顺序执行多条只读工具，每条仍做原来的校验。`message_attachment` 可以传 `message_ids`，逐条核对当前会话后再读，结果分开标注。每轮提示词写明还剩几轮只读工具。
+- 扫描 PDF 交给模型的图片说明使用配置里的 `pdf_max_images`（不写是 3）。`docs_read` 只有正文真的被截断时才标「节选」。
+- 这些上限不写时和以前一样：`tools.history.page_size` 50（停机补答拉消息也用它）、`tools.history.max_lines` 150（超出注明还剩几行，`0` 不截）、`tools.docs_search.max_chars` 4000、`tools.calendar_read.max_chars` 4000、`tools.base_read.max_chars` 5000、`memory.max_turn_chars` 2000（只留开头，`0` 留整段）、`agent.tool_context_budget_chars` 120000（多轮工具结果超预算时先压缩较早的结果，仍超就截断并注明，不报错；`0` 不设预算）。
 - `skills.only`：不写、`[]` 或 `false` 时，文件夹里合法的技能仍然全部可用。写成名字列表后，目录、触发词预放和 `skill_read` 只认这些名字。写错的名字在 `--check` 里提示，不因此失败。
 - `commands.status`：不写或为 `true` 时，`/状态`、`/status` 或单独一个「状态」直接回复当前开关，不调用模型。写成 `false` 时，这几个字仍交给模型。「状态怎么样」不是这条命令。
 - `memory.trim_note`：不写或为 `true` 时，短期对话超过字数预算会在提示词里注明省略了几条，本地记录还在。写成 `false` 时仍丢掉旧对话，但不再写这句话。没超过预算时不加。
@@ -37,4 +40,4 @@
 
 ## English
 
-The version is the `VERSION` file (`0.4.0-dev`). There is no GitHub Release yet. When publishing, drop the `-dev` suffix, tag that version, and keep this file in sync. Do not put secrets or Feishu IDs in release notes. The program does not read this file. New on this branch: `skills.only`, `commands.status`, and `memory.trim_note`. Missing keys keep the previous behavior.
+The version is the `VERSION` file (`0.4.0-dev`). There is no GitHub Release yet. When publishing, drop the `-dev` suffix, tag that version, and keep this file in sync. Do not put secrets or Feishu IDs in release notes. The program does not read this file. New on this branch: several read-only tool calls per round, `message_ids`, remaining-round hints, configurable read caps, and `agent.tool_context_budget_chars`. Missing keys keep the previous behavior.

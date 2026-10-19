@@ -221,6 +221,11 @@
           "type": "integer",
           "minimum": 0
         },
+        "max_turn_chars": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "记进短期记忆的一条最多多少字，只留开头。不写是 2000。0 表示整段都留。"
+        },
         "context_budget_chars": {
           "type": "integer",
           "minimum": 0
@@ -348,7 +353,12 @@
         "max_tool_rounds": {
           "type": "integer",
           "minimum": 0,
-          "description": "只读工具最多连续几轮。不写是 4。小于 1 时按 1。"
+          "description": "只读工具最多连续几轮。不写是 4。小于 1 时按 1。每一轮可以按顺序执行多条只读调用。"
+        },
+        "tool_context_budget_chars": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "多轮工具结果累积重发的字数预算。不写是 120000。超过时先压缩较早的结果，仍超就截断并注明。0 表示不设预算。"
         },
         "progress_heartbeat_sec": {
           "type": "number",
@@ -396,6 +406,75 @@
       "type": "object",
       "additionalProperties": true,
       "properties": {
+        "history": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "days": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "max_pages": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "page_size": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "拉群消息时每页条数。不写是 50。停机补答也用这个数。"
+            },
+            "max_lines": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "交给模型的历史最多几行。不写是 150。超过时注明还剩几行。0 表示不截断。"
+            }
+          }
+        },
+        "docs_search": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "max_chars": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "搜索结果最多多少字。不写是 4000。0 表示不截断。"
+            }
+          }
+        },
+        "calendar_read": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "max_chars": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "日程结果最多多少字。不写是 4000。0 表示不截断。"
+            }
+          }
+        },
+        "base_read": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "max_chars": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "表格结果最多多少字。不写是 5000。0 表示不截断。"
+            }
+          }
+        },
         "message_attachment": {
           "type": "object",
           "additionalProperties": true,
