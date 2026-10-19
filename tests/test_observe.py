@@ -57,6 +57,16 @@ cfg_min = {"profile": "placeholder", "features": {"p2p": False, "attachments": F
 check("只要求已启用能力的 scope",
       doctor.required_scopes(cfg_min) == ["im:message.group_at_msg:readonly", "im:message:send_as_bot",
                                           "im:message:readonly", "im:message.group_msg"])
+cfg_members = dict(cfg_min)
+cfg_members["p2p"] = {"allow_group_members": True}
+check("群成员私聊打开时，doctor 要求 im:chat.members:read",
+      "im:chat.members:read" in doctor.required_scopes(cfg_members)
+      and "im:chat.members:read" not in doctor.required_scopes(cfg_min)
+      and "im:chat.members:read" not in doctor.required_scopes(dict(cfg_min, p2p={"allow_group_members": False})))
+cfg_both_scopes = {"features": {"p2p": True, "attachments": False}, "progress": {"enabled": False}, "tools": {},
+                   "chat_ids": [], "chats": {"auto_join": True}, "p2p": {"allow_group_members": True}}
+check("自动认群和群成员私聊不把同一权限列两次",
+      doctor.required_scopes(cfg_both_scopes).count("im:chat.members:read") == 1)
 check("198.18/15 是假 IP，NO_PROXY 含飞书域名则不算漏配",
       doctor.is_fake_ip("198.18.1.5") and doctor.is_fake_ip("198.19.0.1") and not doctor.is_fake_ip("10.0.0.1")
       and not doctor.proxy_covers_feishu("") and doctor.proxy_covers_feishu("open.feishu.cn,localhost"))

@@ -2832,6 +2832,9 @@ print("PAGE", page)
 '''
 _page_o = _bot_py(_page_src, {"EMPTY": _empty, "AGENTBOT_CATCHUP": "1"})
 check("停机补答拉消息使用 history.page_size", "PAGE 11" in _page_o, _page_o)
+_pm = subprocess.run([sys.executable, os.path.join(FW, "tests", "test_p2p_members.py")],
+                     capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
+check("私聊按群成员放行", _pm.returncode == 0, (_pm.stdout or "") + (_pm.stderr or ""))
 _se = subprocess.run([sys.executable, os.path.join(FW, "tests", "sim_e2e.py")], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
 _se_out = (_se.stdout or "") + (_se.stderr or "")
 check("模拟端到端：一轮多读和预算压缩", _se.returncode == 0, _se_out[-2000:])

@@ -26,6 +26,7 @@
 - `CODEOWNERS`。
 - 安全上报写明使用 GitHub 私密漏洞上报。
 - 文档里的 `lark-cli config init` 都带 `--name <profile>`，并说明不写会覆盖这台电脑上其他机器人的 profile。
+- 私聊可以按群成员放行。`p2p.allow_group_members` 默认 `false`，不写时不查群成员，和以前一样。设为 `true` 后，当前在所服务群里的成员可以私聊；`allow_open_ids` 或写入白名单里的人仍然可以。`open_to_all` 优先。成员名单默认缓存 600 秒（`p2p.member_cache_ttl_sec`）。查成员失败、超时、缺权限或名单不完整时拒绝，不回复群外的人。需要 `im:chat.members:read`。
 
 ## [0.4.0] - 2026-10-19
 
@@ -68,4 +69,4 @@
 
 ## English
 
-The version is the `VERSION` file (`0.4.0`), released on 2026-10-19. Do not put secrets or Feishu IDs in release notes. The program does not read this file. Missing keys keep the previous behavior. This version includes several read-only tool calls per round, `message_ids`, configurable read caps, and `agent.tool_context_budget_chars`. It also keeps a topic together when `root_id` and `thread_id` differ, hides internal ids in voice, sticker, and card messages, strips tool markers from long-term memory, and falls back when a web search returns no text. (#57) `--doctor` warns instead of failing when `lark-cli` only returns a user token, and no longer treats that token as an app permission. Tests and the program read and write text as UTF-8 without `PYTHONUTF8` or `PYTHONIOENCODING`. An optional loose-limits example raises those caps without changing the defaults.
+The version is the `VERSION` file (`0.4.0`), released on 2026-10-19. Do not put secrets or Feishu IDs in release notes. The program does not read this file. Missing keys keep the previous behavior. This version includes several read-only tool calls per round, `message_ids`, configurable read caps, and `agent.tool_context_budget_chars`. It also keeps a topic together when `root_id` and `thread_id` differ, hides internal ids in voice, sticker, and card messages, strips tool markers from long-term memory, and falls back when a web search returns no text. (#57) `--doctor` warns instead of failing when `lark-cli` only returns a user token, and no longer treats that token as an app permission. Tests and the program read and write text as UTF-8 without `PYTHONUTF8` or `PYTHONIOENCODING`. An optional loose-limits example raises those caps without changing the defaults. Unreleased: `p2p.allow_group_members` defaults to false; when enabled, current members of served groups may use private chat. `open_to_all` still wins, and a failed or truncated member list fails closed.
