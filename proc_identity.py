@@ -2,7 +2,7 @@
 # Windows 会把退掉的 PID 很快分给别的程序。只看进程还在不在，会把别的程序当成自己还活着，
 # 或者在停进程时打到别人。这里同时看创建时间和命令行。对不上就当成锁已经过期。
 # 本模块不结束任何进程。
-import os, subprocess
+import hashlib, os, subprocess, tempfile
 
 
 def norm_path(path):
@@ -87,6 +87,30 @@ def decide(lock, snap, base):
     if not lock.get("created"):
         return "ours"
     return "stale"
+
+
+def app_lock_file(bot_id, directory=None):
+    """同一应用的接收锁。文件名是编号的摘要，路径里不出现 open_id。"""
+    digest = hashlib.sha256(str(bot_id or "").encode("utf-8")).hexdigest()[:24]
+    directory = directory or os.environ.get("AGENTBOT_APP_LOCK_DIR") or os.path.join(tempfile.gettempdir(), "agentbot-locks")
+    return os.path.join(directory, digest + ".lock")
+
+
+def app_lock_held(lock, snap):
+    """另一个还活着的 agentbot.py 占着这把锁（不管它的目录）。死进程或被别的程序复用的编号不算。"""
+    if not lock or not lock.get("pid") or not snap:
+        return False
+    if int(snap.get("pid") or 0) != int(lock["pid"]):
+        return False
+    if lock.get("created") and snap.get("created") and str(lock["created"]) != str(snap["created"]):
+        return False
+    cmd = snap.get("cmdline") or ""
+    if "agentbot.py" in cmd.lower():
+        return True
+    if not cmd and not (snap.get("cwd") or ""):
+        if not lock.get("created") or (snap.get("created") and str(lock["created"]) == str(snap["created"])):
+            return True
+    return False
 
 
 def conflict_blocks(snap):

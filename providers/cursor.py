@@ -3,6 +3,7 @@
 import atexit, glob, json, os, re, subprocess, threading, time
 
 import acp_client
+import guard
 from providers.base import PartialText, Provider
 
 DEFAULT_MODEL = "grok-4.7-high-fast"
@@ -219,7 +220,7 @@ class CursorProvider(Provider):
                 return PartialText(part[: a.get("max_chars", 3500)])
             out = (out or "").strip()
             if rc == 0 and out: return out[: a.get("max_chars", 3500)]
-            self.log.error("agent rc=%s model=%s events=%d err=%s", rc, model, st.events, (err or "")[:300])
+            self.log.error("agent rc=%s model=%s events=%d err=%s", rc, model, st.events, guard.redact((err or "")[:300], ()))
             time.sleep(10 * (i + 1) if re.search(r"network|socket|TLS|ECONN|ETIMEDOUT|aborted", err or "", re.I) else 3)
         return None
 
@@ -230,7 +231,7 @@ class CursorProvider(Provider):
                 out = self.pool().ask(sess or "default", prompt, on_stage)
                 return (out or "")[: a.get("max_chars", 3500)] or None
             except acp_client.AcpFail as e:
-                self.log.error("acp fallback: %s", e)
+                self.log.error("acp fallback: %s", guard.redact(str(e), ()))
         return self.oneshot(prompt, on_stage)
 
     def check_items(self):

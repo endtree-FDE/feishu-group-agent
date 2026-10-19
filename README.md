@@ -124,7 +124,7 @@ A screenshot placeholder, with rules for hiding ids, is in [docs/demo/README.md]
 
 写操作要同时满足三道锁：人在白名单里、资源在白名单里、动作属于允许的几类（新建文档、文末追加、建日程、改日程、删日程、加一条表格记录）。发起人还要在原来的会话里回复确认码。不删消息、文档和表格记录。删日程不通知参会人。没有覆盖全文、没有改权限。
 
-密钥放在你自己的电脑上：飞书 App Secret 只在 `lark-cli config init --app-secret-stdin` 时输入；模型密钥只进环境变量。
+密钥放在你自己的电脑上：飞书 App Secret 只在 `lark-cli config init --name <profile> --app-secret-stdin` 时输入。`<profile>` 必须和配置里的 `profile` 相同。不写 `--name` 会使用默认 profile，覆盖这台电脑上其他机器人已经登录的 profile。模型密钥只进环境变量。
 
 不要提交这些文件：填好的 `agents/*.json`、`redact.txt`、`memory/`、`logs/`、`state/`、`state.db`、`kb/` 里的真实资料、`.env`。
 

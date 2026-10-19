@@ -14,7 +14,7 @@ description: >-
 
 ## 你必须遵守
 
-- 应用密钥（App Secret）不进 json、不进仓库、不进你的回复、不进群。让对方本人在自己电脑上运行：`lark-cli config init --app-id 对方的应用ID --app-secret-stdin --brand feishu`，然后自己粘贴密钥并回车。你不要代贴。
+- 应用密钥（App Secret）不进 json、不进仓库、不进你的回复、不进群。让对方本人在自己电脑上运行：`lark-cli config init --name <profile> --app-id 对方的应用ID --app-secret-stdin --brand feishu`，然后自己粘贴密钥并回车。你不要代贴。`<profile>` 必须和配置里的 `profile` 相同。不写 `--name` 会使用默认 profile，覆盖这台电脑上其他机器人已经登录的 profile。
 - 模型看 `model_provider` 和 `agent.model`。没写 `model_provider` 时用这台电脑上的 Cursor。只有这条路在 `agent.model` 留空时才用 `grok-4.7-high-fast`。DeepSeek、通义、智谱、盘古或别的 OpenAI 兼容地址以配置里的模型名为准，不会套这个名字。额度是对方自己电脑上 `cursor-agent login` 的账号，或对方自己的环境变量。不要写死任何账号，不要改用你自己的登录去顶替对方。
 - 不往群里发测试消息。验收请一位真人私聊一次、在群里 @ 一次。
 - 不删除、不覆盖正文、不改权限、不邀请他人。写操作只有白名单的人、白名单的资源、白名单的命令，加上本人 6 位确认码。
@@ -29,7 +29,7 @@ description: >-
 1. 对方在开放平台创建企业自建应用，把 App ID 给你。Secret 不给你。
 2. 用文档里的一键链接申请权限（把 `clientID` 换成 App ID）。事件订阅用长连接，事件名 `im.message.receive_v1`。然后由对方发布版本并设置可用范围。
 3. 在对方的 Windows 上安装 Python 3.12（勾选加入 PATH）、Node.js、`npm install -g @larksuite/cli`、Cursor。由对方运行 `cursor-agent login`。
-4. 由对方本人完成 `lark-cli config init`。你用 `lark-cli config show` 确认 profile 名字，不要把输出贴到公开处。
+4. 由对方本人完成 `lark-cli config init --name <profile>`。`<profile>` 必须和配置里的 `profile` 相同。不写 `--name` 会使用默认 profile，覆盖这台电脑上其他机器人已经登录的 profile。你用 `lark-cli config show` 确认 profile 名字，不要把输出贴到公开处。
 5. 机器人拉进群后：`lark-cli im +chat-list --as bot --profile 对方的profile --page-all --format json` 抄群编号；`lark-cli im +chat-members-list --chat-id 群编号 --as bot --profile 对方的profile --page-all --format json` 抄机器人的 `member_id` 和白名单成员的 `member_id`。对方如果要用自动认群，按 `docs/升级已有智能体.md` 的「14 附」把 `chat_ids` 留空，不要代他们在群里发 `/认群`。
 6. 复制 `agents/example.json` 为 `agents/<短名>.json`。按 `CONFIG.md` 填。`REPLACE_` 全部换掉。`memory.enabled` 和 `progress.enabled` 先保持 `false`。`base_dir` 用 `.`。人设改成这个机器人的名字，不写客户真名。
 7. 复制 `redact.example.txt` 为 `redact.txt`。没有确认过的客户名就先空着。
