@@ -59,3 +59,64 @@ jobs:
         env:
           PYTHONUTF8: "1"
         run: python checks/history_scan.py
+
+  windows-powershell:
+    name: Windows PowerShell 5.1
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Parse scripts, dry-run safe functions, BOM
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($PSVersionTable.PSEdition -ne 'Desktop' -or $PSVersionTable.PSVersion.Major -ne 5) {
+            throw "expected Windows PowerShell 5.1 (powershell.exe), got $($PSVersionTable.PSEdition) $($PSVersionTable.PSVersion)"
+          }
+          $root = (Get-Location).Path
+          $files = @(Get-ChildItem -Path (Join-Path $root 'scripts') -Filter '*.ps1' -File)
+          if ($files.Count -lt 1) { throw 'no ps1 files' }
+          $bad = New-Object System.Collections.Generic.List[string]
+          foreach ($f in $files) {
+            $bytes = [System.IO.File]::ReadAllBytes($f.FullName)
+            $nonAscii = $false
+            foreach ($b in $bytes) { if ($b -gt 127) { $nonAscii = $true; break } }
+            $bom = ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)
+            if ($nonAscii -and -not $bom) { $bad.Add("BOM $($f.Name)") }
+            $tokens = $null
+            $errs = $null
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$tokens, [ref]$errs)
+            if ($errs -and $errs.Count -gt 0) {
+              $bad.Add(("PARSE " + $f.Name + " " + (($errs | ForEach-Object { $_.ToString() }) -join '; ')))
+            }
+            if (-not $ast) { $bad.Add("PARSE $($f.Name) empty") }
+          }
+          # 干跑：只点源函数库，并用虚构路径调用不改系统的函数。
+          # 不执行 start / stop / watchdog / register-tasks / kb-sync-task / switch-from-old / verify_windows。
+          # 那些脚本会启动进程、注册计划任务或读取本机部署，不能在 CI 里真跑。
+          . (Join-Path $root 'scripts\botproc.ps1')
+          . (Join-Path $root 'scripts\rotatelog.ps1')
+          $norm = ConvertTo-NormPath 'C:\Example\Bot'
+          if ($norm -ne 'c:\example\bot') { $bad.Add('DRY botproc ConvertTo-NormPath') }
+          if (-not (Test-UnderBase 'C:\Example\Bot\state' 'C:\Example\Bot')) { $bad.Add('DRY Test-UnderBase') }
+          if (Test-ProfileInCommandLine 'python agentbot.py --profile demo' 'other') { $bad.Add('DRY profile false positive') }
+          if (-not (Test-ProfileInCommandLine 'python agentbot.py --profile demo' 'demo')) { $bad.Add('DRY profile miss') }
+          $tmp = Join-Path $env:TEMP 'agentbot-rotate-dry.log'
+          Set-Content -LiteralPath $tmp -Value 'dry' -Encoding ascii
+          Rotate-LogFile $tmp 2000000 5
+          if (-not (Test-Path -LiteralPath $tmp)) { $bad.Add('DRY rotatelog removed a small file') }
+          Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+          if ($bad.Count -gt 0) {
+            $bad | ForEach-Object { Write-Output $_ }
+            throw 'powershell checks failed'
+          }
+          Write-Output ("parsed {0} scripts" -f $files.Count)
+      - name: Tests
+        shell: powershell
+        env:
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: utf-8
+        run: python tests/run_tests.py

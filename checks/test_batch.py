@@ -106,6 +106,13 @@ with tempfile.TemporaryDirectory() as td:
 code, out = wizard(["--name", "both", "--dry-run", "--write"])
 check("干跑和写入不能一起用", code == 2 and "不能一起用" in out and not os.path.exists(os.path.join(ROOT, "agents", "both.json")))
 
+import checks.history_scan as _hs
+_sha = _hs.git("rev-parse", "HEAD")[1].strip()
+_lines = _hs.grep_commit(_sha, "ou_" + "placeholder")
+check("历史扫描搜的是提交树，不是同名路径", bool(_lines) and any("placeholder" in x for x in _lines))
+check("占位 open_id 不算泄漏", _hs.fixture("open_id", "ou_" + "placeholder", "tests/test_observe.py"))
+check("当前历史没有需要复查的真编号", _hs.main() == 0)
+
 if failures:
     print("%d failed" % len(failures))
     sys.exit(1)

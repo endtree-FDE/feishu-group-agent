@@ -22,7 +22,7 @@ flowchart LR
   lark --> guard["门卫：去重、白名单、限流、脱敏"]
   guard --> pack["拼装：人设、群记忆、技能目录、知识库"]
   pack --> model["Cursor 或 OpenAI 兼容模型"]
-  model --> tools["只读工具"]
+  model --> tools["只读工具，可连续多轮"]
   model --> confirm["写入提案 + 6 位确认码"]
   tools --> model
   confirm --> feishu
@@ -30,6 +30,8 @@ flowchart LR
   out --> feishu
   pack --- store["memory / kb / state.db"]
 ```
+
+`--doctor` 不在这条路上。它只在本机做诊断，不发消息。本机还有两份不含问题原文的日志：`logs/events.jsonl` 和 `logs/journal.jsonl`。
 
 完整分层图和设计说明：
 
@@ -55,30 +57,26 @@ flowchart LR
 
 ## 快速开始
 
-需要 Windows 和 Python 3.12 才能真正连上飞书。离线测试在其他系统上也可以跑，不需要先装别的 Python 包，也不需要联网。看 PDF 附件时才需要另外安装 `pypdf`（纯 Python）。Word（`.docx`）、PPT（`.pptx`）、文本、代码、zip 和图片用标准库读取。Excel（`.xlsx`）在装了 `openpyxl` 时读取。没装这些包也不会影响启动，只是对应的附件会说明读不了。
+新人大约 15 分钟可以在自己电脑上把离线测试和配置检查跑起来，不必先有飞书应用。逐步说明在 [docs/快速开始.md](docs/快速开始.md)。遇到报错先看 [docs/排障.md](docs/排障.md)。
 
 ```text
 python tests/run_tests.py
+python checks/check_config.py agents/example.json
+python setup_agent.py --name demo --provider deepseek --dry-run
+python agentbot.py agents/example.json --doctor
 ```
 
-最后一行会打印通过条数。全部通过就可以。条数会随测试增加，这里不再写死。
+最后一条只做只读诊断，不发消息。没有安装 lark-cli 时，它会列出缺什么。真正连上飞书需要 Windows、Python 3.12 和你自己的应用，步骤在 [docs/新建智能体.md](docs/新建智能体.md)。已经有机器人、想换成这套（文档里的例子叫「小景」）看 [docs/升级已有智能体.md](docs/升级已有智能体.md)。
 
-从零接到飞书：看 [docs/新建智能体.md](docs/新建智能体.md)。顺序是创建企业自建应用、申请权限、在你自己的电脑上初始化 lark-cli、复制配置、启动。
-
-已经有一个机器人、想换成这套（文档里的例子叫「小景」）：看 [docs/升级已有智能体.md](docs/升级已有智能体.md)。
-
-最小配置步骤：
-
-1. 复制 `agents/example.json`，改成你自己的文件名。这个文件已被 `.gitignore` 排除，不会被提交。
-2. 把所有 `REPLACE_` 换成你自己的编号。不要在里面写 App Secret。
-3. 复制 `redact.example.txt` 为 `redact.txt`。没有要隐藏的客户名就先留空。
-4. 在仓库根目录运行 `scripts\start.ps1 -Config agents\<你的文件>.json`。
+看 PDF 附件时才需要另外安装 `pypdf`。Word、PPT、文本、代码、zip 和图片用标准库。Excel 在装了 `openpyxl` 时读取。没装这些包也不会影响启动。
 
 ## English guide
 
 The purpose, the write lock, and the “do not commit” rule are in the English paragraph at the top. The diagram in [架构](#架构) is the path from a Feishu message to a redacted reply. [docs/arch-now.mmd](docs/arch-now.mmd) is that same path with the model choice. [docs/arch-full.mmd](docs/arch-full.mmd) is the longer design, including jobs that are not on by default.
 
-Quick start:
+A 15-minute offline start is in [docs/快速开始.md](docs/快速开始.md). Troubleshooting is in [docs/排障.md](docs/排障.md). `--doctor` only prints a local diagnosis and does not send messages.
+
+Quick start on a machine that will really talk to Feishu:
 
 1. Copy `agents/example.json` to a new filename. That copy is gitignored.
 2. Replace every `REPLACE_` value with your own ids. Do not put an App Secret in the file.
@@ -110,6 +108,12 @@ A screenshot placeholder, with rules for hiding ids, is in [docs/demo/README.md]
 | `write.resources` | 允许新建或追加的文件夹、文档、日历、多维表格 |
 | `model_provider` | `cursor`（默认）或 `openai_compat` |
 | `agent.api_key_env` | 只写环境变量的名字，不写密钥本身 |
+| `agent.max_tool_rounds` | 只读工具最多连续几轮。不写是 `4` |
+| `agent.stall_sec` | 多久没有新输出算卡住。不写是 `300`，写成 `0` 仍按 300 |
+| `tools.message_attachment` | 读当前会话的历史附件。不写时跟着附件开关 |
+| `shutdown_wait_sec` | 停机再等多久。不写是 `15` 秒 |
+| `link_jump_sec` | 休眠多久后重连。不写是 `20` 秒 |
+| `catchup.max_age_sec` | 补答最多回溯多久。不写是 12 小时 |
 | `redact_file` | 客户名名单，默认 `redact.txt`，不要提交 |
 
 `REPLACE_` 开头的值必须换成你自己的，留着不能启动。
@@ -141,14 +145,22 @@ A screenshot placeholder, with rules for hiding ids, is in [docs/demo/README.md]
 | `agents/example.json` | 配置样子，里面都是占位符 |
 | `agents/CONFIG.md` | 每一项怎么填 |
 | `redact.example.txt` | 空的客户名名单样子，复制成 `redact.txt` 再用 |
-| `scripts/` | Windows 上的启动、停止、看门狗、计划任务 |
+| `doctor.py` | `--doctor`：只读诊断，不发消息 |
+| `observe.py` | 本机 `logs/events.jsonl` |
+| `lifecycle.py` | 单实例锁和优雅停机 |
+| `feishu_link.py` | 长连接，以及休眠后的重连 |
+| `setup_agent.py` | 干跑生成配置。不加 `--write` 不写文件 |
+| `scripts/` | Windows 上的启动、停止、看门狗、计划任务、`verify_windows.ps1` |
 | `tests/run_tests.py` | 离线测试。通过时最后一行打印条数 |
+| `docs/快速开始.md` | 新人 15 分钟跑起来 |
+| `docs/排障.md` | 常见问题 |
+| `docs/release-0.4.0.md` | v0.4.0 发布说明草稿，还没有 GitHub Release |
 | `docs/` | 给人看的说明和架构图 |
 | `SKILL.md` | 给帮忙操作的 AI 助手看的步骤 |
 
 ## 参与贡献
 
-看 [CONTRIBUTING.md](CONTRIBUTING.md)。
+看 [CONTRIBUTING.md](CONTRIBUTING.md)。行为约定见 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)。
 
 ## 许可证
 

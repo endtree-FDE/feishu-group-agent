@@ -1,6 +1,6 @@
 # 参与贡献
 
-感谢你愿意改这个模板。行为和安全边界以 [docs/安全红线.md](docs/安全红线.md) 为准，不要为了方便把确认码、白名单或脱敏绕过去。
+感谢你愿意改这个模板。行为和安全边界以 [docs/安全红线.md](docs/安全红线.md) 为准，不要为了方便把确认码、白名单或脱敏绕过去。讨论方式见 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)。第一次跑起来看 [docs/快速开始.md](docs/快速开始.md)。
 
 ## 环境
 
@@ -32,7 +32,9 @@ python checks/lint.py
 
 沿用所在文件已经在用的写法：4 个空格缩进，短语句可以写在同一行。注释说明为什么这样，而不是把代码再翻译一遍。不要为了风格把整个文件重新排版。用户能看到的说明用完整的句子。
 
-GitHub Actions 会在 Windows 和 Linux 上跑上面的 lint 和测试。同一工作流里还会跑 gitleaks，以及 `python checks/history_scan.py`。这个扫描只报告打码后的种类，不改写 Git 历史。工作流不访问飞书，也不读取密钥。
+GitHub Actions 会在 Windows 和 Linux 上跑上面的 lint 和测试。另有一个 `windows-latest` 作业用 Windows PowerShell 5.1（`powershell.exe`，不是 `pwsh`）解析 `scripts/*.ps1`，干跑其中不改系统的函数，并检查含中文的脚本带 UTF-8 BOM。启动、停止和注册计划任务的脚本只解析，不在 CI 里执行。同一工作流里还会跑 gitleaks，以及 `python checks/history_scan.py`。这个扫描只报告打码后的种类，不改写 Git 历史。工作流不访问飞书，也不读取密钥。
+
+含中文的 `.ps1` 请保存为 UTF-8 带 BOM。不要把真实的群号、用户编号、密钥、客户名或 `C:\Users\某人` 这种个人路径写进提交。
 
 ## 不要提交的文件
 

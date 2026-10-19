@@ -6,157 +6,424 @@
   "type": "object",
   "additionalProperties": true,
   "properties": {
-    "name": {"type": "string", "minLength": 1, "maxLength": 40},
-    "base_dir": {"type": "string"},
-    "kb_dir": {"type": "string"},
-    "profile": {"type": "string"},
-    "bot_open_id": {"type": "string"},
-    "bot_names": {"type": "array", "items": {"type": "string"}},
-    "chat_ids": {"type": "array", "items": {"type": "string"}},
-    "reply_in_thread": {"type": "boolean"},
-    "max_concurrency": {"type": "integer", "minimum": 1},
-    "max_queue": {"type": "integer", "minimum": 0},
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 40
+    },
+    "base_dir": {
+      "type": "string"
+    },
+    "kb_dir": {
+      "type": "string"
+    },
+    "profile": {
+      "type": "string"
+    },
+    "bot_open_id": {
+      "type": "string"
+    },
+    "bot_names": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "chat_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "reply_in_thread": {
+      "type": "boolean"
+    },
+    "max_concurrency": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "max_queue": {
+      "type": "integer",
+      "minimum": 0
+    },
     "model_provider": {
       "type": "string",
-      "enum": ["cursor", "openai_compat", "fake", "deepseek", "dashscope", "zhipu", "pangu"]
+      "enum": [
+        "cursor",
+        "openai_compat",
+        "fake",
+        "deepseek",
+        "dashscope",
+        "zhipu",
+        "pangu"
+      ]
     },
-    "dry_run_live_reads": {"type": "boolean"},
-    "redact_file": {"type": "string"},
-    "help_pattern": {"type": "string"},
-    "system_prompt": {"type": "string"},
+    "dry_run_live_reads": {
+      "type": "boolean"
+    },
+    "redact_file": {
+      "type": "string"
+    },
+    "help_pattern": {
+      "type": "string"
+    },
+    "system_prompt": {
+      "type": "string"
+    },
     "kb_index": {
       "type": "object",
       "additionalProperties": true,
       "properties": {
-        "enabled": {"type": "boolean"},
-        "budget_chars": {"type": "integer", "minimum": 0}
+        "enabled": {
+          "type": "boolean"
+        },
+        "budget_chars": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
     "chats": {
       "type": "object",
       "additionalProperties": true,
       "properties": {
-        "auto_join": {"type": "boolean"},
-        "admit": {"type": "string"},
-        "inviter_open_ids": {"type": "array", "items": {"type": "string"}}
+        "auto_join": {
+          "type": "boolean"
+        },
+        "admit": {
+          "type": "string"
+        },
+        "inviter_open_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
       }
     },
     "catchup": {
       "type": "object",
       "additionalProperties": true,
       "properties": {
-        "enabled": {"type": "boolean"},
-        "overlap_sec": {"type": "integer", "minimum": 0},
-        "max_messages": {"type": "integer", "minimum": 0}
+        "enabled": {
+          "type": "boolean"
+        },
+        "overlap_sec": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_messages": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_age_sec": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "补答最多回溯多少秒。不写是 43200。0 表示不再另加时限。"
+        }
       }
     },
     "thread_followup": {
       "type": "object",
       "additionalProperties": true,
       "properties": {
-        "enabled": {"type": "boolean"},
-        "who": {"type": "string"}
+        "enabled": {
+          "type": "boolean"
+        },
+        "who": {
+          "type": "string"
+        }
       }
     },
     "rate_limit": {
       "type": "object",
       "additionalProperties": true,
       "properties": {
-        "min_gap_per_user": {"type": "number", "minimum": 0},
-        "max_per_hour": {"type": "integer", "minimum": 0}
+        "min_gap_per_user": {
+          "type": "number",
+          "minimum": 0
+        },
+        "max_per_hour": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
     "observability": {
       "type": "object",
       "additionalProperties": true,
       "properties": {
-        "journal": {"type": "boolean"}
+        "journal": {
+          "type": "boolean"
+        }
       }
     },
     "features": {
       "type": "object",
       "additionalProperties": true,
       "properties": {
-        "memory": {"type": "boolean"},
-        "p2p": {"type": "boolean"},
-        "tools": {"type": "boolean"},
-        "attachments": {"type": "boolean"},
-        "vision": {"type": "boolean"}
+        "memory": {
+          "type": "boolean"
+        },
+        "p2p": {
+          "type": "boolean"
+        },
+        "tools": {
+          "type": "boolean"
+        },
+        "attachments": {
+          "type": "boolean"
+        },
+        "vision": {
+          "type": "boolean"
+        }
       }
     },
     "memory": {
       "type": "object",
       "additionalProperties": true,
       "properties": {
-        "enabled": {"type": "boolean"},
-        "dir": {"type": "string"},
-        "profile_budget_chars": {"type": "integer", "minimum": 0},
-        "recall": {"type": "boolean"},
-        "recall_budget_chars": {"type": "integer", "minimum": 0},
-        "max_fact_chars": {"type": "integer", "minimum": 0},
-        "scope": {"type": "string"},
-        "max_turns": {"type": "integer", "minimum": 0},
-        "context_budget_chars": {"type": "integer", "minimum": 0},
-        "ttl_hours": {"type": "number", "minimum": 0},
-        "per_user": {"type": "boolean"},
-        "trim_note": {"type": "boolean"}
+        "enabled": {
+          "type": "boolean"
+        },
+        "dir": {
+          "type": "string"
+        },
+        "profile_budget_chars": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "recall": {
+          "type": "boolean"
+        },
+        "recall_budget_chars": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_fact_chars": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "scope": {
+          "type": "string"
+        },
+        "max_turns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "context_budget_chars": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ttl_hours": {
+          "type": "number",
+          "minimum": 0
+        },
+        "per_user": {
+          "type": "boolean"
+        },
+        "trim_note": {
+          "type": "boolean"
+        }
       }
     },
     "skills": {
       "type": "object",
       "additionalProperties": true,
       "properties": {
-        "enabled": {"type": "boolean"},
-        "dir": {"type": "string"},
+        "enabled": {
+          "type": "boolean"
+        },
+        "dir": {
+          "type": "string"
+        },
         "only": {},
-        "index_budget_chars": {"type": "integer", "minimum": 0},
-        "preload": {"type": "boolean"},
-        "preload_budget_chars": {"type": "integer", "minimum": 0}
+        "index_budget_chars": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "preload": {
+          "type": "boolean"
+        },
+        "preload_budget_chars": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
     "p2p": {
       "type": "object",
       "additionalProperties": true,
       "properties": {
-        "allow_open_ids": {"type": "array", "items": {"type": "string"}},
-        "open_to_all": {"type": "boolean"}
+        "allow_open_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "open_to_all": {
+          "type": "boolean"
+        }
       }
     },
     "agent": {
       "type": "object",
       "additionalProperties": true,
       "properties": {
-        "mode": {"type": "string"},
-        "preset": {"type": "string", "enum": ["", "deepseek", "dashscope", "zhipu", "pangu"]},
-        "model": {"type": "string"},
-        "base_url": {"type": "string", "pattern": "^$|^https?://\\S+$"},
-        "api_key_env": {"type": "string", "pattern": "^$|^[A-Za-z_][A-Za-z0-9_]{0,80}$"},
-        "network_retries": {"type": "integer", "minimum": 0},
-        "max_runtime_sec": {"type": "number", "minimum": 0},
-        "stall_sec": {"type": "number", "minimum": 0},
-        "max_chars": {"type": "integer", "minimum": 0},
-        "body_max_chars": {"type": "integer", "minimum": 0},
-        "reply_chunk_chars": {"type": "integer", "minimum": 0}
+        "mode": {
+          "type": "string"
+        },
+        "preset": {
+          "type": "string",
+          "enum": [
+            "",
+            "deepseek",
+            "dashscope",
+            "zhipu",
+            "pangu"
+          ]
+        },
+        "model": {
+          "type": "string"
+        },
+        "base_url": {
+          "type": "string",
+          "pattern": "^$|^https?://\\S+$"
+        },
+        "api_key_env": {
+          "type": "string",
+          "pattern": "^$|^[A-Za-z_][A-Za-z0-9_]{0,80}$"
+        },
+        "network_retries": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_runtime_sec": {
+          "type": "number",
+          "minimum": 0
+        },
+        "stall_sec": {
+          "type": "number",
+          "minimum": 0
+        },
+        "max_chars": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "body_max_chars": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reply_chunk_chars": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_tool_rounds": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "只读工具最多连续几轮。不写是 4。小于 1 时按 1。"
+        },
+        "progress_heartbeat_sec": {
+          "type": "number",
+          "minimum": 0,
+          "description": "作答时隔多少秒记进度心跳。不写是 20。0 表示不打这条心跳。"
+        }
       }
     },
-    "texts": {"type": "object", "additionalProperties": {"type": "string"}},
+    "texts": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
     "policy": {
       "type": "object",
       "additionalProperties": true,
       "properties": {
-        "redlines": {"type": "array"}
+        "redlines": {
+          "type": "array"
+        }
       }
     },
     "kb_sync": {
       "type": "object",
       "additionalProperties": true,
       "properties": {
-        "docs_tokens": {"type": "array", "items": {"type": "string"}}
+        "docs_tokens": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
       }
     },
-    "write": {"type": "object", "additionalProperties": true},
-    "progress": {"type": "object", "additionalProperties": true},
-    "tools": {"type": "object", "additionalProperties": true},
-    "conflict_pidfiles": {"type": "array"}
+    "write": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "progress": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "tools": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "message_attachment": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "读取当前会话里某条历史消息的附件。没写时跟着 attachment.enabled。",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "max_per_answer": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "kb_read": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "max_chars": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "attachment": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "pdf_scan_pages": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "PDF 没有文字时，最多抽出前几页里的内嵌图片。不写是 10。"
+            }
+          }
+        }
+      }
+    },
+    "conflict_pidfiles": {
+      "type": "array"
+    },
+    "shutdown_wait_sec": {
+      "type": "number",
+      "minimum": 0,
+      "description": "停机最多再等几秒。不写是 15。0 表示马上退出。"
+    },
+    "link_jump_sec": {
+      "type": "number",
+      "minimum": 0,
+      "description": "休眠超过这么多秒就重连长连接。不写是 20。0 表示不因为休眠重连。"
+    }
   }
 }

@@ -38,23 +38,35 @@ def mask(value):
     return v[:3] + "…" + v[-2:] + " len=%d" % len(v)
 
 def fixture(kind, value, path):
-    if "REPLACE_" in value or "某某" in value:
+    if "REPLACE_" in value or "某某" in value or "placeholder" in value.lower() or "not_a_real" in value:
         return True
+    norm = path.replace("\\", "/")
     if kind == "phone":
         return value == FIXTURE_PHONE
     if kind == "email":
         dom = value.split("@", 1)[-1].lower()
         return dom in EMAIL_OK
     if kind == "company":
-        return "某某" in value or path.replace("\\", "/").endswith("guard.py")
+        # 扫描器自己的正则，以及脱敏规则里的公司后缀，不是客户名。
+        return "某某" in value or norm.endswith("guard.py") or norm.endswith("checks/history_scan.py")
+    if kind in ("open_id", "union_id", "chat_id", "app_id", "message_id"):
+        body = value.split("_", 1)[-1]
+        # 飞书真实编号是十六进制。带 g–z 的是测试里起的名字，例如 om_chainfile1。
+        if re.search(r"[g-zG-Z]", body):
+            return True
     if kind == "secret_assign":
-        # parts.password: 是 if 语句的冒号，不是赋值。
-        if ".password:" in value and "=" not in value.split("password", 1)[-1][:3]:
+        # parts.password: 是 if 语句的冒号，不是赋值。匹配结果可能不含前面的点。
+        if "password:" in value and "=" not in value.split("password", 1)[-1][:3]:
+            return True
+        if norm.endswith("checks/history_scan.py"):
             return True
         tail = re.split(r"[:=]", value, maxsplit=1)[-1].strip().strip("\"'")
-        if tail.lower() in {"false", "true", "none", "null", ""}:
+        tail = re.sub(r"[\"')\]},]+$", "", tail)
+        if tail.lower() in {"false", "true", "none", "null", "", "abc"}:
             return True
-        if tail.startswith("REPLACE") or "environ" in tail:
+        if tail.startswith("REPLACE") or "environ" in tail or tail == "supersecretvalue123":
+            return True
+        if "api-key=" in value.lower() and "sk-" not in value.lower():
             return True
     return False
 
@@ -64,7 +76,9 @@ def add(found, kind, value, path, sha):
     found[(kind, mask(value), path)].add(sha[:10])
 
 def grep_commit(sha, pattern):
-    code, out, err = git("grep", "-I", "-n", "-E", "-e", pattern, "--", sha)
+    # 树对象放在 -- 前面。模式用 -e，避免 -----BEGIN 被当成选项。
+    # -- SHA 会被当成路径，扫不到那一次提交。
+    code, out, err = git("grep", "-I", "-n", "-E", "-e", pattern, sha, "--")
     if code not in (0, 1):
         print(err.strip() or "git grep 失败")
         return None
