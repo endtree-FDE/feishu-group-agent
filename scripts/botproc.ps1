@@ -1,4 +1,4 @@
-# 判断进程是不是「这个目录里的机器人」。Windows 会复用 PID，不能只看父进程编号。
+﻿# 判断进程是不是「这个目录里的机器人」。Windows 会复用 PID，不能只看父进程编号。
 # 本文件只放函数。stop.ps1 / start.ps1 / watchdog.ps1 用点号引入，不要直接运行。
 
 function ConvertTo-NormPath([string]$Path) {

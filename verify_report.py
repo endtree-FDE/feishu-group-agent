@@ -170,13 +170,19 @@ def judge_lock(directory, lock_exists, lock_text, lock_proc):
     return rows
 
 
+# 这两个文件是后来加的。还没答过题、看门狗还没写过，不存在是空，不是轮转坏了。
+_EMPTY_OK = {"events.jsonl", "watchdog.log"}
+
+
 def judge_rotation(logs):
     rows = []
     for item in as_list(logs):
         name = item.get("name") or "?"
         if not item.get("exists"):
-            level = "WARN" if name == "events.jsonl" else "WARN"
-            rows.append((level, "rotate", "%s 不存在" % name))
+            if name in _EMPTY_OK:
+                rows.append(("OK", "rotate", "%s 不存在（空）" % name))
+            else:
+                rows.append(("WARN", "rotate", "%s 不存在" % name))
             continue
         try:
             size = int(item.get("size") or 0)

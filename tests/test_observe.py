@@ -67,17 +67,18 @@ def run(argv):
     calls.append(list(argv))
     if "consume" in argv:
         raise AssertionError("doctor must not consume")
+    if "--as" in argv:
+        return 2, "", "Error: unknown flag: --as"
     if argv[1:2] == ["--version"] or (len(argv) > 1 and argv[1] == "--version"):
         return 0, "lark-cli test\n", ""
     if "show" in argv:
         return 0, "profile ok\n", ""
     if "status" in argv:
-        return 0, "ready\n", ""
-    if "check" in argv:
-        scopes = " ".join(doctor.required_scopes(cfg_min))
-        return 0, scopes + "\n", ""
-    if "list" in argv:
-        return 0, "im.message.receive_v1\n", ""
+        return 0, json.dumps({"identities": {"bot": {"available": True, "status": "ready"}}}) + "\n", ""
+    if "scopes" in argv:
+        return 0, json.dumps({"scopes": doctor.required_scopes(cfg_min)}) + "\n", ""
+    if "list" in argv or "check" in argv:
+        return 2, "", "Error: unknown command"
     return 1, "", "unexpected"
 
 
@@ -86,10 +87,85 @@ lines, code = doctor.report(cfg_min, r"D:\bots\placeholder", ["lark-cli"], run,
                             lambda host: [("1.2.3.4", 443)], lambda host, port: True,
                             {"pypdf": True, "openpyxl": False, "PIL": True}, {"NO_PROXY": "open.feishu.cn"})
 text = "\n".join(lines)
-check("权限和订阅齐全时没有 FAIL，可选包缺失只是警告",
-      code == 0 and "FAIL" not in text and "WARN" in text and "openpyxl" in text, text)
+check("权限齐全时没有 FAIL，可选包缺失只是警告",
+      code == 0 and "FAIL" not in text and "WARN" in text and "openpyxl" in text and "scopes" in text, text)
+check("诊断不带 --as，也不把 event list 当成订阅",
+      calls and all("--as" not in c for c in calls)
+      and all(not (len(c) >= 3 and c[1] == "event" and c[2] == "list") for c in calls)
+      and "开放平台" in text, str(calls) + "\n" + text)
 check("诊断命令里没有 consume、发送或回复",
       calls and all("consume" not in c and "send" not in c and "reply" not in " ".join(c) for c in calls), str(calls))
+
+usage_calls = []
+
+
+def run_usage(argv):
+    usage_calls.append(list(argv))
+    if argv[1:2] == ["--version"] or (len(argv) > 1 and argv[1] == "--version"):
+        return 0, "lark-cli version 1.0.98\n", ""
+    if "show" in argv:
+        return 0, "profile ok\n", ""
+    return 2, "", "Error: unknown flag: --as\nUsage:\n  lark-cli auth status [flags]"
+
+
+lines, code = doctor.report(cfg_min, r"D:\bots\placeholder", ["lark-cli"], run_usage, lambda: [],
+                            lambda host: [("1.2.3.4", 443)], lambda host, port: True,
+                            {"pypdf": True, "openpyxl": True, "PIL": True}, {"NO_PROXY": "open.feishu.cn"})
+text = "\n".join(lines)
+check("lark-cli 1.0.98 参数错误是 WARN，不是 FAIL",
+      code == 0 and "FAIL" not in text and "参数不被这一版接受" in text and "列不出应用权限" in text, text)
+
+miss_scopes = [item for item in doctor.required_scopes(cfg_min) if item != "im:message:send_as_bot"]
+
+
+def run_missing(argv):
+    if argv[1:2] == ["--version"] or (len(argv) > 1 and argv[1] == "--version"):
+        return 0, "lark-cli test\n", ""
+    if "show" in argv:
+        return 0, "profile ok\n", ""
+    if "status" in argv:
+        return 0, json.dumps({"identity": "bot"}) + "\n", ""
+    if "scopes" in argv:
+        return 0, json.dumps({"scopes": miss_scopes}) + "\n", ""
+    return 1, "", "unexpected"
+
+
+lines, code = doctor.report(cfg_min, r"D:\bots\placeholder", ["lark-cli"], run_missing, lambda: [],
+                            lambda host: [("1.2.3.4", 443)], lambda host, port: True,
+                            {"pypdf": True, "openpyxl": True, "PIL": True}, {"NO_PROXY": "open.feishu.cn"})
+text = "\n".join(lines)
+check("应用权限列表里缺发送权限是 FAIL",
+      code == 1 and "缺少" in text and "im:message:send_as_bot" in text, text)
+
+
+def run_user_scopes(argv):
+    if argv[1:2] == ["--version"] or (len(argv) > 1 and argv[1] == "--version"):
+        return 0, "lark-cli test\n", ""
+    if "show" in argv:
+        return 0, "profile ok\n", ""
+    if "status" in argv:
+        return 0, json.dumps({"identity": "user", "identities": {"bot": {"available": False, "status": "missing"}}}) + "\n", ""
+    if "scopes" in argv:
+        return 0, json.dumps({"tokenType": "user", "userScopes": doctor.required_scopes(cfg_min)}) + "\n", ""
+    return 1, "", "unexpected"
+
+
+lines, code = doctor.report(cfg_min, r"D:\bots\placeholder", ["lark-cli"], run_user_scopes, lambda: [],
+                            lambda host: [("1.2.3.4", 443)], lambda host, port: True,
+                            {"pypdf": True, "openpyxl": True, "PIL": True}, {"NO_PROXY": "open.feishu.cn"})
+text = "\n".join(lines)
+check("用户令牌的 userScopes 不算应用权限，bot 明确不可用是 FAIL",
+      code == 1 and "应用身份未就绪" in text and "没有解析到应用权限列表" in text and "缺少" not in text, text)
+
+win_argv = doctor.windows_process_argv()
+check("Windows 进程列表走 powershell 的 Win32_Process，不用 pwsh",
+      win_argv[0] == "powershell" and "-NoProfile" in win_argv and "-NonInteractive" in win_argv
+      and "Get-CimInstance Win32_Process" in win_argv[-1] and "pwsh" not in win_argv)
+raw16 = "12\tC:\\Python\\python.exe C:\\bots\\a\\agentbot.py cfg.json\n".encode("utf-16")
+parsed = doctor.parse_cim_lines(doctor.decode_process_output(raw16))
+check("能读 PowerShell 5.1 的 UTF-16 进程行，并丢掉无关进程",
+      parsed == [{"pid": 12, "cmdline": r"C:\Python\python.exe C:\bots\a\agentbot.py cfg.json"}]
+      and doctor.parse_cim_lines("9\tnotepad.exe\n") == [])
 
 secret_cfg = dict(cfg_min, app_secret="supersecretvalue123")
 lines, code = doctor.report(secret_cfg, r"D:\bots\placeholder", ["lark-cli"], run, lambda: [],
