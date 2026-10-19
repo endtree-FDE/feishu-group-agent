@@ -117,8 +117,13 @@ try:
     work = tempfile.mkdtemp(prefix="agentbot_lock_")
     cfg = _cfg(work)
     holder = _sleeper()
-    time.sleep(0.2)
-    snap = proc_identity.snapshot(holder.pid)
+    snap = None
+    # Windows 上刚拉起的进程，有时第一次查不到命令行。多等一会儿再判失败。
+    for _ in range(8):
+        time.sleep(0.25)
+        snap = proc_identity.snapshot(holder.pid)
+        if snap and snap.get("created") and "python" in (snap.get("cmdline") or "").lower():
+            break
     check("能读到本机进程的创建时间和命令行",
           bool(snap and snap.get("created") and "python" in (snap.get("cmdline") or "").lower()), str(snap))
     os.makedirs(os.path.join(work, "state"), exist_ok=True)

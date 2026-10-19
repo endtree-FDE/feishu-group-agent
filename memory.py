@@ -93,7 +93,7 @@ class GroupMemory:
             if hit and hit[0] == mt: return hit[1]
         try: raw = open(p, encoding="utf-8-sig").read()
         except OSError: return ""
-        text = guard.redact(raw.strip(), self.names)
+        text = guard.neutralize(guard.redact(raw.strip(), self.names))
         with self._lock: self._cache[chat_id] = (mt, text)
         return text
 
@@ -219,7 +219,7 @@ class GroupMemory:
         old = sum(1 for x in fs if x.get("status") == "superseded")
         if old: lines.append("另有 %d 条已被新条目取代（保留历史，不再使用）。" % old)
         lines.append("白名单成员可以发「记一下：主题：内容」新增（同一主题会取代旧的），发「/忘记 编号」删除。")
-        return guard.redact("\n".join(lines), self.names)
+        return guard.neutralize(guard.redact("\n".join(lines), self.names))
 
     # ---------- 写 ----------
     def _write_all(self, chat_id, facts):
@@ -293,7 +293,7 @@ class GroupMemory:
         if len(text) < 2: return "要记什么？请发「记一下：内容」。"
         if len(text) > self.max_fact: return "太长了，请控制在 %d 字以内，或拆成几条分别记。" % self.max_fact
         if guard.policy_hit(text, self.mem_rules): return "这条内容按本机器人的规则不记录。"
-        clean = guard.redact(text, self.names)  # 落盘前脱敏：客户名 → 某客户，手机号/证件号/邮箱/密钥/路径打码
+        clean = guard.neutralize(guard.redact(text, self.names))  # 落盘前脱敏，并消掉工具标记，避免以后注入时被当成指令
         facts = self.facts(chat); subj = subject_of(clean)
         old = [x for x in facts if subj and x.get("status", "active") == "active" and (x.get("subject") or "").strip().lower() == subj.lower()]
         fid = self._next_id(chat, facts); today = datetime.date.today().isoformat()

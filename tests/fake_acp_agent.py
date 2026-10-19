@@ -166,6 +166,10 @@ def send_perm(state, wait):
     global PERM_ID
     if not state["left"]:
         rejected = all(x["rejected"] for x in state["results"]) if state["results"] else True
+        if state.get("empty_after") and not rejected:
+            # 搜索已经放行，但模型没有再写出正文。用来确认这种空回合会回退，而不是把空白当答案。
+            send({"jsonrpc": "2.0", "id": state["req_id"], "result": {"stopReason": "end_turn"}})
+            return
         finish(state["req_id"], state["sid"], "已拒绝权限请求" if rejected else "权限被允许")
         return
     tool, options = state["left"].pop(0)
@@ -200,7 +204,13 @@ def handle_prompt(req_id, sid, text, wait):
             time.sleep(0.25)
         finish(req_id, sid, "慢答案")
         return
-    calls = permission_calls(current_question(text))
+    q = current_question(text)
+    if "<<ACP_WEB_FAIL>>" in q and not follow:
+        web = perm_options(once=True, always=True, reject=True)
+        calls = [({"toolCallId": "web_search_fail", "title": "Web search: 查不到", "kind": "search", "status": "pending"}, web)]
+        send_perm({"req_id": req_id, "sid": sid, "left": calls, "results": [], "current": None, "empty_after": True}, wait)
+        return
+    calls = permission_calls(q)
     if calls:
         send_perm({"req_id": req_id, "sid": sid, "left": calls, "results": [], "current": None}, wait)
         return

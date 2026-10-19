@@ -679,6 +679,11 @@ class Tools:
             files.append(p)
         msgs = (j.get("data") or {}).get("messages") or []
         msg = msgs[0] if msgs else {}
+        got = _msg_chat(msg)
+        want = str((ctx or {}).get("chat_id") or "")
+        if got and want and got != want:
+            shutil.rmtree(d, ignore_errors=True)
+            raise ToolError("只能读取当前会话里的附件")
         files = apply_original_names(files, msg, self.names)
         self.audit(kind="read", tool="attachment", user=ctx["user"], chat=ctx["chat_id"], ok=True, n=len(files))
         return d, files, (msg.get("msg_type") or msg.get("message_type") or ""), msg
@@ -1071,6 +1076,8 @@ def explain_lark_error(tool, j, bot_name="机器人"):
         return "没有找到这份资源（不存在或已被删除）"
     if code in _PERM_CODES or "permission" in low or "forbidden" in low or "no access" in low or "无权限" in msg or "没有权限" in msg:
         return "机器人没有访问这份资源的权限（需要把它分享给应用「%s」）" % (bot_name or "机器人")
+    if code == 99991400 or re.search(r"rate limit|too many requests|frequency limit", low):
+        return "飞书限流了，请稍后再试"
     short = re.sub(r"\s+", " ", msg).strip()
     if short and short.lower() not in ("null", "none"):
         return "飞书接口调用失败：" + short[:120]
