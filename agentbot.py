@@ -110,6 +110,7 @@ with DBL:
     DB.execute("create index if not exists turns_sess on turns(sess, ts)")
     DB.execute("create table if not exists chats(chat_id text primary key, name text, status text, source text, inviter text, ts real, updated real)")
     DB.execute("create table if not exists threads(root text primary key, chat_id text, initiator text, ts real)")
+    DB.execute("create table if not exists att_text(mid text primary key, body text, ts real)")
     _seen_cols = {r[1] for r in DB.execute("pragma table_info(seen)")}
     # 旧库只有 mid/ts，那些行视为已经答过，避免升级后把历史消息再答一遍。
     if "status" not in _seen_cols: DB.execute("alter table seen add column status text default 'answered'")
@@ -159,10 +160,17 @@ def seen_event(eid):
     with DBL:
         try: DB.execute("insert into events values(?,?)", (eid, time.time())); DB.commit(); return False
         except sqlite3.IntegrityError: return True
+def _topic_id(ev):
+    """同一条话题用同一个编号。回复上的 root_id 优先于 thread_id，避免两者不一致时拆成两段会话。"""
+    if not isinstance(ev, dict): return ""
+    mid = str(ev.get("message_id") or "")
+    root = str(ev.get("root_id") or "")
+    if root and root != mid: return root
+    return str(ev.get("thread_id") or "") or mid
 def session_key(ev):
     # 群会话带上 chat_id。飞书的话题编号通常全局唯一，但伪造事件可以复用别的群的 root_id。
     if ev.get("chat_type") == "p2p": return "p2p:" + (ev.get("chat_id") or ev.get("sender_id") or "?")
-    topic = ev.get("thread_id") or ev.get("root_id") or ev.get("message_id")
+    topic = _topic_id(ev) or ev.get("message_id")
     return "g:%s:%s" % (ev.get("chat_id") or "?", topic)
 def _trim_note_on():
     """没写 memory.trim_note 时默认加上省略说明。显式 false 才恢复静默丢掉。"""
@@ -268,7 +276,7 @@ def _bot_answered(sess):
         row = DB.execute("select 1 from turns where sess=? and role=? limit 1", (sess, "bot")).fetchone()
     return bool(row)
 def _note_thread(ev, uid):
-    root = ev.get("thread_id") or ev.get("root_id") or ev.get("message_id")
+    root = _topic_id(ev) or ev.get("message_id")
     chat = ev.get("chat_id") or ""
     if not root or not chat: return
     with DBL:
@@ -291,26 +299,40 @@ def _thread_followup_ok(ev, uid):
     """话题里机器人已经答过，发起人或白名单可以不 @ 接着问。没写这项时关闭。"""
     fc = _follow_cfg()
     if not fc["enabled"] or (ev.get("chat_type") or "group") == "p2p": return False
-    root = ev.get("thread_id") or ev.get("root_id")
-    if not root or not _bot_answered(session_key(ev)): return False
+    root = _topic_id(ev)
+    if not root or root == str(ev.get("message_id") or "") or not _bot_answered(session_key(ev)): return False
     who = fc["who"]
     if who == "anyone": return True
     if who == "whitelist": return is_admin(uid)
     if who == "initiator": return uid == _thread_initiator(root)
     return uid == _thread_initiator(root) or is_admin(uid)
 _OWN_CONTEXT = ("image", "file", "post", "media", "merge_forward", "interactive", "card")
+def _save_att_text(mid, text):
+    """记住这条消息已经抽出的附件正文。话题里接着问纯文字时不再下载一次。"""
+    text = (text or "").strip()
+    if not mid or not text: return
+    with DBL:
+        DB.execute("insert or replace into att_text(mid, body, ts) values(?,?,?)", (str(mid)[:120], text[:8000], time.time()))
+        DB.commit()
+def _load_att_text(mid):
+    if not mid: return ""
+    with DBL:
+        row = DB.execute("select body from att_text where mid=?", (str(mid)[:120],)).fetchone()
+    return row[0] if row and row[0] else ""
 def _context_targets(ev, sess, mtype, mid):
-    """自己这条若带图片或转发就取；引用别人的也取。话题里接着问纯文字、且父消息就是话题根时不再重复取。"""
+    """自己这条若带图片或转发就取；引用别人的也取。话题里接着问纯文字、且父消息就是话题根时不再重复取。
+    返回 (要下载的消息, 改用缓存的消息)。"""
     parent = str(ev.get("parent_id") or "")
     reply_to = str(ev.get("reply_to") or "")
-    root = str(ev.get("thread_id") or ev.get("root_id") or "")
-    out = []
+    root = _topic_id(ev)
+    out, skipped = [], []
     if mtype in _OWN_CONTEXT: out.append(mid)
     quote = reply_to or parent
     if quote and quote != mid and quote not in out:
         skip = (not reply_to) and parent and root and parent == root and mtype == "text" and _bot_answered(sess)
-        if not skip: out.append(quote)
-    return out
+        if skip: skipped.append(quote)
+        else: out.append(quote)
+    return out, skipped
 
 # ---------- 哪些群可以回答 ----------
 # chat_ids 写了非空列表：只回答这些群，和以前一样（即使同时开了 auto_join 也忽略它）。
@@ -527,9 +549,24 @@ def _event_id(obj):
     if isinstance(h, dict) and h.get("event_id"): return str(h["event_id"])
     if obj.get("event_id"): return str(obj["event_id"])
     return ""
+_RECALL_TYPES = {"im.message.recalled_v1", "im.message.message_recalled_v1"}
+def _is_recall(obj):
+    if not isinstance(obj, dict): return False
+    if _member_type(obj) in _RECALL_TYPES: return True
+    inner = obj.get("event")
+    return isinstance(inner, dict) and _member_type(inner) in _RECALL_TYPES
+# 这些类型没有可交给模型的正文。直接说明，避免把 file_key、open_id 或别的群号送进提示词。
+_QUIET_TYPES = {
+    "audio": "这是一条语音，目前不能听里面的内容。请用文字说明要点。",
+    "sticker": "这是一个表情，没有可读取的文字。",
+    "share_chat": "这是一条群名片。我不会打开别的群，也不会主动发消息。",
+    "share_user": "这是一张联系人名片。我不会展开这个人的资料。",
+}
 def ingest(obj):
-    """一条 stdout JSON。消息事件交给 handle；进群/出群只记群，不回复。"""
+    """一条 stdout JSON。消息事件交给 handle；进群/出群只记群，不回复。撤回不回复。"""
     if not isinstance(obj, dict): return
+    if _is_recall(obj):
+        log.info("recall ignored"); return
     et = _member_type(obj)
     if et not in (_MEMBER_ADDED, _MEMBER_DELETED):
         inner = obj.get("event") if isinstance(obj.get("event"), dict) else None
@@ -938,7 +975,9 @@ def _load_context(targets, ctx, mid):
         for src in targets:
             text, cleanup = attachment_context(src, ctx, label=("这条消息" if src == mid else "被引用的消息"))
             if cleanup: cleanups.append(cleanup)
-            if text: parts.append(text)
+            if text:
+                parts.append(text)
+                _save_att_text(src, text)
     except Exception:
         for c in cleanups:
             try: c()
@@ -1258,6 +1297,12 @@ def handle(ev):
     if ev.get("_late") or how == "replay": LATE.note = "（延迟回复）"
     finished = False
     try:
+        mtype = str(ev.get("message_type") or "text").lower()
+        if mtype == "system":
+            log.info("skip system message %s", mid); finished = True; return
+        note = _QUIET_TYPES.get(mtype)
+        if note:
+            reply(mid, note); finished = True; return
         _handle_claimed(ev, mid, ctype, uid); finished = True
     finally:
         # 停机时这题还没走完：留着 received，下次启动补答。异常且并非停机，仍记成已回答，和以前一样。
@@ -1297,7 +1342,8 @@ def _handle_claimed(ev, mid, ctype, uid):
         elif why == "user": reply(mid, (CFG.get("texts") or {}).get("wait") or "请稍等一下，我处理完上一条就回复你。")
         return
     # 本条若是图片、富文本或转发，取它自己；回复或引用了别的消息时，把那段原文也带上。
-    targets = _context_targets(ev, sess, mtype, mid)
+    targets, skipped = _context_targets(ev, sess, mtype, mid)
+    cached = [t for t in (_load_att_text(s) for s in skipped) if t]
     if not q and mtype in ("image", "file", "media", "post", "merge_forward"): q = "请看我发的内容，概括要点。"
     if not q: reply(mid, CFG["texts"]["empty"]); return
     with _AL:
@@ -1322,7 +1368,9 @@ def _handle_claimed(ev, mid, ctype, uid):
                 try: extra, cleanup = _load_context(targets, ctx, mid)
                 except ToolError as e:
                     log.info("attachment degraded: %s %s", e.user_msg, guard.redact(e.detail[:200], REDACT_NAMES))
-                    if mtype != "text": extra = "（附件读取失败：%s。请如实告诉提问者。）" % e.user_msg
+                    extra = "（附件读取失败：%s。请如实告诉提问者。）" % e.user_msg
+            if cached:
+                extra = ("\n\n".join(cached) + ("\n\n" + extra if extra else "")).strip()
             def hook(stage, think=None, end=False, text=None):
                 # text 是回答的文字片段，由模型层拼成最终答案，不刷进进度卡片，也不写入 inflight。
                 if think is not None: prog.add_thinking(think, end)
@@ -1434,26 +1482,40 @@ def message_recalled(m):
     mtype = str(m.get("message_type") or m.get("msg_type") or "").strip().lower()
     return mtype in ("deleted", "recall", "recalled")
 
+_LISTED_FILE = {"file", "image", "media", "audio", "post", "sticker"}
+def _listed_content(m):
+    """补答时不要把 file_key 的 JSON 当成提问。有 text 用 text；文件类只用文件名。"""
+    mtype = str(m.get("message_type") or m.get("msg_type") or "text").lower()
+    content = m.get("content") if m.get("content") is not None else ""
+    parsed = content if isinstance(content, dict) else None
+    if isinstance(content, str) and content[:1] in "{[":
+        try:
+            got = json.loads(content)
+        except Exception:
+            got = None
+        if isinstance(got, dict): parsed = got
+    if isinstance(parsed, dict):
+        text = parsed.get("text")
+        if isinstance(text, str): return text
+        if mtype in _LISTED_FILE:
+            name = parsed.get("file_name") if isinstance(parsed.get("file_name"), str) else ""
+            if not name and isinstance(parsed.get("filename"), str): name = parsed["filename"]
+            return name
+        return json.dumps(parsed, ensure_ascii=False)
+    if isinstance(content, str): return content
+    return "" if content is None else str(content)
 def event_from_listed(chat_id, m):
     """把 chat-messages-list 的一条收成 handle 能吃的事件。没有消息编号的跳过。"""
     if not isinstance(m, dict): return None
     mid = m.get("message_id") or m.get("id")
     if not mid: return None
     sender = m.get("sender") if isinstance(m.get("sender"), dict) else {}
-    content = m.get("content") if m.get("content") is not None else ""
-    if isinstance(content, dict):
-        content = content.get("text") or json.dumps(content, ensure_ascii=False)
-    elif isinstance(content, str) and content[:1] == "{":
-        try:
-            parsed = json.loads(content)
-            if isinstance(parsed, dict) and isinstance(parsed.get("text"), str): content = parsed["text"]
-        except Exception: pass
-    if not isinstance(content, str): content = str(content)
     return {"message_id": str(mid), "chat_id": m.get("chat_id") or chat_id, "chat_type": m.get("chat_type") or "group",
             "message_type": m.get("message_type") or m.get("msg_type") or "text",
             "sender_id": m.get("sender_id") or sender.get("id") or sender.get("open_id") or "?",
             "sender_type": m.get("sender_type") or sender.get("sender_type") or "user",
-            "content": content, "mentions": m.get("mentions") or [],
+            "content": _listed_content(m), "mentions": m.get("mentions") or [],
+            "reply_to": m.get("reply_to") or m.get("upper_message_id") or "",
             "root_id": m.get("root_id") or "", "parent_id": m.get("parent_id") or "", "thread_id": m.get("thread_id") or ""}
 
 def catch_up_mentions():
