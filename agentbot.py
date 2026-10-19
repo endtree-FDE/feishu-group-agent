@@ -14,6 +14,7 @@ HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import utf8io  # 管道上的标准流改为 UTF-8，避免中文 Windows 的代码页把日志解崩
 import acp_client, channels, feishu_link, guard, lifecycle, memory, observe, proc_identity, providers
 from channels.base import Cap, can_update, status_modes
+from channels.feishu import MEMBER_ADDED, MEMBER_DELETED
 from providers.base import PartialText
 from tools import Tools, ToolError, TOOL_DOC, MEMORY_TOOL_DOC, READ_TOOLS, WRITE_TOOLS, run_capture, parse_cli_json, clip_body, message_text, attachment_limits, inspect_download, disk_download_name, kb_catalog, history_page_size, sweep_old
 
@@ -385,8 +386,6 @@ def _context_targets(ev, sess, mtype, mid):
 _CHAT_RX = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
 _ADMIT_RX = re.compile(r"^/?(?:认群|admit)$", re.I)
 _REVOKE_RX = re.compile(r"^/?(?:忘群|unadmit)$", re.I)
-_MEMBER_ADDED = "im.chat.member.bot.added_v1"
-_MEMBER_DELETED = "im.chat.member.bot.deleted_v1"
 _CHAT_TEXT = {
     "chat_pending": "这个群还没认。请白名单成员 @我 发送「/认群」。在此之前我不调用模型，也不主动发消息。",
     "chat_admitted": "已认这个群。之后在本群 @ 我才会回答。我不会主动发消息。",
@@ -492,17 +491,6 @@ def describe_chats():
             pnd = DB.execute("select count(*) from chats where status='pending'").fetchone()[0]
         return "auto_join admit=%s admitted=%d pending=%d" % (mode, n, pnd)
     return "chat_ids 为空且 auto_join 关闭"
-def _member_type(obj):
-    if not isinstance(obj, dict): return ""
-    h = obj.get("header")
-    if isinstance(h, dict) and h.get("event_type"): return h["event_type"]
-    return obj.get("event_type") or ""
-def _member_body(obj):
-    inner = obj.get("event") if isinstance(obj, dict) and isinstance(obj.get("event"), dict) else None
-    if inner and (_member_type(inner) in (_MEMBER_ADDED, _MEMBER_DELETED) or isinstance(inner.get("header"), dict)):
-        return _member_body(inner)
-    if inner and inner.get("chat_id"): return inner
-    return obj if isinstance(obj, dict) else {}
 def apply_member(event_type, body, event_id=""):
     """进群 / 出群只记 state.db。这里不调用 reply。"""
     if not auto_join_active():
@@ -519,7 +507,7 @@ def apply_member(event_type, body, event_id=""):
     name = _clip_name(body.get("name") if isinstance(body.get("name"), str) else "")
     inviter = open_id_of(body.get("operator_id"))
     row = load_chat(cid)
-    if event_type == _MEMBER_DELETED:
+    if event_type == MEMBER_DELETED:
         if row and row["status"] == "revoked":
             save_chat(cid, "revoked", "deleted", inviter, name); return
         save_chat(cid, "left", "deleted", inviter, name); return
@@ -581,23 +569,12 @@ def record_static_chats():
     for cid in static_chat_ids() or []:
         if valid_chat(cid): save_chat(cid, "admitted", "config")
 def consumer_keys():
+    # 进群、出群的事件名只在飞书适配器里定义一份。要不要订阅仍由核心的认群开关决定。
     keys = ["im.message.receive_v1"]
-    if auto_join_active(): keys += [_MEMBER_ADDED, _MEMBER_DELETED]
+    if auto_join_active(): keys += [MEMBER_ADDED, MEMBER_DELETED]
     return keys
 def consume_argv(event_key):
     return CHANNEL.consume_argv(event_key)
-def _event_id(obj):
-    if not isinstance(obj, dict): return ""
-    h = obj.get("header")
-    if isinstance(h, dict) and h.get("event_id"): return str(h["event_id"])
-    if obj.get("event_id"): return str(obj["event_id"])
-    return ""
-_RECALL_TYPES = {"im.message.recalled_v1", "im.message.message_recalled_v1"}
-def _is_recall(obj):
-    if not isinstance(obj, dict): return False
-    if _member_type(obj) in _RECALL_TYPES: return True
-    inner = obj.get("event")
-    return isinstance(inner, dict) and _member_type(inner) in _RECALL_TYPES
 # 这些类型没有可交给模型的正文。直接说明，避免把 file_key、open_id 或别的群号送进提示词。
 _QUIET_TYPES = {
     "audio": "这是一条语音，目前不能听里面的内容。请用文字说明要点。",

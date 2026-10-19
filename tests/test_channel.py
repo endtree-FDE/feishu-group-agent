@@ -169,17 +169,21 @@ import sys
 sys.argv = ["agentbot.py", sys.argv[1], "--dry-run", sys.argv[2]]
 import agentbot
 from channels.base import Cap
+from channels.feishu import MEMBER_ADDED, MEMBER_DELETED
 print("NAME", agentbot.CHANNEL.name)
 print("CARD", int(agentbot.CHANNEL.supports(Cap.CARD_UPDATE)))
 print("CAL", int(agentbot.CHANNEL.supports(Cap.CALENDAR)))
 print("SAME", int(agentbot.TOOLS.channel is agentbot.CHANNEL))
 print("KEY", "channel" in agentbot.CFG)
+print("ONE", int(agentbot.MEMBER_ADDED is MEMBER_ADDED and agentbot.MEMBER_DELETED is MEMBER_DELETED))
+print("GONE", int(any(hasattr(agentbot, n) for n in ("_is_recall", "_member_type", "_member_body", "_event_id", "_RECALL_TYPES", "_MEMBER_ADDED", "_MEMBER_DELETED"))))
 '''
     r = subprocess.run([sys.executable, "-c", src, os.path.join(FW, "agents", "example.json"), empty],
                        cwd=FW, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
     out = (r.stdout or "") + (r.stderr or "")
     check("旧示例配置加载后仍是飞书，且没有 channel 键",
-          r.returncode == 0 and "NAME feishu" in out and "CARD 1" in out and "CAL 1" in out and "SAME 1" in out and "KEY False" in out, out)
+          r.returncode == 0 and "NAME feishu" in out and "CARD 1" in out and "CAL 1" in out and "SAME 1" in out and "KEY False" in out
+          and "ONE 1" in out and "GONE 0" in out, out)
 
 
 def main():
