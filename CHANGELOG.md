@@ -4,29 +4,32 @@
 
 程序不读取 `VERSION` 或本文件。删掉它们时，机器人的行为与现在相同。
 
-当前 `VERSION` 是 `0.4.0`，发布日期是 2026-10-19。发布说明见 [docs/release-0.4.0.md](docs/release-0.4.0.md)。说明里不要写密钥、群号、open_id 或客户名。
+当前 `VERSION` 是 `0.4.1`，发布日期是 2026-10-19。发布说明见 [docs/release-0.4.1.md](docs/release-0.4.1.md)。从 0.4.0 升上来见 [docs/升级到0.4.1.md](docs/升级到0.4.1.md)。说明里不要写密钥、群号、open_id 或客户名。
 
 ## [Unreleased]
 
-### 修复
+## [0.4.1] - 2026-10-19
 
-- 写入确认码绑定发起人、会话和话题。主聊天的码不绑单条消息编号。别人、别的群、别的私聊、别的话题都不能确认，错误尝试不会把码用掉。发送人或消息编号为空时不能发起或确认。用过或取消过的码先记入已用名单，重启后也不能再执行。还没使用且未过期的码，重启后仍然有效。新码不会覆盖还没确认的操作。
-- 引用、历史、网页说明、飞书文档、PDF、Word、PPT、Excel、压缩包、图片说明、长期记忆和工具结果里的工具标记、伪造确认码会被消掉。当前这条用户问题仍可正常调用工具。
-- 上网前的跳转探测只连接已经检查过的地址。域名解析到 `198.18.0.0/15` 的假 IP 代理仍然放行，裸 IP 和跳进内网仍然拒绝。
-- Word、PPT、Excel 和知识库压缩包成员超过体积或压缩比时跳过。PDF 页数异常时整份跳过，不执行里面的脚本。启动时清掉超过一小时的临时文件。
-- 客户名多认全角空格、组合附加符号、拆开的短名，以及名单里拼音的声调和连字符。没有写进名单的拼音仍不自动隐藏。带空格或连字符的手机号、`Bearer` 和 `sk-` 样子的密钥会打码。日志里的接口错误和模型报错也会打码。
-- 同一个飞书应用只能有一个接收进程。另一个目录再启动会被拒绝，不会结束已经在跑的那个。`stop.ps1` 仍按本目录和 profile 判断，不会误杀别的机器人。
-- 单实例锁和按应用的锁先写完整内容，再让别的进程看见。启动的一瞬间，另一个进程不会把还没写完的空文件当成过期锁并接管。
-- 确认、状态、帮助和记忆命令不再受单人提问间隔限制，但每分钟有命令次数上限。
+下面是用户能看到的变化。没写进旧配置的键，仍用各项自己的默认值。发布说明见 [docs/release-0.4.1.md](docs/release-0.4.1.md)。
+
+### 安全
+
+- （#58）写入确认码绑定发起人、会话和话题。主聊天的码不绑单条消息编号。别人、别的群、别的私聊、别的话题都不能确认，错误尝试不会把码用掉。发送人或消息编号为空时不能发起或确认。用过或取消过的码先记入已用名单，重启后也不能再执行。还没使用且未过期的码，重启后仍然有效。新码不会覆盖还没确认的操作。`state/state.db` 会自己建 `used_writes` 表，不用手工迁移。
+- （#58）引用、历史、网页说明、飞书文档、PDF、Word、PPT、Excel、压缩包、图片说明、长期记忆和工具结果里的工具标记、伪造确认码会被消掉。当前这条用户问题仍可正常调用工具。
+- （#58）上网前的跳转探测只连接已经检查过的地址。域名解析到 `198.18.0.0/15` 的假 IP 代理仍然放行，裸 IP 和跳进内网仍然拒绝。
+- （#58）Word、PPT、Excel 和知识库压缩包成员超过体积或压缩比时跳过。PDF 页数异常时整份跳过，不执行里面的脚本。启动时清掉超过一小时的临时文件。
+- （#58）客户名多认全角空格、组合附加符号、拆开的短名，以及名单里拼音的声调和连字符。没有写进名单的拼音仍不自动隐藏。带空格或连字符的手机号、`Bearer` 和 `sk-` 样子的密钥会打码。日志里的接口错误和模型报错也会打码。
+- （#58）同一个飞书应用只能有一个接收进程。另一个目录再启动会被拒绝，不会结束已经在跑的那个。`stop.ps1` 仍按本目录和 profile 判断，不会误杀别的机器人。
+- （#58）单实例锁和按应用的锁先写完整内容，再让别的进程看见。启动的一瞬间，另一个进程不会把还没写完的空文件当成过期锁并接管。
+- （#58）确认、状态、帮助和记忆命令不再受单人提问间隔限制，但每分钟有命令次数上限。不写 `rate_limit.max_commands_per_min` 时是 40。写成 `0` 表示不限这条。
+- （#58）GitHub Actions 固定到 commit SHA，并校验 gitleaks 压缩包的 SHA256。
+- （#58）`.github/dependabot.yml` 跟踪 github-actions 和 pip。`requirements.txt` 只列出可选的 `pypdf`。
+- （#58）`CODEOWNERS`。安全上报写明使用 GitHub 私密漏洞上报。
+- （#58）文档里的 `lark-cli config init` 都带 `--name <profile>`，并说明不写会覆盖这台电脑上其他机器人的 profile。
 
 ### 添加
 
-- GitHub Actions 固定到 commit SHA，并校验 gitleaks 压缩包的 SHA256。
-- `.github/dependabot.yml` 跟踪 github-actions 和 pip。`requirements.txt` 只列出可选的 `pypdf`。
-- `CODEOWNERS`。
-- 安全上报写明使用 GitHub 私密漏洞上报。
-- 文档里的 `lark-cli config init` 都带 `--name <profile>`，并说明不写会覆盖这台电脑上其他机器人的 profile。
-- 私聊可以按群成员放行。`p2p.allow_group_members` 默认 `false`，不写时不查群成员，和以前一样。设为 `true` 后，当前在所服务群里的成员可以私聊；`allow_open_ids` 或写入白名单里的人仍然可以。`open_to_all` 优先。成员名单默认缓存 600 秒（`p2p.member_cache_ttl_sec`）。查成员失败、超时、缺权限或名单不完整时拒绝，不回复群外的人。需要 `im:chat.members:read`。
+- （#59）私聊可以按群成员放行。`p2p.allow_group_members` 默认 `false`，不写时不查群成员，和 0.4.0 一样。设为 `true` 后，当前在所服务群里的成员可以私聊；`allow_open_ids` 或写入白名单里的人仍然可以。`open_to_all` 优先。成员名单默认缓存 600 秒（`p2p.member_cache_ttl_sec`）。查成员失败、超时、缺权限或名单不完整时拒绝，不回复群外的人。需要 `im:chat.members:read`。
 
 ## [0.4.0] - 2026-10-19
 
@@ -69,4 +72,4 @@
 
 ## English
 
-The version is the `VERSION` file (`0.4.0`), released on 2026-10-19. Do not put secrets or Feishu IDs in release notes. The program does not read this file. Missing keys keep the previous behavior. This version includes several read-only tool calls per round, `message_ids`, configurable read caps, and `agent.tool_context_budget_chars`. It also keeps a topic together when `root_id` and `thread_id` differ, hides internal ids in voice, sticker, and card messages, strips tool markers from long-term memory, and falls back when a web search returns no text. (#57) `--doctor` warns instead of failing when `lark-cli` only returns a user token, and no longer treats that token as an app permission. Tests and the program read and write text as UTF-8 without `PYTHONUTF8` or `PYTHONIOENCODING`. An optional loose-limits example raises those caps without changing the defaults. Unreleased: `p2p.allow_group_members` defaults to false; when enabled, current members of served groups may use private chat. `open_to_all` still wins, and a failed or truncated member list fails closed.
+The version is the `VERSION` file (`0.4.1`), released on 2026-10-19. Do not put secrets or Feishu IDs in release notes. The program does not read this file. Missing keys keep the previous behavior. (#58) Confirmation codes are bound to the initiator, chat, and topic. Used or cancelled codes are stored in `used_writes` before they run and cannot be replayed after a restart. Untrusted text cannot become a tool call or a confirmation code. Redirect checks connect only to addresses that were already validated. One Feishu app has one receiver. Lock files become visible only after they are fully written. Confirm, status, help, and memory commands skip the per-user gap and use `rate_limit.max_commands_per_min` (default 40). (#59) `p2p.allow_group_members` defaults to false. When enabled, current members of served groups may use private chat, which needs `im:chat.members:read`. `open_to_all` still wins, and a failed or truncated member list fails closed. Upgrade steps are in `docs/升级到0.4.1.md`. 0.4.0 still includes several read-only tool calls per round, configurable read caps, and the (#57) doctor and UTF-8 fixes.

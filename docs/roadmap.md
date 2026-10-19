@@ -112,7 +112,7 @@
 ### 12. CHANGELOG、版本号和 Release（本轮草稿）
 
 - **目标：** 每次对用户可见的改动有一条记录，打标签就能下载。
-- **现状：** 根目录 `VERSION` 是 `0.4.0`，`CHANGELOG.md` 有 `[0.4.0] - 2026-10-19`。程序不读这两个文件。`acp_client.py` 里给协议用的 `clientInfo` 版本字符串仍不是对外发布号。
+- **现状：** 根目录 `VERSION` 是 `0.4.1`，`CHANGELOG.md` 有 `[0.4.1] - 2026-10-19`。GitHub Release 标签仍是已发布的 `v0.4.0`，`v0.4.1` 还没打。程序不读这两个文件。`acp_client.py` 里给协议用的 `clientInfo` 版本字符串仍不是对外发布号。
 - **参考：** [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)、[语义化版本](https://semver.org/lang/zh-CN/)、[GitHub Releases](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)。
 - **验收：** 仓库根有 `CHANGELOG.md`，至少有一个未发布或已发布的版本节。有一处单一版本号（例如 `VERSION` 文件），和 changelog、Release 标签一致。缺这个文件时，程序行为与现在相同。Release 说明不包含密钥和真实编号。
 

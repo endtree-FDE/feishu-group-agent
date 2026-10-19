@@ -156,6 +156,8 @@ A screenshot placeholder, with rules for hiding ids, is in [docs/demo/README.md]
 | `tests/run_tests.py` | 离线测试。通过时最后一行打印条数 |
 | `docs/快速开始.md` | 新人 15 分钟跑起来 |
 | `docs/排障.md` | 常见问题 |
+| `docs/release-0.4.1.md` | v0.4.1 发布说明（2026-10-19） |
+| `docs/升级到0.4.1.md` | 从 0.4.0 升到 0.4.1：可选打开按群成员私聊，确认码表自动建 |
 | `docs/release-0.4.0.md` | v0.4.0 发布说明（2026-10-19） |
 | `docs/宽松配置示例.md` | 可选：把只读轮数、附件数、PDF 页数、文档字数和各项读取上限调大。默认值不变 |
 | `docs/` | 给人看的说明和架构图 |
