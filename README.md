@@ -118,9 +118,11 @@ A screenshot placeholder, with rules for hiding ids, is in [docs/demo/README.md]
 
 `REPLACE_` 开头的值必须换成你自己的，留着不能启动。
 
+只读轮数、附件数、PDF 页数、文档字数和各项读取上限的默认值不改。额度充足时可以抄 [docs/宽松配置示例.md](docs/宽松配置示例.md)，那一段不进 `agents/example.json`。
+
 ## 安全说明
 
-写操作要同时满足三道锁：人在白名单里、资源在白名单里、动作属于允许的四类（新建文档、文末追加、建日程、加一条表格记录）。发起人还要在原来的会话里回复确认码。没有删除、没有覆盖全文、没有改权限。
+写操作要同时满足三道锁：人在白名单里、资源在白名单里、动作属于允许的几类（新建文档、文末追加、建日程、改日程、删日程、加一条表格记录）。发起人还要在原来的会话里回复确认码。不删消息、文档和表格记录。删日程不通知参会人。没有覆盖全文、没有改权限。
 
 密钥放在你自己的电脑上：飞书 App Secret 只在 `lark-cli config init --app-secret-stdin` 时输入；模型密钥只进环境变量。
 
@@ -154,7 +156,8 @@ A screenshot placeholder, with rules for hiding ids, is in [docs/demo/README.md]
 | `tests/run_tests.py` | 离线测试。通过时最后一行打印条数 |
 | `docs/快速开始.md` | 新人 15 分钟跑起来 |
 | `docs/排障.md` | 常见问题 |
-| `docs/release-0.4.0.md` | v0.4.0 发布说明草稿，还没有 GitHub Release |
+| `docs/release-0.4.0.md` | v0.4.0 发布说明。日期待定，还没有标签，也还没有 GitHub Release |
+| `docs/宽松配置示例.md` | 可选：把只读轮数、附件数、PDF 页数、文档字数和各项读取上限调大。默认值不变 |
 | `docs/` | 给人看的说明和架构图 |
 | `SKILL.md` | 给帮忙操作的 AI 助手看的步骤 |
 
