@@ -149,6 +149,16 @@
         }
       }
     },
+    "commands": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "status": {
+          "type": "boolean",
+          "description": "不写或 true 时，/状态、/status 或单独一个「状态」不调用模型。false 时这几个字仍交给模型。"
+        }
+      }
+    },
     "observability": {
       "type": "object",
       "additionalProperties": true,
@@ -223,7 +233,8 @@
           "type": "boolean"
         },
         "trim_note": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "不写或 true：超字数预算丢掉旧对话时，在提示词里注明省略了几条。false 则静默丢掉。"
         }
       }
     },
@@ -237,7 +248,23 @@
         "dir": {
           "type": "string"
         },
-        "only": {},
+        "only": {
+          "description": "不写、空数组或 false：合法技能全部选用。字符串或字符串数组才收窄目录、预放和 skill_read。",
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
         "index_budget_chars": {
           "type": "integer",
           "minimum": 0

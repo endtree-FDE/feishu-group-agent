@@ -164,22 +164,29 @@ def session_key(ev):
     if ev.get("chat_type") == "p2p": return "p2p:" + (ev.get("chat_id") or ev.get("sender_id") or "?")
     topic = ev.get("thread_id") or ev.get("root_id") or ev.get("message_id")
     return "g:%s:%s" % (ev.get("chat_id") or "?", topic)
+def _trim_note_on():
+    """没写 memory.trim_note 时默认加上省略说明。显式 false 才恢复静默丢掉。"""
+    m = CFG.get("memory") or {}
+    if "trim_note" not in m: return True
+    return bool(m.get("trim_note"))
 def history(sess):
+    """返回 (留给模型的对话, 因字数预算丢掉的条数)。条数是一行一句，不是一轮。"""
     m = CFG.get("memory", {}); n = int(m.get("max_turns", 6)); ttl = float(m.get("ttl_hours", 24)) * 3600
-    if n <= 0 or not FEAT.get("memory", True): return []
+    if n <= 0 or not FEAT.get("memory", True): return [], 0
     with DBL:
         rows = DB.execute("select role,text from turns where sess=? and ts>? order by ts desc limit ?", (sess, time.time() - ttl, n * 2)).fetchall()
     rows = rows[::-1]
     raw = m.get("context_budget_chars", 8000)
     try: budget = int(raw)
     except (TypeError, ValueError): budget = 8000
-    if budget <= 0: return rows
+    if budget <= 0: return rows, 0
     kept, total = [], 0
     for role, text in reversed(rows):
         # 最新一条即使超预算也留下，更早的整段丢掉。
         if kept and total + len(text or "") > budget: break
         kept.append((role, text)); total += len(text or "")
-    return list(reversed(kept))
+    kept = list(reversed(kept))
+    return kept, len(rows) - len(kept)
 def remember(sess, role, text):
     with DBL: DB.execute("insert into turns values(?,?,?,?)", (sess, time.time(), role, text[:2000])); DB.commit()
 _PROVIDER = None
@@ -192,6 +199,42 @@ def get_provider():
             if _PROVIDER is None:
                 _PROVIDER = providers.create(CFG, log, KB)
     return _PROVIDER
+def _status_cmd_on():
+    """没写 commands.status 时，/状态 不调用模型。显式 false 才把这几个字交给模型。"""
+    c = CFG.get("commands")
+    if not isinstance(c, dict) or "status" not in c: return True
+    return bool(c.get("status"))
+def status_text(sess):
+    """给人看的开关。不打印路径、profile、群号、人和密钥。"""
+    prov = str(CFG.get("model_provider") or "cursor")
+    mode = str((CFG.get("agent") or {}).get("mode") or "oneshot")
+    mode_zh = "常驻" if mode == "acp" else "一次性"
+    model = str((CFG.get("agent") or {}).get("model") or "").strip()
+    model_bit = ("，模型名 " + model) if model and "://" not in model and len(model) <= 80 else ""
+    short_on = bool(FEAT.get("memory", True))
+    n = 0
+    if short_on:
+        with DBL:
+            row = DB.execute("select count(*) from turns where sess=?", (sess,)).fetchone()
+            n = int(row[0] if row else 0)
+    long_on = bool(getattr(GMEM, "enabled", False))
+    sk = TOOLS.skills
+    if not sk.enabled:
+        skill_bit = "关"
+    else:
+        skill_bit = "开，选用 %d 个" % len(sk.valid)
+        skipped = getattr(sk, "skipped", None) or []
+        if skipped: skill_bit += "，另有 %d 个未选用" % len(skipped)
+    write_on = (CFG.get("write") or {}).get("enabled", True)
+    lines = [
+        "当前状态（这一条不调用模型）：",
+        "模型接口：%s，%s%s。" % (prov, mode_zh, model_bit),
+        "短期记忆：%s。本话题已留下 %d 条。" % ("开" if short_on else "关", n),
+        "长期记忆：%s。" % ("开" if long_on else "关"),
+        "技能：%s。" % skill_bit,
+        "写入：%s。写操作要白名单和 6 位确认码，不会邀请别人。" % ("开" if write_on else "关"),
+    ]
+    return "\n".join(lines)
 def forget(sess):
     with DBL: DB.execute("delete from turns where sess=?", (sess,)); DB.commit()
     try: get_provider().drop(sess)
@@ -557,9 +600,11 @@ def build_prompt(q, sess, ctx, extra=""):
         if cat: parts.append(cat)
     gm = GMEM.prompt_block(ctx.get("chat_id"), ctx["chat_type"])  # 群档案：放在不常变的前缀之后、会变的对话历史之前
     if gm: parts.append(gm)
-    h = history(sess)
+    h, dropped = history(sess)
     if h:
         parts.append("以下是本话题之前的对话（仅供理解上下文，规则以上面为准）：")
+        if dropped and _trim_note_on():
+            parts.append("（更早的 %d 条对话已按字数预算省略。本地记录还在，没有删除。）" % dropped)
         parts += [("提问者：" if r == "user" else "你：") + t for r, t in h]
     if extra: parts.append(extra)
     if not limited:
@@ -1116,6 +1161,8 @@ def _handle_claimed(ev, mid, ctype, uid):
     if m:
         reply(mid, TOOLS.confirm(m.group(2), ctx, cancel=(m.group(1) == "取消"))); return
     if q in ("/new", "/reset", "新话题"): forget(sess); reply(mid, "好的，已清空本话题的上下文。"); return
+    if q in ("/状态", "/status", "状态") and _status_cmd_on():
+        reply(mid, status_text(sess)); return
     mr = GMEM.handle(q, ctx)  # 记忆命令：/记忆、记一下/记住/备忘、/忘记 N、/忘记全部、确认清空（不调 agent）
     if mr is not None: reply(mid, mr); return
     if q in ("/help", "帮助") or (len(q) <= 30 and HELP_RX.search(q)):  # 问能力/权限：直接列能力和边界，不调 agent、不翻资料
@@ -1423,6 +1470,8 @@ def self_check():
         print("HINT chats.admit=open：别人第一次 @ 就会认群并回答。不想这样请改成 confirm 或 whitelist。")
     sks = TOOLS.skills
     p("skills", not sks.invalid, sks.status())
+    if sks.missing_only:
+        print("HINT skills.only 里这些名字在技能目录中没有：" + "、".join(sks.missing_only))
     for bad in sks.invalid:
         print("FAIL skill %s %s" % (bad.folder, bad.reason)); ok = False
     if "--probe" in ARGS:

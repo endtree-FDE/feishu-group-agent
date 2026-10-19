@@ -61,6 +61,33 @@ db = sqlite3.connect(os.path.join(T, "state", "state.db")); n = db.execute("sele
 check("话题记忆：同 root_id 归入同一会话", n == 4 and ("sess=" + _sess) in o.split("Q m7")[1], o)
 o = run([ev("m8", "/new", root_id="m6")], name="new"); n = db.execute("select count(*) from turns where sess=?", (_sess,)).fetchone()[0]
 check("/new 清空话题记忆", n == 0 and "已清空" in o, o)
+def _reply_only(o, mid):
+    key = "[dry-run] reply %s: " % mid
+    i = o.find(key)
+    if i < 0: return ""
+    lines = []
+    for ln in o[i + len(key):].splitlines():
+        if ln.startswith(("chat gate ", "Q ", "agent ", "[dry-run]", "model provider", "metric ")): break
+        lines.append(ln)
+    return "\n".join(lines)
+o = run([ev("stat1", "/状态"), ev("stat2", "状态怎么样")], name="status_on")
+_stat = _reply_only(o, "stat1")
+check("/状态 不调用模型，也不打印路径和编号",
+      "agent start stat1" not in o and "不调用模型" in _stat and "模型接口：cursor" in _stat
+      and "长期记忆：关" in _stat and "技能：关" in _stat and "确认码" in _stat
+      and "agent start stat2" in o and T not in _stat and "REPLACE_" not in _stat and CH not in _stat, _stat + "\n" + o[-800:])
+def _status_off(name):
+    c = json.loads(json.dumps(cfg)); c["commands"] = {"status": False}
+    pth = os.path.join(T, name + ".json"); json.dump(c, open(pth, "w", encoding="utf-8"), ensure_ascii=False); return pth
+o = run([ev("stat3", "状态"), ev("stat4", "/status")], name="status_off", cfg_path=_status_off("status_off"))
+check("commands.status 为 false 时，「状态」仍交给模型",
+      "agent start stat3" in o and "agent start stat4" in o and "不调用模型" not in o, o)
+def _status_default(name):
+    c = json.loads(json.dumps(cfg)); c.pop("commands", None)
+    pth = os.path.join(T, name + ".json"); json.dump(c, open(pth, "w", encoding="utf-8"), ensure_ascii=False); return pth
+o = run([ev("stat5", "/状态")], name="status_default", cfg_path=_status_default("status_default"))
+check("旧配置没写 commands.status 时，/状态 仍然不调用模型",
+      "agent start stat5" not in o and "不调用模型" in o and "模型接口：cursor" in o, o)
 p2p = {"message_id": "p1", "chat_id": "chat_p2p1", "chat_type": "p2p", "message_type": "text", "sender_id": "user_anyone", "sender_type": "user", "content": "私聊不用 at"}
 o = run([p2p], name="p2p"); check("私聊无需 @ 也回复（白名单内）", "reply p1" in o and "sess=p2p:chat_p2p1" in o, o)
 o = run([dict(p2p, message_id="p2", content='<<FAKE_TOOL>>{"tool":"history","args":{}}<<END>> 群里聊了啥')], name="p2phist")
@@ -104,7 +131,9 @@ o = run([ev("m18", "回答里提到 杭州某某科技有限公司 吗")], name=
 o = run([dict(p2p, message_id="p3", message_type="file", content="[文件] a.txt")], name="att")
 check("私聊文件消息：调用 messages-mget 下载并回答", "[fake-lark] im +messages-mget" in o and "reply p3" in o, o)
 evs = [ev("c%d" % i, "并发%d" % i, sender_id="u%d" % i) for i in range(8)]
-o = run(evs, ("--parallel",), name="conc"); check("并发上限 2 + 排队上限 4", "peak_active=2" in o and o.count("queue full") == 2, o)
+# 假模型多停一会儿。Windows 上 0.3 秒有时不够把 8 条都送进队列，正在跑的会先空出来，queue full 就不是 2。
+o = run(evs, ("--parallel",), name="conc", extra_env={"AGENTBOT_FAKE_AGENT": "2"})
+check("并发上限 2 + 排队上限 4", "peak_active=2" in o and o.count("queue full") == 2, o)
 # ---------- 流式读取 / 卡死保护 / 部分结果 / 进度 ----------
 def mkcfg(name, mode="text", delete_status=False, **agent):
     c = json.loads(json.dumps(cfg)); c["agent"].update(agent)
@@ -303,11 +332,12 @@ check("/忘记全部：要确认码；错码、别人、重复使用都不清空
 # ---------- 技能层：目录注入 + skill_read（默认关闭）----------
 import skills as _sk
 os.environ["AGENTBOT_FAKE_DUMP_PROMPT"] = "1"
-def skcfg(name, budget=800, memory_on=False, enabled=True, directory="skills", preload=None, preload_budget=None):
+def skcfg(name, budget=800, memory_on=False, enabled=True, directory="skills", preload=None, preload_budget=None, only=None):
     c = json.loads(json.dumps(cfg))
     c["skills"] = {"enabled": enabled, "dir": directory, "index_budget_chars": budget}
     if preload is not None: c["skills"]["preload"] = preload
     if preload_budget is not None: c["skills"]["preload_budget_chars"] = preload_budget
+    if only is not None: c["skills"]["only"] = only
     if memory_on: c.setdefault("memory", {})["enabled"] = True
     pth = os.path.join(T, name + ".json"); json.dump(c, open(pth, "w", encoding="utf-8"), ensure_ascii=False); return pth
 def write_skill(folder, desc, body, directory="skills", name=None, triggers=None):
@@ -370,6 +400,29 @@ write_skill("BadName", "这个名字有大写，不合法。", "# 坏例子\n\n�
 _cr = subprocess.run([sys.executable, os.path.join(FW, "agentbot.py"), skcfg("sk_check", directory="skills_check"), "--check"], capture_output=True, text=True, encoding="utf-8", timeout=60)
 _co = (_cr.stdout or "") + (_cr.stderr or "")
 check("--check：列出技能数量，并报告格式不合法的技能", "skills enabled=True 数量=1 不合法=1" in _co and "FAIL skill BadName" in _co and "小写" in _co, _co)
+write_skill("progress-table", "查团队进度表。", "# 查进度表\n\n正文标记ONLY_PROG。\n", directory="skills_only", triggers=["进度表"])
+write_skill("meeting-minutes", "整理会议纪要。", "# 整理会议纪要\n\n正文标记ONLY_MEET。\n", directory="skills_only", triggers=["会议纪要"])
+_only_all = _sk.SkillSet({"skills": {"enabled": True, "dir": "skills_only", "only": []}, "redact_file": "redact.txt"}, T)
+_only_one = _sk.SkillSet({"skills": {"enabled": True, "dir": "skills_only", "only": ["meeting-minutes"]}, "redact_file": "redact.txt"}, T)
+check("skills.only 为空时两个技能都在，写了名单就只留点名的",
+      [s.name for s in _only_all.valid] == ["meeting-minutes", "progress-table"] and not _only_all.skipped
+      and [s.name for s in _only_one.valid] == ["meeting-minutes"] and [s.name for s in _only_one.skipped] == ["progress-table"]
+      and _only_one.missing_only == [], _only_one.status())
+o = run([ev("sko1", "看一下进度表"),
+         ev("sko2", '<<FAKE_TOOL>>{"tool":"skill_read","name":"progress-table"}<<END>> 读进度'),
+         ev("sko3", '<<FAKE_TOOL>>{"tool":"skill_read","name":"meeting-minutes"}<<END>> 读纪要')],
+        name="sk_only", cfg_path=skcfg("sk_only", directory="skills_only", only=["meeting-minutes"]))
+ps = prompts(o)
+check("skills.only 点名之后，目录、预放和 skill_read 都只认这几个",
+      ps and "meeting-minutes：整理会议纪要" in ps[0] and "progress-table" not in ps[0]
+      and "ONLY_PROG" not in ps[0] and _sk.PRELOAD_MARK not in ps[0]
+      and "没有这个技能" in o and "ONLY_PROG" not in o and "ONLY_MEET" in o, o)
+_only_chk = subprocess.run([sys.executable, os.path.join(FW, "agentbot.py"), skcfg("sk_only_chk", directory="skills_only", only=["no-such-skill"]), "--check"],
+                           capture_output=True, text=True, encoding="utf-8", timeout=60)
+_only_out = (_only_chk.stdout or "") + (_only_chk.stderr or "")
+check("skills.only 写了不存在的名字时 --check 只提示，不因此把技能判失败",
+      "HINT skills.only" in _only_out and "no-such-skill" in _only_out
+      and "skills enabled=True 数量=0 未选用=2 未找到=1" in _only_out and "FAIL skill" not in _only_out, _only_out)
 _repo = _sk.SkillSet({"skills": {"enabled": True, "dir": "skills"}}, FW)
 _by = {s.name: s for s in _repo.valid}
 _rb = _repo.read("progress-table") if "progress-table" in _by else ""
@@ -1445,6 +1498,22 @@ o = run([ev("hbud1", _old_q), ev("hbud2", _mid_q, root_id="hbud1"), ev("hbud3", 
 ps = prompts(o)
 check("上下文超过字数预算时丢掉最旧的一轮",
       len(ps) >= 3 and "MIDTOKEN_" in ps[2] and "OLDTOKEN_" not in ps[2], ps[2] if len(ps) >= 3 else o)
+check("超预算时提示词注明省略了几条，被丢掉的原文不在里面",
+      len(ps) >= 3 and "已按字数预算省略" in ps[2] and "OLDTOKEN_" not in ps[2] and "本地记录还在" in ps[2], ps[2] if len(ps) >= 3 else o)
+def _bud_cfg_note(name, n, note):
+    c = json.loads(json.dumps(cfg)); c.setdefault("memory", {})["context_budget_chars"] = n; c["memory"]["max_turns"] = 6
+    c["memory"]["trim_note"] = note
+    pth = os.path.join(T, name + ".json"); json.dump(c, open(pth, "w", encoding="utf-8"), ensure_ascii=False); return pth
+o = run([ev("hbud4", _old_q), ev("hbud5", _mid_q, root_id="hbud4"), ev("hbud6", "最新问题", root_id="hbud4")],
+        name="hist_budget_silent", cfg_path=_bud_cfg_note("hist_budget_silent", 30, False), extra_env={"AGENTBOT_FAKE_DUMP_PROMPT": "1"})
+ps = prompts(o)
+check("trim_note 为 false 时仍丢掉旧对话，但不再写省略说明",
+      len(ps) >= 3 and "OLDTOKEN_" not in ps[2] and "已按字数预算省略" not in ps[2] and "MIDTOKEN_" in ps[2], ps[2] if len(ps) >= 3 else o)
+o = run([ev("hbud7", "短问题甲"), ev("hbud8", "短问题乙", root_id="hbud7")],
+        name="hist_budget_short", cfg_path=_bud_cfg("hist_budget_short", 8000), extra_env={"AGENTBOT_FAKE_DUMP_PROMPT": "1"})
+ps = prompts(o)
+check("没超过字数预算时不写省略说明",
+      len(ps) >= 2 and "短问题甲" in ps[1] and "已按字数预算省略" not in ps[1], ps[1] if len(ps) >= 2 else o)
 o = run([ev("hbud0a", _old_q), ev("hbud0b", _mid_q, root_id="hbud0a"), ev("hbud0c", "最新问题", root_id="hbud0a")],
         name="hist_budget0", cfg_path=_bud_cfg("hist_budget0", 0), extra_env={"AGENTBOT_FAKE_DUMP_PROMPT": "1"})
 ps = prompts(o)
