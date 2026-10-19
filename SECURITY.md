@@ -42,7 +42,7 @@ lark-cli config init --app-id 你的应用ID --app-secret-stdin --brand feishu
 2. 目标在配置点名的文件夹、文档、日历或表里。
 3. 动作只限于新建文档、在白名单文档末尾追加、建日程、加一条表格记录。
 
-程序不删除消息、文档、日程或表格记录，不覆盖已有正文，不修改权限，不邀请他人，也不主动发消息。
+程序不删除消息、文档或表格记录，不覆盖已有正文，不修改权限，不邀请他人，也不主动发消息。日程可以改、可以删，但必须是白名单发起人用确认码确认，而且不会通知或增删参会人。
 
 回答、进度、记忆和知识库同步会打码客户名、手机号、证件号、邮箱、密钥样子的字符串和电脑路径。话题红线默认是空的，由部署者自己写。
 
@@ -54,4 +54,4 @@ lark-cli config init --app-id 你的应用ID --app-secret-stdin --brand feishu
 
 ## English
 
-The version is the `VERSION` file. There is no GitHub Release yet, so security fixes target `main`. After a release exists, they target the latest release and `main`. Report vulnerabilities through [GitHub private security advisories](https://github.com/endtree-FDE/feishu-group-agent/security/advisories/new). Do not include secrets, Feishu IDs, or customer names in public issues. The bot runs on the operator's machine; this repository must not contain App Secrets or filled-in configuration.
+The version is the `VERSION` file. There is no GitHub Release yet, so security fixes target `main`. After a release exists, they target the latest release and `main`. Report vulnerabilities through [GitHub private security advisories](https://github.com/endtree-FDE/feishu-group-agent/security/advisories/new). Do not include secrets, Feishu IDs, or customer names in public issues. The bot runs on the operator's machine; this repository must not contain App Secrets or filled-in configuration. It does not delete messages, documents, or Bitable records. Changing or deleting a calendar event still needs an allow-listed person and a confirmation code, and does not notify attendees.
