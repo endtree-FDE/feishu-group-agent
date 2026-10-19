@@ -3193,5 +3193,9 @@ _acp._open_pinned_hook = None
 _acp._lookup_host = _old_lookup2
 _acp.configure_web({})
 
+print("\n-- knowledge --", flush=True)
+_kb = subprocess.run([sys.executable, os.path.join(FW, "tests", "test_knowledge.py")], cwd=FW)
+results.append(("分群知识库", _kb.returncode == 0))
+
 print("\n%d/%d passed" % (sum(r for _, r in results), len(results))); shutil.rmtree(T, ignore_errors=True)
 sys.exit(0 if all(r for _, r in results) else 1)

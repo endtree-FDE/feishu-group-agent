@@ -467,6 +467,56 @@ python checks/check_config.py agents/example.json
 
 升级旧配置：不用改。没写 `kb_index` 和 `kb_read` 时，空知识库的提示词和以前一样；放了文件之后才会多出目录，并可以按路径读取。读出来的客户名会打码。`../`、绝对路径和跳出目录的链接读不到。未列入私聊名单的人看不到目录，也不能读。
 
+## 分群知识库检索 knowledge
+
+默认关。不写 `knowledge`，或 `enabled` 为 `false` 时，不建索引、不检索，提示词里也不会出现 `kb_search`。`/状态` 不多一行。已经在用的 `kb/` 目录、`kb_read` 和 `kb_sync` 都不变。
+
+打开之后，每个群、每次私聊各有一份本地索引，存在本机 `state/kb/<会话>/`，不要提交。检索只能查当前这一份。甲群的文件和链接不会进乙群。
+
+| 键 | 默认 | 填什么 |
+|---|---|---|
+| `enabled` | `false` | `true` 才收录、才响应 `/kb`。 |
+| `auto_retrieve` | `false` | `true` 时，普通问题会先附上最多几条片段。命令不会。 |
+| `local` | `true` | 收录本机器人 `kb/` 里的文件。这是机器人自己的资料，每个打开检索的会话都会收一份。设为 `false` 就只收下面几项。 |
+| `group_files` | `false` | `true` 才收本群里发过的文件。私聊没有这一项。 |
+| `group_links` | `false` | `true` 才收本群消息里的飞书云文档、知识库、多维表格链接。别的网址跳过，不会去访问。 |
+| `docs` | `[]` | 云文档链接或 token。`REPLACE_` 开头的会丢掉。 |
+| `wiki` | `[]` | 知识库链接或节点 token。 |
+| `bases` | `[]` | 多维表格。可以写 `{"base_token":"…","table_id":"…","title":"任务表"}`，或 `base_token/table_id`。链接里要能看出 `table=`。 |
+| `refresh_min` | `0` | `0` 不定时。写了分钟数就按这个间隔补收录，小于 5 按 5，避免打太勤。一个周期只更新一个会话。 |
+| `chunk_chars` | `480` | 每段大约多少字。 |
+| `chunk_overlap` | `80` | 相邻段重叠多少字。 |
+| `top_k` | `5` | 一次最多回几段。 |
+| `max_chars` | `4000` | 检索结果最多多少字，并且不会超过 `agent.tool_context_budget_chars`。 |
+| `embeddings.enabled` | `false` | `true` 才请求向量。失败就只用关键词，不中断回答。 |
+| `embeddings.base_url` | 空 | OpenAI 兼容地址，例如 `https://api.example.com/v1`。不要在地址里写密钥。本机可以用 `http://127.0.0.1:端口/v1`。 |
+| `embeddings.api_key_env` | 空 | 环境变量的名字，不是密钥本身。 |
+| `embeddings.model` | 空 | 向量模型名。空着就不会去请求。 |
+| `embeddings.timeout_sec` | `20` | 请求最多等几秒。 |
+
+群里的命令（要先打开 `enabled`，否则这几个字仍交给模型）：
+
+| 命令 | 谁可以 | 做什么 |
+|---|---|---|
+| `/kb`、`/kb status`、`/kb 状态` | 能叫到机器人的人 | 看本会话收录了几份、上次什么时候更新。不调用模型。 |
+| `/kb refresh`、`/kb 刷新` | 只有 `write.allowed_users` | 按上面的来源更新这一份索引。不调用模型。 |
+
+模型侧的工具是 `kb_search`，参数 `{"query":"关键词"}`。它不能指定别的群。
+
+飞书权限都是只读，只有打开并且用到对应来源时，`--doctor` 才会多要求这些：
+
+| 来源 | 权限 |
+|---|---|
+| 只收本地 `kb/` | 不需要新的飞书权限 |
+| 群文件 | `im:message:readonly`、`im:message.group_msg`、`im:resource` |
+| 云文档 | `docx:document:readonly` |
+| 知识库 | `wiki:node:read`（或 `wiki:wiki:readonly`、`wiki:node:retrieve`） |
+| 多维表格 | `base:record:read` |
+
+文档没分享给应用时，这一份会记失败，已经收过的内容先留着。图片没有单独的文字识别，不进索引。PDF、Word、PPT、Excel、CSV、Markdown、文本和 zip 用原来的读取和上限。细节见 [docs/知识库.md](docs/知识库.md)。
+
+`tools.docs_read.allow_tokens` 如果写了非空名单，知识库也只收名单里的云文档和知识库，不会因为开了检索就读得更宽。
+
 ## 知识库同步 kb_sync
 
 `docs_tokens`：要从飞书拉进知识库的文档编号列表。空列表表示不拉。同步只进待审区，你确认后才替换正式知识库。见 `docs/新建智能体.md` 最后一节。

@@ -81,6 +81,11 @@ def required_scopes(cfg):
             need.append("calendar:calendar.event:read")
         if digest_mod.settings(cfg).get("include_tasks") and digest_mod.task_table(cfg):
             need.append("base:record:read")
+    kcfg = cfg.get("knowledge") if isinstance(cfg.get("knowledge"), dict) else {}
+    if kcfg.get("enabled"):
+        import knowledge as knowledge_mod
+        for item in knowledge_mod.scopes_for(cfg):
+            need.append(item)
     out = []
     for item in need:
         if item not in out:

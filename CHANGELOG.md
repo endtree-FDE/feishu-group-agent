@@ -15,8 +15,13 @@
 - 主人可以在私聊发 `/report` 再看一份，不占每周名额。群里发这条只回一句已私聊，明细不进群。没打开时，`/report` 仍交给模型。
 - `python agentbot.py <配置> --report [--week 2026-W42] [--out 文件.md|文件.csv]` 只打印或导出，不发送。`enabled` 为 false 时也能用。
 - 读文件的审计和用量只记扩展名，不记原文件名。脱敏命中只记次数。`--dry-run`、测试替身和停机补答会标成演练或补答，周报不把它们算进真实用量。
+- 分群知识库检索，默认关。没写 `knowledge` 或 `enabled` 为 `false` 时，不收录、不检索，提示词、工具和 `/状态` 与现在一样。打开后，每个群或私聊一份本地 SQLite 索引：本地 `kb/`、可选的群文件，以及配置或群里出现的飞书云文档、知识库和多维表格。中文用字双字进 FTS5。配了 OpenAI 兼容的向量地址才做混合检索，否则只用关键词。模型用 `kb_search` 查，也可以打开 `auto_retrieve` 自动附上片段。回答按标题、章节或页码引用，飞书文档带链接。白名单成员发「/kb refresh」更新；「/kb」或「/kb status」查看。`refresh_min` 大于 0 时按间隔补一次，一个周期只更新一个会话。说明见 [docs/知识库.md](docs/知识库.md)。
 
 旧配置不用改。说明见 [docs/用量周报.md](docs/用量周报.md)。
+
+### 安全
+
+- 知识库按会话分开，检索不能指定别的群。收录前和送出前都打码，并消掉工具标记和伪造确认码。资料里的网址不会被拿去访问，只把飞书文档、知识库、多维表格的编号交给原来的只读命令。压缩包、PDF 页数和单文件大小仍用附件那一套上限。向量地址只来自配置，密钥只读环境变量。需要的飞书权限都是只读，没打开这项时 `--doctor` 不多要权限。
 
 ## [0.5.0] - 2026-10-19
 
@@ -95,6 +100,8 @@
 - 公开前扫描只报告打码结果，不改写 Git 历史。
 
 ## English
+
+Unreleased: optional per-chat knowledge search. Omitted or `knowledge.enabled: false` keeps the previous prompt, tools, and commands. See `docs/知识库.md`.
 
 The version is the `VERSION` file (`0.5.0`), released on 2026-10-19. Do not put secrets or Feishu IDs in release notes. The program does not read this file. Missing keys keep the previous behavior. 0.5.0 adds six creative-workflow skills, a channel adapter (Feishu is the first implementation; WeCom is an experimental skeleton and does not connect), optional disconnect alerts, and an optional morning digest. `skills.enabled`, `alerts.enabled`, and `digest.enabled` stay false when omitted. An empty `skills.only` still means every valid skill once skills are turned on. Writes still need the allow-list and a confirmation code. Alert DMs and digest posts go through the channel `push_text` method. On Feishu that is `im +messages-send` and does not start the event consumer. The digest posts at most once per local day per configured chat and never mentions everyone. Upgrade and rollback steps are in `docs/升级到0.5.0.md`. Rolling back to v0.4.1 (`deb498f`) also drops the channel adapter and the creative skills.
 

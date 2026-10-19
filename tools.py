@@ -42,7 +42,7 @@ SCOPE_HINT = {
     "calendar_update": "calendar:calendar.event:update", "calendar_delete": "calendar:calendar.event:delete",
     "base_create": "base:record:create", "merge_forward": "im:message:readonly",
 }
-READ_TOOLS = {"history", "docs_read", "docs_search", "calendar_read", "base_read", "message_attachment", "kb_read"}
+READ_TOOLS = {"history", "docs_read", "docs_search", "calendar_read", "base_read", "message_attachment", "kb_read", "kb_search"}
 _KB_EXT = {".md", ".txt", ".markdown"}
 WRITE_TOOLS = {"docs_create", "docs_append", "calendar_create", "calendar_create_batch", "calendar_update", "calendar_delete", "base_create"}
 _CAL_FOLLOW = {"calendar_create_batch", "calendar_update", "calendar_delete"}
@@ -187,6 +187,10 @@ class Tools:
             if not isinstance(spec, dict) or "enabled" not in spec:
                 return self.enabled("attachment")
             return bool(spec.get("enabled"))
+        # 分群检索默认关。只有 knowledge.enabled 才出现，不看 tools 里有没有这一项。
+        if name == "kb_search":
+            import knowledge
+            return knowledge.enabled(self.cfg)
         # 旧配置没有 kb_read 时默认可以读知识库。写成 enabled false 才关掉。
         if name == "kb_read" and name not in self.t: return True
         spec = self.t.get(name)
@@ -320,6 +324,20 @@ class Tools:
         """只读技能正文。名字必须在启动时扫到的目录里，不拼接用户给的路径。"""
         try: return self.skills.read((a or {}).get("name"))
         except skills.SkillError as e: raise ToolError(str(e))
+
+    def _kb_search(self, a, ctx):
+        """只查当前会话自己的索引。参数里的群号一律忽略。"""
+        import knowledge
+        if not knowledge.enabled(self.cfg):
+            raise ToolError("未知工具")
+        query = str((a or {}).get("query") or (a or {}).get("keyword") or "").strip()
+        if not query:
+            raise ToolError("没有给出要检索的内容")
+        chat = str((ctx or {}).get("chat_id") or "")
+        text = knowledge.search_text(self.base, self.cfg, chat, query, self.names, knowledge.tool_budget(self.cfg))
+        if not text:
+            return "本会话的知识库里没有查到相关内容。不要编造。"
+        return text
 
     def _kb_read(self, a, ctx):
         """只读知识库里的 md/txt。路径必须落在 kb_dir 内。"""
