@@ -576,7 +576,35 @@ def acfg(name, progress=False, memory_on=False, **agent):
     pth = os.path.join(T, name + ".json"); json.dump(c, open(pth, "w", encoding="utf-8"), ensure_ascii=False); return pth
 def load_trace(path):
     if not os.path.exists(path): return []
-    return [json.loads(l) for l in open(path, encoding="utf-8") if l.strip()]
+    out = []
+    for i, l in enumerate(open(path, encoding="utf-8"), 1):
+        if not l.strip():
+            continue
+        try:
+            out.append(json.loads(l))
+        except json.JSONDecodeError as e:
+            raise AssertionError("trace %s line %d is not json: %r" % (os.path.basename(path), i, l[:120])) from e
+    return out
+def _trace_lines_stay_json():
+    import importlib.util, threading
+    path = os.path.join(T, "trace_lock.jsonl")
+    if os.path.exists(path): os.remove(path)
+    spec = importlib.util.spec_from_file_location("fake_acp_agent_lock", FAKE_ACP)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    os.environ["AGENTBOT_ACP_TRACE"] = path
+    try:
+        def worker(i):
+            for n in range(20):
+                mod.trace({"event": "t", "i": i, "n": n, "blob": "甲" * 400})
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(4)]
+        for th in threads: th.start()
+        for th in threads: th.join()
+    finally:
+        os.environ.pop("AGENTBOT_ACP_TRACE", None)
+    lines = [l for l in open(path, encoding="utf-8") if l.strip()]
+    return len(lines) == 80 and all(json.loads(l).get("event") == "t" for l in lines)
+check("ACP 跟踪文件并发追加仍是一行一个 JSON", _trace_lines_stay_json())
 def run_acp(events, name, cfg_path, extra_env=None, args=()):
     trace = os.path.join(T, name + ".trace")
     if os.path.exists(trace): os.remove(trace)

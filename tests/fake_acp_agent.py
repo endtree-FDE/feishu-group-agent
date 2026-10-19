@@ -4,16 +4,47 @@ import json, os, sys, time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import utf8io  # noqa: F401
 
-TRACE = os.environ.get("AGENTBOT_ACP_TRACE")
 PERM_ID = 8000
 
 
 def trace(obj):
-    if not TRACE:
+    """追加一行 JSON。常驻进程和回退的 -p 会同时写这个文件，必须整行写完再放锁。"""
+    path = os.environ.get("AGENTBOT_ACP_TRACE")
+    if not path:
         return
-    with open(TRACE, "a", encoding="utf-8") as f:
-        f.write(json.dumps(obj, ensure_ascii=False) + "\n")
-        f.flush()
+    data = (json.dumps(obj, ensure_ascii=False) + "\n").encode("utf-8")
+    lock = path + ".lock"
+    deadline = time.time() + 5
+    while True:
+        try:
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.close(fd)
+            break
+        except FileExistsError:
+            if time.time() >= deadline:
+                try:
+                    os.remove(lock)
+                except OSError:
+                    pass
+                deadline = time.time() + 5
+            else:
+                time.sleep(0.02)
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_WRONLY | os.O_APPEND, 0o644)
+        try:
+            view = data
+            while view:
+                n = os.write(fd, view)
+                if n <= 0:
+                    break
+                view = view[n:]
+        finally:
+            os.close(fd)
+    finally:
+        try:
+            os.remove(lock)
+        except OSError:
+            pass
 
 
 def send(obj):
