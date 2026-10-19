@@ -1,4 +1,6 @@
-﻿# 看门狗：心跳超过 3 分钟没更新，或进程不在，就重新启动。只写本地日志，不发任何消息。
+﻿# 看门狗：心跳超过 3 分钟没更新，或进程不在，就重新启动。
+# 默认只写本地日志，不发消息。配置里 alerts.enabled 为 true 时，重启前请 Python 通知主人。
+# 那条通知走发送接口，不依赖事件长连接。没打开时不调用 Python。通知失败也不挡住重启。
 param([string]$Config = "agents\example.json")
 $base = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $hb = Join-Path $base "state\heartbeat"; $wl = Join-Path $base "logs\watchdog.log"
@@ -19,6 +21,28 @@ if (Test-Path $pidf) {
 $stale = (-not (Test-Path $hb)) -or (([DateTimeOffset]::UtcNow.ToUnixTimeSeconds()) - [int](Get-Content $hb)) -gt 180
 if ((-not $alive) -or $stale) {
   "$(Get-Date -Format s) restart (alive=$alive stale=$stale)" | Add-Content $wl -Encoding utf8
+  try {
+    $cfgPath = $Config
+    if (-not [IO.Path]::IsPathRooted($cfgPath)) { $cfgPath = Join-Path $base $cfgPath }
+    $alertOn = $false
+    if (Test-Path -LiteralPath $cfgPath) {
+      $parsed = [IO.File]::ReadAllText($cfgPath) | ConvertFrom-Json
+      if ($parsed.PSObject.Properties.Name -contains "alerts" -and $parsed.alerts -and $parsed.alerts.enabled -eq $true) {
+        $alertOn = $true
+      }
+    }
+    if ($alertOn) {
+      $py = (Get-Command python.exe -ErrorAction SilentlyContinue).Source
+      if (-not $py) { $py = "C:\Program Files\Python312\python.exe" }
+      if (Test-Path -LiteralPath $py) {
+        & $py (Join-Path $base "agentbot.py") $cfgPath "--alert-check" 2>&1 | Add-Content $wl -Encoding utf8
+      } else {
+        "alert-check skipped: python not found" | Add-Content $wl -Encoding utf8
+      }
+    }
+  } catch {
+    "alert-check failed" | Add-Content $wl -Encoding utf8
+  }
   if ($alive) { & (Join-Path $PSScriptRoot "stop.ps1") | Add-Content $wl -Encoding utf8 }
   & (Join-Path $PSScriptRoot "start.ps1") -Config $Config | Add-Content $wl -Encoding utf8
 }

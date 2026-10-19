@@ -153,11 +153,34 @@ class LinkWatch:
         self.generation = 0
         self.failures = {}
         self._last_wake_wall = 0.0
+        self.link_up = False
+        self.link_since = None
         self._lock = threading.Lock()
 
     def start(self, now_mono=None, now_wall=None):
         self.prev_mono = time.monotonic() if now_mono is None else now_mono
         self.prev_wall = time.time() if now_wall is None else now_wall
+        with self._lock:
+            if self.link_since is None:
+                self.link_since = self.prev_wall
+
+    def mark_link(self, up, now=None):
+        """连接状态变化时才改计时。已经是断开时再记一次断开，不把计时清零。"""
+        now = time.time() if now is None else float(now)
+        with self._lock:
+            if self.link_since is None:
+                self.link_up = bool(up)
+                self.link_since = now
+                return
+            if bool(up) == bool(self.link_up):
+                return
+            self.link_up = bool(up)
+            self.link_since = now
+
+    def link_snapshot(self):
+        with self._lock:
+            since = self.link_since if self.link_since is not None else time.time()
+            return bool(self.link_up), float(since)
 
     def pulse(self, now_mono=None, now_wall=None):
         """发现休眠或时钟前跳时返回多出来的秒数，并把 generation 加一。30 秒内不重复报。"""
@@ -182,6 +205,9 @@ class LinkWatch:
         if kind == "up":
             with self._lock:
                 self.failures[key] = 0
+            self.mark_link(True)
+        elif kind == "down":
+            self.mark_link(False)
         return kind
 
     def fail(self, key):

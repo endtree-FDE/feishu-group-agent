@@ -73,6 +73,14 @@ def required_scopes(cfg):
     p2p = cfg.get("p2p") or {}
     if isinstance(p2p, dict) and p2p.get("allow_group_members"):
         need.append("im:chat.members:read")
+    # 早晨摘要自己去读日历和任务表。工具开关没开时，这两项权限仍要有，否则摘要读不到。
+    digest_cfg = cfg.get("digest") if isinstance(cfg.get("digest"), dict) else {}
+    if digest_cfg.get("enabled"):
+        import digest as digest_mod
+        if digest_mod.settings(cfg).get("include_calendar") and digest_mod.calendar_id(cfg):
+            need.append("calendar:calendar.event:read")
+        if digest_mod.settings(cfg).get("include_tasks") and digest_mod.task_table(cfg):
+            need.append("base:record:read")
     out = []
     for item in need:
         if item not in out:

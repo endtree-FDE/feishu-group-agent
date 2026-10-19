@@ -5,6 +5,7 @@
 #   --lock-test N      只拿单实例锁并保持 N 秒（不启动 consumer）
 #   --check            自检：配置、目录、当前模型接口、lark-cli，可选探测权限（--probe），不启动 consumer
 #   --doctor           只读诊断：登录、scope、事件订阅、网络、依赖、重复进程。不发消息，不写心跳
+#   --alert-check      看门狗在重启前调用：心跳过期才通知主人。不拿锁，不启动长连接
 #   环境变量 AGENTBOT_FAKE_AGENT=秒：用 sleep 代替模型（仅测试，优先于 model_provider）
 #   环境变量 AGENTBOT_AGENT_CMD='["python","fake.py"]'：替换 cursor-agent 可执行文件（仅测试，用来模拟 stream-json 或 ACP）
 # 模型从哪来看配置 model_provider，没写就是 cursor。cursor 的登录和额度是运行这台电脑的人自己的账号，程序里不写账号。
@@ -12,7 +13,7 @@ import json, os, re, subprocess, sys, time, logging, collections, threading, sql
 
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import utf8io  # 管道上的标准流改为 UTF-8，避免中文 Windows 的代码页把日志解崩
-import acp_client, channels, feishu_link, guard, lifecycle, memory, observe, proc_identity, providers
+import acp_client, channels, digest, feishu_link, guard, health_alert, lifecycle, memory, observe, proc_identity, providers
 from channels.base import Cap, can_update, status_modes
 from channels.feishu import MEMBER_ADDED, MEMBER_DELETED
 from providers.base import PartialText
@@ -298,6 +299,11 @@ def status_text(sess):
         "技能：%s。" % skill_bit,
         "写入：%s。写操作要白名单和 6 位确认码，不会邀请别人。" % ("开" if write_on else "关"),
     ]
+    # 两项都默认关。没打开时不增加这几行，/状态 的正文和以前一样。
+    if health_alert.settings(CFG)["enabled"]:
+        lines.append("断线提醒：开。长连接断开时用发送接口通知主人，不依赖那条长连接。")
+    if digest.enabled(CFG):
+        lines.append("早晨摘要：开。到点每个群最多一条，不会点名所有人。")
     return "\n".join(lines)
 def forget(sess):
     with DBL: DB.execute("delete from turns where sess=?", (sess,)); DB.commit()
@@ -838,6 +844,10 @@ _UNTRUSTED_TOOLS = {"history", "docs_search", "docs_read", "calendar_read", "bas
 def build_prompt(q, sess, ctx, extra="", rounds_left=None):
     limited = bool((ctx or {}).get("limited"))
     parts = [CFG["system_prompt"]]
+    # 早晨摘要的说明不随这一题变化，放在会话类型和对话历史前面，好让前缀继续能缓存。
+    note = digest.prompt_note(CFG)
+    if note:
+        parts.append(note)
     parts.append("当前会话类型：%s。" % ("私聊" if ctx["chat_type"] == "p2p" else "群聊"))
     if limited: parts.append("这是未列入私聊名单的人。不要使用飞书工具，不要复述知识库、其他群或配置。")
     # 放在稳定前缀里：同一话题两次提问逐字相同，也不进预放正文的字数预算。
@@ -1829,6 +1839,7 @@ def _on_wake(gap):
 def heartbeat():
     _LINK.start()
     wrote = 0
+    maintained = 0
     while not lifecycle.SHUTDOWN.is_set():
         try: gap = _LINK.pulse()
         except Exception:
@@ -1839,6 +1850,13 @@ def heartbeat():
             try: _on_wake(gap)
             except Exception: log.exception("wake handler failed")
         now = time.time()
+        # 第一轮就查一次，之后大约 15 秒一次。关着的功能在这里直接返回，不发消息。
+        if now - maintained >= 15 and not lifecycle.SHUTDOWN.is_set():
+            maintained = now
+            try:
+                maintenance_tick(now)
+            except Exception:
+                log.exception("maintenance tick failed")
         if not gap and now - wrote >= 60 and not lifecycle.SHUTDOWN.is_set():
             try: open(os.path.join(STATE, "heartbeat"), "w", encoding="utf-8").write(str(int(now)))
             except OSError: pass
@@ -1846,6 +1864,48 @@ def heartbeat():
             try: OBS.shrink_stdio()
             except Exception: pass
         time.sleep(1)
+
+def _served_ids():
+    ids = static_chat_ids()
+    if ids is not None:
+        return list(ids)
+    return [r["chat_id"] for r in all_chats() if r.get("status") == "admitted"]
+
+def _outbound_send(kind, target, text, key):
+    """断线私聊和早晨摘要都走当前渠道。飞书在适配器里调用发送接口，不经过事件长连接。"""
+    try:
+        result = CHANNEL.push_text(kind, target, text, key)
+    except Exception:
+        log.exception("outbound send failed")
+        return "fail"
+    return result if result in ("ok", "fail", "unknown") else "fail"
+
+def _digest_fetch(tool, argv):
+    try:
+        got = TOOLS.lark(tool, argv)
+    except ToolError as exc:
+        return {"_error": guard.redact(exc.user_msg, REDACT_NAMES)[:200]}
+    except Exception as exc:
+        return {"_error": guard.redact(str(exc), REDACT_NAMES)[:200]}
+    data = got.get("data") if isinstance(got, dict) else None
+    return data if isinstance(data, dict) else {"items": data or []}
+
+def maintenance_tick(now=None):
+    """断线提醒和早晨摘要。演练、自检、诊断都不发。两项默认关，关着时不会打开发送接口。"""
+    if DRY or CHECK or DOCTOR:
+        return
+    now = time.time() if now is None else float(now)
+    up, since = _LINK.link_snapshot()
+    try:
+        health_alert.tick(CFG, BASE, REDACT_NAMES, up, since, now=now, sender=_outbound_send, log=log)
+    except Exception:
+        log.exception("health alert tick failed")
+    try:
+        def _send_chat(chat, text, key):
+            return _outbound_send("chat", chat, text, key)
+        digest.deliver(CFG, BASE, REDACT_NAMES, now, _digest_fetch, _send_chat, _served_ids(), log)
+    except Exception:
+        log.exception("digest tick failed")
 
 def self_check():
     ok = True
@@ -1875,6 +1935,14 @@ def self_check():
     report_p2p_members()
     if auto_join_active() and admit_mode() == "open":
         print("HINT chats.admit=open：别人第一次 @ 就会认群并回答。不想这样请改成 confirm 或 whitelist。")
+    alert_cfg = health_alert.settings(CFG)
+    if alert_cfg["enabled"] and not alert_cfg["owners"]:
+        print("HINT alerts.enabled 已打开，但 owner_open_ids 为空。只会写本机 logs/alerts.log，不会发私聊。")
+    digest_cfg = digest.settings(CFG)
+    if digest_cfg["enabled"] and not digest_cfg["chats"]:
+        print("HINT digest.enabled 已打开，但 chat_ids 为空。不会往任何群发早晨摘要。")
+    if digest_cfg["enabled"] and not digest_cfg["time_ok"]:
+        print("HINT digest.time 不是 HH:MM，早晨摘要不会发。")
     sks = TOOLS.skills
     p("skills", not sks.invalid, sks.status())
     if sks.missing_only:
@@ -1894,6 +1962,13 @@ def self_check():
     return ok
 
 def main():
+    if "--alert-check" in ARGS:
+        # 看门狗在重启前调用。不拿单实例锁，不启动长连接。没打开 alerts 时马上返回。
+        try:
+            health_alert.external_check(CFG, BASE, REDACT_NAMES, sender=_outbound_send, log=log)
+        except Exception:
+            log.exception("alert-check failed")
+        sys.exit(0)
     if DOCTOR:
         import doctor
         sys.exit(doctor.run_doctor(CFG, BASE, lark_exe()))
@@ -2007,6 +2082,9 @@ def _consume_forever(event_key):
         elif _LINK.generation != seen: reason = "wake"
         elif down.is_set(): reason = "down"
         else: reason = "exit"
+        # 这一轮接收结束了。在下一次日志写明 connected 之前，长连接不算健康。
+        if reason in ("wake", "down", "exit"):
+            _LINK.mark_link(False)
         if p.poll() is None and reason in ("wake", "down", "shutdown"):
             if feishu_link.may_signal(p, created):
                 try: p.terminate()

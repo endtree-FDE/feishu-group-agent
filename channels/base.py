@@ -168,6 +168,11 @@ class Channel:
     def send_text(self, mid, text, key):
         raise ChannelError(unavailable(Cap.SEND_TEXT))
 
+    def push_text(self, kind, target, text, key):
+        """主动发给一个人或一个群，不是回复某一条消息。返回 ok / fail / unknown。
+        默认失败。飞书在自己的适配器里实现，不让核心直接拼命令。"""
+        return "fail"
+
     def reply_message(self, mid, msg_type, payload, idempotency_key, reply_in_thread):
         raise ChannelError(unavailable(Cap.SEND_TEXT))
 

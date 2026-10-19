@@ -156,8 +156,74 @@ def test_wecom_skeleton():
         except ChannelError as e:
             sent = e.user_msg
         check("骨架的发送不会出去", "尚未连接" in sent, sent)
+        pushed = ch.push_text("user", "user_placeholder", "你好", "k1")
+        check("骨架的主动发送返回 fail，不连接", pushed == "fail")
     finally:
         os.environ.pop("AGENTBOT_EXPERIMENTAL_CHANNELS", None)
+
+
+def test_push_text():
+    seen = []
+
+    def run_capture(argv, cwd=None, timeout=None):
+        seen.append(list(argv))
+        return subprocess.CompletedProcess(argv, 0, '{"ok": true, "data": {"message_id": "om_push"}}', "")
+
+    folder = tempfile.mkdtemp(prefix="agentbot_push_")
+    try:
+        cfg = {"profile": "placeholder", "bot_open_id": "ou_bot_placeholder"}
+        ch = FeishuChannel(cfg, exe=lambda: ["lark-cli"], api=lambda *a, **k: ({}, ""), tmp=folder,
+                           dry=True, log=logging.getLogger("ch"), run_capture=run_capture, names=())
+        result = ch.push_text("user", "ou_owner_placeholder", "长连接断了", "k" + ("a" * 20))
+        cmd = seen[-1] if seen else []
+        check("飞书主动发送是 messages-send，不启动 consume",
+              result == "ok" and cmd[:3] == ["lark-cli", "im", "+messages-send"]
+              and "--user-id" in cmd and cmd[cmd.index("--user-id") + 1] == "ou_owner_placeholder"
+              and "consume" not in cmd and "--markdown" not in cmd, cmd)
+        seen.clear()
+        result = ch.push_text("chat", "oc_chat_placeholder", "今天的安排", "k" + ("b" * 20))
+        cmd = seen[-1] if seen else []
+        check("群摘要走 --chat-id，同样不启动 consume",
+              result == "ok" and "--chat-id" in cmd and cmd[cmd.index("--chat-id") + 1] == "oc_chat_placeholder"
+              and "consume" not in cmd and "--markdown" not in cmd, cmd)
+        mem = MemoryChannel(cfg)
+        got = mem.push_text("user", "ou_owner_placeholder", "恢复了", "kmem")
+        check("内存渠道记下主动发送并返回 ok",
+              got == "ok" and mem.outbox[-1]["op"] == "push_text" and mem.outbox[-1]["kind"] == "user"
+              and mem.outbox[-1]["target"] == "ou_owner_placeholder")
+    finally:
+        import shutil
+        shutil.rmtree(folder, ignore_errors=True)
+
+    empty = os.path.join(tempfile.gettempdir(), "agentbot_push_empty.jsonl")
+    open(empty, "w", encoding="utf-8").write("")
+    src = r'''
+import sys
+sys.argv = ["agentbot.py", sys.argv[1], "--dry-run", sys.argv[2]]
+import agentbot
+seen = []
+def fake(kind, target, text, key):
+    seen.append((kind, target, text, key))
+    return "ok"
+agentbot.CHANNEL.push_text = fake
+print("SEND", agentbot._outbound_send("user", "ou_owner_placeholder", "hello", "kabc"))
+print("ARGS", seen)
+def bad(kind, target, text, key):
+    return "nope"
+agentbot.CHANNEL.push_text = bad
+print("BAD", agentbot._outbound_send("user", "ou_owner_placeholder", "hello", "kabc"))
+def boom(kind, target, text, key):
+    raise RuntimeError("down")
+agentbot.CHANNEL.push_text = boom
+print("EXC", agentbot._outbound_send("user", "ou_owner_placeholder", "hello", "kabc"))
+'''
+    r = subprocess.run([sys.executable, "-c", src, os.path.join(FW, "agents", "example.json"), empty],
+                       cwd=FW, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
+    out = (r.stdout or "") + (r.stderr or "")
+    check("核心的主动发送只调用渠道 push_text",
+          r.returncode == 0 and "SEND ok" in out
+          and "('user', 'ou_owner_placeholder', 'hello', 'kabc')" in out
+          and "BAD fail" in out and "EXC fail" in out and "event consume" not in out, out)
 
 
 def test_wired_default():
@@ -191,6 +257,7 @@ def main():
     test_feishu_argv()
     test_memory_and_degrade()
     test_wecom_skeleton()
+    test_push_text()
     test_wired_default()
     passed = sum(1 for _, ok in results if ok)
     print("\n%d/%d passed" % (passed, len(results)))

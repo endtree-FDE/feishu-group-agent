@@ -106,6 +106,14 @@ class FeishuChannel(Channel):
     def consume_argv(self, event_key):
         return self.exe() + ["event", "consume", event_key, "--profile", self.cfg["profile"], "--as", "bot"]
 
+    def push_text(self, kind, target, text, key):
+        """私聊主人或往群里发摘要。走 im +messages-send，不启动 event consume。"""
+        import outbound
+        exe = self.exe() if callable(self.exe) else self.exe
+        folder = self.tmp or "."
+        return outbound.send(exe, str(self.cfg.get("profile") or ""), kind, target, text, key,
+                             self.names, folder, run=self.run_capture)
+
     def send_text(self, mid, text, key):
         """回复一条文字。命令和重试与原来的 _reply_one 相同。正文应已由核心脱敏。"""
         if self.dry:

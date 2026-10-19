@@ -43,6 +43,26 @@
   "observability": {
     "journal": true
   },
+  "alerts": {
+    "enabled": false,
+    "owner_open_ids": [],
+    "unhealthy_after_sec": 180,
+    "repeat_sec": 1800,
+    "local_log": true,
+    "windows_toast": false
+  },
+  "digest": {
+    "enabled": false,
+    "time": "08:30",
+    "timezone": "Asia/Shanghai",
+    "chat_ids": [],
+    "window_min": 30,
+    "include_calendar": true,
+    "include_tasks": true,
+    "status_field": "状态",
+    "title_field": "",
+    "done_values": ["已完成", "完成", "已关闭", "关闭", "取消", "已取消", "done", "closed", "cancelled", "canceled"]
+  },
   "features": {
     "memory": true,
     "p2p": true,
