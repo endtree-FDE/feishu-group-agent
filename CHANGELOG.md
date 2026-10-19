@@ -10,7 +10,7 @@
 
 ## [Unreleased]
 
-这一节是相对 `main` 上已包含多轮只读工具和可靠性改动的快照，再叠上开源说明和集成。还没有 GitHub Release。发布草稿见 [docs/release-0.4.0.md](docs/release-0.4.0.md)。`VERSION` 仍是 `0.4.0-dev`。
+这一节已经在 `main` 上，还没有收成 `0.4.0` 标签。还没有 GitHub Release。发布草稿见 [docs/release-0.4.0.md](docs/release-0.4.0.md)。`VERSION` 仍是 `0.4.0-dev`。
 
 ### 添加
 
