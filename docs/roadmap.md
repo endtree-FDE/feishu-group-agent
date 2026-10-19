@@ -147,7 +147,7 @@
 ### 17. 模型和平台可替换（本轮草稿）
 
 - **目标：** 参赛或换供应商时，只换模型或换运行平台，不复制一份飞书门卫、确认码和 SSRF 检查。
-- **现状：** `model_provider` 可以是 `cursor`、`openai_compat`、`fake`，也可以是预设 `deepseek`、`dashscope`、`zhipu`、`pangu`。预设只补空着的地址、模型名和变量名，密钥仍只在环境变量里。飞书入口没有换成别的平台。openJiuwen 用同一套 OpenAI 兼容字段对接，说明在 [用本框架参赛.md](用本框架参赛.md)。仓库里没有比赛密钥、股票池或赛题数据。
+- **现状：** `model_provider` 可以是 `cursor`、`openai_compat`、`fake`，也可以是预设 `deepseek`、`dashscope`、`zhipu`、`pangu`。预设只补空着的地址、模型名和变量名，密钥仍只在环境变量里。渠道适配器默认仍是飞书；企业微信只有实验骨架，不连接。说明在 [渠道.md](渠道.md) 和 [渠道-企业微信.md](渠道-企业微信.md)。openJiuwen 用同一套 OpenAI 兼容字段对接，说明在 [用本框架参赛.md](用本框架参赛.md)。仓库里没有比赛密钥、股票池或赛题数据。
 - **参考：** [docs/模型接口.md](模型接口.md)、[openJiuwen 赛题报道](https://caijing.chinadaily.com.cn/a/202607/20/WS6a5dd2a3a310d709c2fbe862.html)、[职场赛题](https://competitions.atomgit.com/competition/2079523455267733506)、[量化赛题](https://competitions.atomgit.com/competition/2079794808848314369)、[论文赛题](https://competitions.atomgit.com/competition/2079803553561747457)。赛题要接的是 openJiuwen / JiuwenSwarm 这一类运行时，模型名由参赛者自己配。
 - **验收：** 不写新的平台配置时，飞书入口和现有两种模型与现在相同。文档说明怎样接另一种 OpenAI 兼容模型，以及平台接口要守住的边界：白名单、确认码、脱敏、不主动发消息。仓库不收录比赛密钥、账号或赛题数据。默认不自动切换到第二家模型（那是第 8 项，默认关）。
 

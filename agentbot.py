@@ -12,7 +12,9 @@ import json, os, re, subprocess, sys, time, logging, collections, threading, sql
 
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import utf8io  # 管道上的标准流改为 UTF-8，避免中文 Windows 的代码页把日志解崩
-import acp_client, feishu_link, guard, lifecycle, memory, observe, proc_identity, providers
+import acp_client, channels, feishu_link, guard, lifecycle, memory, observe, proc_identity, providers
+from channels.base import Cap, can_update, status_modes
+from channels.feishu import MEMBER_ADDED, MEMBER_DELETED
 from providers.base import PartialText
 from tools import Tools, ToolError, TOOL_DOC, MEMORY_TOOL_DOC, READ_TOOLS, WRITE_TOOLS, run_capture, parse_cli_json, clip_body, message_text, attachment_limits, inspect_download, disk_download_name, kb_catalog, history_page_size, sweep_old
 
@@ -384,8 +386,6 @@ def _context_targets(ev, sess, mtype, mid):
 _CHAT_RX = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
 _ADMIT_RX = re.compile(r"^/?(?:认群|admit)$", re.I)
 _REVOKE_RX = re.compile(r"^/?(?:忘群|unadmit)$", re.I)
-_MEMBER_ADDED = "im.chat.member.bot.added_v1"
-_MEMBER_DELETED = "im.chat.member.bot.deleted_v1"
 _CHAT_TEXT = {
     "chat_pending": "这个群还没认。请白名单成员 @我 发送「/认群」。在此之前我不调用模型，也不主动发消息。",
     "chat_admitted": "已认这个群。之后在本群 @ 我才会回答。我不会主动发消息。",
@@ -491,17 +491,6 @@ def describe_chats():
             pnd = DB.execute("select count(*) from chats where status='pending'").fetchone()[0]
         return "auto_join admit=%s admitted=%d pending=%d" % (mode, n, pnd)
     return "chat_ids 为空且 auto_join 关闭"
-def _member_type(obj):
-    if not isinstance(obj, dict): return ""
-    h = obj.get("header")
-    if isinstance(h, dict) and h.get("event_type"): return h["event_type"]
-    return obj.get("event_type") or ""
-def _member_body(obj):
-    inner = obj.get("event") if isinstance(obj, dict) and isinstance(obj.get("event"), dict) else None
-    if inner and (_member_type(inner) in (_MEMBER_ADDED, _MEMBER_DELETED) or isinstance(inner.get("header"), dict)):
-        return _member_body(inner)
-    if inner and inner.get("chat_id"): return inner
-    return obj if isinstance(obj, dict) else {}
 def apply_member(event_type, body, event_id=""):
     """进群 / 出群只记 state.db。这里不调用 reply。"""
     if not auto_join_active():
@@ -518,7 +507,7 @@ def apply_member(event_type, body, event_id=""):
     name = _clip_name(body.get("name") if isinstance(body.get("name"), str) else "")
     inviter = open_id_of(body.get("operator_id"))
     row = load_chat(cid)
-    if event_type == _MEMBER_DELETED:
+    if event_type == MEMBER_DELETED:
         if row and row["status"] == "revoked":
             save_chat(cid, "revoked", "deleted", inviter, name); return
         save_chat(cid, "left", "deleted", inviter, name); return
@@ -552,7 +541,7 @@ def extract_chat_rows(j):
 def sync_joined_chats():
     """启动时用 im +chat-list（GET /open-apis/im/v1/chats）记下当前所在的群。失败只记日志，不清空已有记录。"""
     if not auto_join_active(): return
-    j, err = lark_api(["im", "+chat-list", "--page-all", "--page-size", "100", "--page-limit", "20", "--format", "json"], timeout=120)
+    j, err = CHANNEL.list_chats()
     if not j:
         log.warning("chat list unavailable (groups still recorded from events and @): %s", (err or "")[-300:]); return
     seen = set()
@@ -580,23 +569,12 @@ def record_static_chats():
     for cid in static_chat_ids() or []:
         if valid_chat(cid): save_chat(cid, "admitted", "config")
 def consumer_keys():
+    # 进群、出群的事件名只在飞书适配器里定义一份。要不要订阅仍由核心的认群开关决定。
     keys = ["im.message.receive_v1"]
-    if auto_join_active(): keys += [_MEMBER_ADDED, _MEMBER_DELETED]
+    if auto_join_active(): keys += [MEMBER_ADDED, MEMBER_DELETED]
     return keys
 def consume_argv(event_key):
-    return lark_exe() + ["event", "consume", event_key, "--profile", CFG["profile"], "--as", "bot"]
-def _event_id(obj):
-    if not isinstance(obj, dict): return ""
-    h = obj.get("header")
-    if isinstance(h, dict) and h.get("event_id"): return str(h["event_id"])
-    if obj.get("event_id"): return str(obj["event_id"])
-    return ""
-_RECALL_TYPES = {"im.message.recalled_v1", "im.message.message_recalled_v1"}
-def _is_recall(obj):
-    if not isinstance(obj, dict): return False
-    if _member_type(obj) in _RECALL_TYPES: return True
-    inner = obj.get("event")
-    return isinstance(inner, dict) and _member_type(inner) in _RECALL_TYPES
+    return CHANNEL.consume_argv(event_key)
 # 这些类型没有可交给模型的正文。直接说明，避免把 file_key、open_id 或别的群号送进提示词。
 _QUIET_TYPES = {
     "audio": "这是一条语音，目前不能听里面的内容。请用文字说明要点。",
@@ -605,22 +583,15 @@ _QUIET_TYPES = {
     "share_user": "这是一张联系人名片。我不会展开这个人的资料。",
 }
 def ingest(obj):
-    """一条 stdout JSON。消息事件交给 handle；进群/出群只记群，不回复。撤回不回复。"""
+    """一条 stdout JSON。分类在渠道里：消息交给 handle；进群/出群只记群，不回复。撤回不回复。"""
     if not isinstance(obj, dict): return
-    if _is_recall(obj):
+    kind, payload = CHANNEL.classify(obj)
+    if kind == "recall":
         log.info("recall ignored"); return
-    et = _member_type(obj)
-    if et not in (_MEMBER_ADDED, _MEMBER_DELETED):
-        inner = obj.get("event") if isinstance(obj.get("event"), dict) else None
-        if inner and not obj.get("message_id"):
-            et = _member_type(inner)
-            if et in (_MEMBER_ADDED, _MEMBER_DELETED):
-                apply_member(et, _member_body(inner), _event_id(obj) or _event_id(inner)); return
-            if inner.get("message_id") or inner.get("id") or inner.get("chat_type") or inner.get("sender_id"):
-                handle(inner); return
-    if et in (_MEMBER_ADDED, _MEMBER_DELETED):
-        apply_member(et, _member_body(obj), _event_id(obj)); return
-    handle(obj)
+    if kind == "member":
+        apply_member(payload["event_type"], payload["body"], payload["event_id"]); return
+    if kind == "message":
+        handle(payload); return
 
 # ---------- 限流 + 并发 ----------
 RL = CFG.get("rate_limit", {}); RLL = threading.Lock(); last_user = {}; hour_hits = collections.deque(); cmd_hits = {}
@@ -652,10 +623,12 @@ def command_ok(uid):
 
 # ---------- 判定 ----------
 def is_for_me(ev):
+    """是不是在叫这个机器人。身份来自当前渠道，飞书仍是配置里的 bot_open_id。"""
+    bot = CHANNEL.identity().bot_id
     for m in ev.get("mentions") or []:
         ids = m.get("id"); vals = list(ids.values()) if isinstance(ids, dict) else [ids]
         vals += [m.get("open_id"), m.get("user_id")]
-        if CFG["bot_open_id"] in [v for v in vals if v]: return True
+        if bot in [v for v in vals if v]: return True
     return False
 def clean_q(t):
     t = re.sub(r"@_user_\d+", "", t or "")
@@ -741,13 +714,12 @@ def _parse_members(j):
         if isinstance(total, int) and isinstance(arr, list) and total > len(arr): incomplete = True
     return ids, not incomplete, len(ids)
 def _fetch_chat_members(cid):
-    """以机器人身份拉一整份成员。lark_api 会补上 --profile 和 --as bot。失败或名单不完整都不返回可用集合。"""
+    """拉一整份成员。飞书经渠道走 lark-cli，lark_api 会补上 --profile 和 --as bot。失败或名单不完整都不返回可用集合。"""
     if not valid_chat(cid):
         _log_member_fail(cid, "error"); return {"ok": False, "ids": set(), "count": None, "code": "error"}
-    # im/v1/chats/{chat_id}/members ，member_id_type=open_id。--page-limit 0 表示翻完，不在默认 10 页处停。
-    argv = ["im", "+chat-members-list", "--chat-id", cid, "--member-id-type", "open_id",
-            "--page-all", "--page-limit", "0", "--format", "json"]
-    try: j, err = lark_api(argv, timeout=120)
+    if not CHANNEL.supports(Cap.MEMBERS):
+        _log_member_fail(cid, "unsupported"); return {"ok": False, "ids": set(), "count": None, "code": "unsupported"}
+    try: j, err = CHANNEL.list_members(cid)
     except Exception:
         _log_member_fail(cid, "error"); return {"ok": False, "ids": set(), "count": None, "code": "error"}
     if not j:
@@ -870,7 +842,7 @@ def build_prompt(q, sess, ctx, extra="", rounds_left=None):
     if limited: parts.append("这是未列入私聊名单的人。不要使用飞书工具，不要复述知识库、其他群或配置。")
     # 放在稳定前缀里：同一话题两次提问逐字相同，也不进预放正文的字数预算。
     parts.append(_UNTRUSTED_NOTE)
-    tools_on = [n for n in READ_TOOLS | WRITE_TOOLS if TOOLS.enabled(n)]
+    tools_on = [n for n in READ_TOOLS | WRITE_TOOLS if TOOLS.enabled(n) and TOOLS.channel_allows(n)]
     if not limited and FEAT.get("tools") and tools_on:
         doc = TOOL_DOC + "\n（当前启用：%s）" % "、".join(sorted(tools_on))
         if GMEM.enabled: doc += "\n" + MEMORY_TOOL_DOC
@@ -1260,25 +1232,8 @@ def reply(mid, text):
         if not _reply_one(mid, body, reply_key(mid, i, total)): ok_all = False
     return ok_all
 def _reply_one(mid, text, key):
-    if DRY: log.info("[dry-run] reply %s: %s", mid, text[:600]); return True
-    fn = os.path.join(TMP, "r_%s.json" % hashlib.md5(("%s:%s" % (mid, key)).encode()).hexdigest()[:12])
-    with open(fn, "w", encoding="utf-8") as f: json.dump({"text": text}, f, ensure_ascii=False)
-    cmd = lark_exe() + ["im", "+messages-reply", "--profile", CFG["profile"], "--as", "bot", "--message-id", mid,
-                        "--msg-type", "text", "--content", "@" + os.path.basename(fn), "--idempotency-key", key]
-    if CFG.get("reply_in_thread", True): cmd.insert(cmd.index("--msg-type"), "--reply-in-thread")
-    ok = False; out = ""
-    for i in range(4):
-        try: r = run_capture(cmd, cwd=TMP, timeout=90)
-        except subprocess.TimeoutExpired: r = subprocess.CompletedProcess(cmd, -1, "", "timeout")
-        out = (r.stdout or "") + (r.stderr or "")
-        try: ok = bool(json.loads((r.stdout or "{}")[(r.stdout or "{}").find("{"):]).get("ok"))
-        except Exception: ok = '"ok": true' in out
-        if ok or not re.search(r"unreachable|EOF|timeout|connection", out, re.I): break
-        log.warning("reply retry %d: %s", i + 1, guard.redact(out[:200], REDACT_NAMES)); time.sleep(5 * (i + 1))
-    log.info("reply %s ok=%s %s", mid, ok, "" if ok else out[:300])
-    try: os.remove(fn)
-    except OSError: pass
-    return ok
+    """文字回复走渠道。飞书的命令、幂等键和重试仍在 FeishuChannel.send_text。"""
+    return CHANNEL.send_text(mid, text, key)
 
 # ---------- 进度（表情回应 + 可编辑的状态消息）----------
 def lark_api(argv, payload=None, timeout=30):
@@ -1299,6 +1254,19 @@ def lark_api(argv, payload=None, timeout=30):
         if fn:
             try: os.remove(fn)
             except OSError: pass
+
+def _channel_exe():
+    return lark_exe()
+def _channel_api(argv, payload=None, timeout=30):
+    return lark_api(argv, payload, timeout)
+def _channel_capture(cmd, cwd=None, timeout=60):
+    return run_capture(cmd, cwd=cwd, timeout=timeout)
+try:
+    CHANNEL = channels.open_channel(CFG, exe=_channel_exe, api=_channel_api, tmp=TMP, dry=DRY, log=log,
+                                    run_capture=_channel_capture, names=REDACT_NAMES)
+except channels.ChannelError as _ch_err:
+    sys.stderr.write(_ch_err.user_msg + "\n"); sys.exit(2)
+TOOLS.channel = CHANNEL
 def _find_key(j, key):
     if isinstance(j, dict):
         if isinstance(j.get(key), str): return j[key]
@@ -1367,24 +1335,23 @@ class Progress:
             log.info("[dry-run] status(%s) %s: %s", mode, self.mid, txt)
             if mode == "card": log.info("[dry-run] card %s: %s", self.mid, json.dumps(self.card(txt), ensure_ascii=False)[:800])
             return "dry_status_" + self.mid
-        cmd = ["im", "+messages-reply", "--message-id", self.mid, "--msg-type", "interactive" if mode == "card" else "text",
-               "--content", "@PAYLOAD", "--idempotency-key", ("st_" + self.mid)[:50]]
-        if CFG.get("reply_in_thread", True): cmd.insert(cmd.index("--msg-type"), "--reply-in-thread")
-        j, err = lark_api(cmd, self.card(txt) if mode == "card" else {"text": txt}, timeout=60)
+        j, err = CHANNEL.reply_message(self.mid, "interactive" if mode == "card" else "text",
+                                      self.card(txt) if mode == "card" else {"text": txt},
+                                      ("st_" + self.mid)[:50], CFG.get("reply_in_thread", True))
         if not j: _prog_fail("status_" + mode, "im:message:send_as_bot", err)
         return _find_key(j, "message_id") if j else None
     def start(self):
         if not self.on(): return
         emo = self.c.get("reaction")
-        if emo and "reaction" not in PROG_OFF:
+        if emo and "reaction" not in PROG_OFF and CHANNEL.supports(Cap.REACTIONS):
             if DRY: log.info("[dry-run] react %s %s", self.mid, emo); self.reaction_id = "dry_reaction"
             else:
-                j, err = lark_api(["im", "reactions", "create", "--message-id", self.mid, "--data", "@PAYLOAD"], {"reaction_type": {"emoji_type": emo}})
+                j, err = CHANNEL.add_reaction(self.mid, emo)
                 self.reaction_id = _find_key(j, "reaction_id") if j else None
                 if not j: _prog_fail("reaction", "im:message.reactions:write_only（或 im:message）", err)
         if not self.c.get("status_message", True): return
         txt = self.render()
-        modes = ["card", "text"] if self.c.get("mode", "card") == "card" else ["text"]
+        modes = status_modes(CHANNEL, self.c.get("mode", "card") == "card")
         for m in modes:
             if ("status_" + m) in PROG_OFF: continue
             self.status_id = self._send_status(m, txt)
@@ -1404,15 +1371,15 @@ class Progress:
         if not self.status_id: return False
         kind = "patch" if self.mode == "card" else "edit"
         if kind in PROG_OFF and not final: return False
+        if not can_update(CHANNEL, self.mode): return False
         if DRY:
             log.info("[dry-run] %s %s: %s", kind, self.status_id, text[:300])
             if self.mode == "card": log.info("[dry-run] card %s: %s", self.status_id, json.dumps(self.card(text), ensure_ascii=False)[:800])
             self.edits += 1; return True
         if self.mode == "card":
-            j, err = lark_api(["im", "messages", "patch", "--message-id", self.status_id, "--data", "@PAYLOAD"],
-                              {"content": json.dumps(self.card(text), ensure_ascii=False)}, timeout=60)
+            j, err = CHANNEL.patch_card(self.status_id, self.card(text))
         else:
-            j, err = lark_api(["im", "+messages-edit", "--message-id", self.status_id, "--msg-type", "text", "--content", "@PAYLOAD"], {"text": text}, timeout=60)
+            j, err = CHANNEL.edit_text(self.status_id, text)
         if j: self.edits += 1; return True
         _prog_fail(kind, "im:message:update（或 im:message）", err); return False
     def _ticker(self):
@@ -1449,11 +1416,12 @@ class Progress:
             return False
         sid = self.status_id
         cmd = ["im", "messages", "delete", "--message-id", sid, "--yes"]  # DELETE /open-apis/im/v1/messages/:message_id；high-risk-write，缺 --yes 退出码 10
+        if not CHANNEL.supports(Cap.RECALL): return False
         if DRY:
             if os.environ.get("AGENTBOT_RECALL_FAIL") == "1":
                 log.info("[dry-run] recall %s failed", " ".join(cmd)); return False
             log.info("[dry-run] recall %s", " ".join(cmd)); return True
-        j, err = lark_api(cmd, timeout=60)
+        j, err = CHANNEL.delete_message(sid)
         if j:
             log.info("status recalled %s", sid); return True
         log.info("progress recall failed (fallback to done): %s", (err or "")[-300:])
@@ -1463,13 +1431,13 @@ class Progress:
         if self.reaction_id:
             if DRY: log.info("[dry-run] unreact %s %s", self.mid, self.reaction_id)
             else:
-                j, err = lark_api(["im", "reactions", "delete", "--message-id", self.mid, "--reaction-id", self.reaction_id])
+                j, err = CHANNEL.remove_reaction(self.mid, self.reaction_id)
                 if not j: log.info("progress unreact failed (skipped): %s", err[-200:])
         done = self.c.get("done_reaction")
-        if done and self.reaction_id and "reaction" not in PROG_OFF:  # 能加处理中表情时才换完成表情
+        if done and self.reaction_id and "reaction" not in PROG_OFF and CHANNEL.supports(Cap.REACTIONS):  # 能加处理中表情时才换完成表情
             if DRY: log.info("[dry-run] react %s %s", self.mid, done)
             else:
-                j, err = lark_api(["im", "reactions", "create", "--message-id", self.mid, "--data", "@PAYLOAD"], {"reaction_type": {"emoji_type": done}})
+                j, err = CHANNEL.add_reaction(self.mid, done)
                 if not j: log.info("progress done-reaction failed (skipped): %s", err[-200:])
 
 def probe_progress():
@@ -1478,16 +1446,16 @@ def probe_progress():
     res = {}
     if row:
         mid = row[0]
-        j, err = lark_api(["im", "reactions", "delete", "--message-id", mid, "--reaction-id", "probe_invalid_reaction_id"])
+        j, err = CHANNEL.probe(["im", "reactions", "delete", "--message-id", mid, "--reaction-id", "probe_invalid_reaction_id"])
         res["reaction"] = (not _SCOPE_RX.search(err or "")) and ("231011" in (err or "") or bool(j)), "im:message.reactions:write_only", err
-        j, err = lark_api(["im", "+messages-edit", "--message-id", mid, "--msg-type", "text", "--content", "@PAYLOAD"], {"text": "probe"})
+        j, err = CHANNEL.probe(["im", "+messages-edit", "--message-id", mid, "--msg-type", "text", "--content", "@PAYLOAD"], {"text": "probe"})
         res["edit"] = (not _SCOPE_RX.search(err or "")) and "230071" in (err or ""), "im:message:update", err
-        j, err = lark_api(["im", "messages", "patch", "--message-id", mid, "--data", "@PAYLOAD"], {"content": "{}"})
+        j, err = CHANNEL.probe(["im", "messages", "patch", "--message-id", mid, "--data", "@PAYLOAD"], {"content": "{}"})
         res["patch"] = (not _SCOPE_RX.search(err or "")) and not j, "im:message:update", err
     else: res["reaction"] = res["edit"] = res["patch"] = (False, "（state.db 里没有消息可做探针）", "")
     p = Progress("probe"); p.thinking = "探针：正在读 C:\\x\\kb\\示例.md"
-    j, err = lark_api(["api", "POST", "/open-apis/cardkit/v1/cards", "--data", "@PAYLOAD"],
-                      {"type": "card_json", "data": json.dumps(p.card(p.render()), ensure_ascii=False)})
+    j, err = CHANNEL.probe(["api", "POST", "/open-apis/cardkit/v1/cards", "--data", "@PAYLOAD"],
+                           {"type": "card_json", "data": json.dumps(p.card(p.render()), ensure_ascii=False)})
     res["card"] = bool(j), "cardkit:card:write（卡片 JSON 校验）", err
     return res
 
@@ -1772,6 +1740,8 @@ def catch_up_mentions():
     """停机期间 @ 了机器人、本地又没答过的消息，启动时补上，并标明是延迟回复。"""
     cfg = _catchup_settings()
     if not cfg["enabled"]: return
+    if not CHANNEL.supports(Cap.HISTORY):
+        log.info("catchup skip: channel has no history"); return
     if DRY and os.environ.get("AGENTBOT_CATCHUP") != "1": return
     try: hb = int(open(os.path.join(STATE, "heartbeat"), encoding="utf-8").read().strip())
     except Exception: hb = 0
@@ -1785,8 +1755,8 @@ def catch_up_mentions():
     for cid in chats or []:
         if n >= cfg["max_messages"]: break
         try:
-            j = TOOLS.lark("history", ["im", "+chat-messages-list", "--chat-id", cid, "--start", start,
-                                       "--page-size", str(history_page_size(CFG)), "--page-limit", "2", "--no-reactions"])
+            j = TOOLS._transport("history", ["im", "+chat-messages-list", "--chat-id", cid, "--start", start,
+                                             "--page-size", str(history_page_size(CFG)), "--page-limit", "2", "--no-reactions"])
         except ToolError as e:
             log.info("catchup list failed %s: %s", cid, e.user_msg); continue
         msgs = (j.get("data") or {}).get("messages") or []
@@ -1881,6 +1851,8 @@ def self_check():
     ok = True
     for h in getattr(TOOLS, "legacy_hints", ()):
         print("HINT " + h)  # 旧键还能用，提示改名，不算失败
+    if CHANNEL.name != "feishu":
+        print("HINT channel=%s experimental=%s %s" % (CHANNEL.name, "yes" if CHANNEL.experimental else "no", CHANNEL.blocked_reason()))
     def p(name, good, info=""):
         nonlocal ok; ok &= bool(good); print("%s %s %s" % ("OK  " if good else "FAIL", name, info))
     p("kb dir", os.path.isdir(KB), KB)
@@ -1968,6 +1940,8 @@ def main():
             if hold: _HOLD_GO.set()
         for t in ths: t.join()
         log.info("dry-run finished peak_active=%d max_concurrency=%d", _peak, MAXC); return
+    if not CHANNEL.ready():
+        log.error("channel blocked: %s", CHANNEL.blocked_reason()); sys.exit(2)
     check_conflicts(); acquire_lock()
     try:
         n = sweep_old(TMP, 3600) + sweep_old(os.path.join(KB, ".attach"), 3600)
