@@ -2,7 +2,7 @@
 # Windows 会把退掉的 PID 很快分给别的程序。只看进程还在不在，会把别的程序当成自己还活着，
 # 或者在停进程时打到别人。这里同时看创建时间和命令行。对不上就当成锁已经过期。
 # 本模块不结束任何进程。
-import hashlib, os, subprocess, tempfile
+import hashlib, os, subprocess, tempfile, time
 
 
 def norm_path(path):
@@ -32,6 +32,47 @@ def parse_lock(text):
 
 def format_lock(pid, created, base):
     return "%s\ncreated=%s\nbase=%s\n" % (int(pid), created or "", base or "")
+
+
+def publish_exclusive(path, body):
+    """把完整内容一次变成 path。别人要么看到完整文件，要么看到文件还不存在。
+    先创建再写入时，Windows 上另一个进程会读到空文件，并把还活着的锁当成过期。"""
+    if isinstance(body, str):
+        body = body.encode("utf-8")
+    folder = os.path.dirname(path) or "."
+    os.makedirs(folder, exist_ok=True)
+    tmp = os.path.join(folder, ".%s.%d.%d.tmp" % (os.path.basename(path), os.getpid(), time.time_ns()))
+    fd = os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+    try:
+        view = body
+        while view:
+            n = os.write(fd, view)
+            if n <= 0:
+                raise OSError("lock write stalled")
+            view = view[n:]
+    except Exception:
+        os.close(fd)
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+    os.close(fd)
+    try:
+        if os.name == "nt":
+            os.rename(tmp, path)
+            return
+        os.link(tmp, path)
+    except Exception:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+    try:
+        os.remove(tmp)
+    except OSError:
+        pass
 
 
 def base_in_text(text, base):

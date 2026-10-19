@@ -67,7 +67,7 @@ def acquire_lock():
     snap = proc_identity.snapshot(os.getpid()) or {}
     body = proc_identity.format_lock(os.getpid(), snap.get("created") or "", BASE).encode("utf-8")
     try:
-        fd = os.open(LOCK, os.O_CREAT | os.O_EXCL | os.O_WRONLY); os.write(fd, body); os.close(fd)
+        proc_identity.publish_exclusive(LOCK, body)
         atexit.register(_release_lock)
         log.info("lock acquired pid %s", os.getpid())
         _acquire_app_lock(); return
@@ -102,7 +102,7 @@ def _acquire_app_lock():
     snap = proc_identity.snapshot(os.getpid()) or {}
     body = proc_identity.format_lock(os.getpid(), snap.get("created") or "", BASE).encode("utf-8")
     try:
-        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY); os.write(fd, body); os.close(fd)
+        proc_identity.publish_exclusive(path, body)
         atexit.register(_release_app_lock)
         log.info("app lock acquired"); return
     except FileExistsError:

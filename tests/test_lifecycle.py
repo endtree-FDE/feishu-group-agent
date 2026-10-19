@@ -112,6 +112,25 @@ def _alive(proc):
     return proc.poll() is None
 
 
+_pub = tempfile.mkdtemp(prefix="agentbot_pub_")
+try:
+    _pub_path = os.path.join(_pub, "bot.lock")
+    _pub_body = proc_identity.format_lock(7, "100", _pub)
+    proc_identity.publish_exclusive(_pub_path, _pub_body)
+    _pub_again = False
+    try:
+        proc_identity.publish_exclusive(_pub_path, proc_identity.format_lock(8, "200", _pub))
+    except FileExistsError:
+        _pub_again = True
+    _pub_names = sorted(os.listdir(_pub))
+    _pub_got = open(_pub_path, encoding="utf-8").read()
+    check("锁文件一次写成完整内容，第二次不会覆盖，也不留下临时文件",
+          _pub_got == _pub_body and _pub_again and _pub_names == ["bot.lock"]
+          and proc_identity.parse_lock(_pub_got)["pid"] == 7, _pub_got + " " + str(_pub_names))
+finally:
+    shutil.rmtree(_pub, ignore_errors=True)
+
+
 # ---------- 真进程：接管锁时不能把那个进程杀掉 ----------
 holder = None
 try:
@@ -191,11 +210,16 @@ try:
     first = subprocess.Popen([sys.executable, os.path.join(FW, "agentbot.py"), cfg, "--lock-test", "8"],
                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
     lock_path = os.path.join(work, "state", "bot.lock")
+    body = ""
     for _ in range(50):
         if os.path.isfile(lock_path):
-            break
-        time.sleep(0.1)
-    body = open(lock_path, encoding="utf-8").read() if os.path.isfile(lock_path) else ""
+            try:
+                body = open(lock_path, encoding="utf-8").read()
+            except OSError:
+                body = ""
+            if body.splitlines()[:1] == [str(first.pid)] and "created=" in body and "base=" in body:
+                break
+        time.sleep(0.05)
     second = _run_bot(cfg, ["--lock-test", "0.2"])
     out = (second.stdout or "") + (second.stderr or "")
     check("本机器人还在时第二个进程退出 3，锁的第一行仍是进程号",
