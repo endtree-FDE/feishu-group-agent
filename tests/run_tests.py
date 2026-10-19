@@ -464,13 +464,93 @@ _repo = _sk.SkillSet({"skills": {"enabled": True, "dir": "skills"}}, FW)
 _by = {s.name: s for s in _repo.valid}
 _rb = _repo.read("progress-table") if "progress-table" in _by else ""
 _mb = _repo.read("meeting-minutes") if "meeting-minutes" in _by else ""
-check("仓库示例技能格式合法：查进度表、整理会议纪要",
-      [s.name for s in _repo.valid] == ["meeting-minutes", "progress-table"] and not _repo.invalid
+_creative = ["aigc-prompt-pack", "creative-brief", "post-mortem", "short-video-script", "storyboard", "topic-ideation"]
+_expect_skills = ["aigc-prompt-pack", "creative-brief", "meeting-minutes", "post-mortem", "progress-table", "short-video-script", "storyboard", "topic-ideation"]
+check("仓库示例技能格式合法：查进度表、整理会议纪要，以及六份创作技能",
+      [s.name for s in _repo.valid] == _expect_skills and not _repo.invalid
       and "base_read" in _rb and "表里没有" in _rb and "name: progress-table" not in _rb
       and "未提及" in _mb and "不写入" in _mb and "name: meeting-minutes" not in _mb
       and "进度表" in _by["progress-table"].triggers and "谁负责" in _by["progress-table"].triggers
       and "会议纪要" in _by["meeting-minutes"].triggers and "待办" in _by["meeting-minutes"].triggers,
       _repo.status() + str(_by["progress-table"].triggers) + str(_by["meeting-minutes"].triggers))
+_need = {
+    "topic-ideation": ["受众匹配", "可执行", "辨识度", "传播结构", "风险", "docs_create"],
+    "short-video-script": ["钩子", "口播", "docs_create"],
+    "storyboard": ["镜号", "时长", "画面", "声音/音乐", "AIGC提示词备注", "docs_create"],
+    "aigc-prompt-pack": ["正向提示词", "负向提示词", "不绑定工具", "docs_create"],
+    "creative-brief": ["交付物", "未提及", "docs_create"],
+    "post-mortem": ["下次改", "未提及", "docs_create"],
+}
+_forbid_triggers = {"进度", "进度表", "负责人", "截止", "谁负责", "会议纪要", "纪要", "待办", "会议记录"}
+_phone_rx = re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)")
+_fmt_bad = []
+for _cn in _creative:
+    _skl = _by.get(_cn)
+    if not _skl:
+        _fmt_bad.append(_cn + " missing"); continue
+    _raw = open(_skl.path, encoding="utf-8").read()
+    _data, _parsed, _err = _sk.parse_skill(_raw)
+    _body = _repo.read(_cn)
+    if _err or (_data or {}).get("name") != _cn or not str(_parsed or "").strip():
+        _fmt_bad.append(_cn + " parse " + str(_err))
+    if not (1 <= len(_skl.description) <= 1024):
+        _fmt_bad.append(_cn + " description")
+    if not _skl.triggers or _forbid_triggers.intersection(_skl.triggers):
+        _fmt_bad.append(_cn + " triggers " + str(_skl.triggers))
+    if len(_body) > 3000 or len(_body) < 200:
+        _fmt_bad.append("%s body %d" % (_cn, len(_body)))
+    if "没确认前不要说已经写入" not in _body or "确认码由程序发给发起人" not in _body or "base_create" not in _body:
+        _fmt_bad.append(_cn + " save")
+    if "不写命理、运势、风水、占卜或超自然因果" not in _body or "才问一句" not in _body:
+        _fmt_bad.append(_cn + " bounds")
+    if "<<TOOL>>" in _body or "<<MEM>>" in _body or _phone_rx.search(_body) or "sk-" in _body:
+        _fmt_bad.append(_cn + " unsafe")
+    for _bit in _need[_cn]:
+        if _bit not in _body:
+            _fmt_bad.append(_cn + " missing " + _bit)
+    if "name: " + _cn in _body:
+        _fmt_bad.append(_cn + " yaml leaked")
+check("创作技能格式：触发词、正文、确认码和预放字数", not _fmt_bad, str(_fmt_bad))
+_cat = _repo.prompt_block()
+check("八个技能的目录放得进默认 800 字，且不截断",
+      _cat and len(_cat) <= 800 and _sk.TRUNC_NOTE not in _cat and all((n + "：") in _cat for n in _expect_skills),
+      "%d %s" % (len(_cat or ""), _cat))
+_picks = [
+    ("给青绿山水出几个选题", "topic-ideation"),
+    ("写一版45秒口播稿", "short-video-script"),
+    ("列一个分镜清单", "storyboard"),
+    ("给第2镜写提示词包", "aigc-prompt-pack"),
+    ("写成项目策划书", "creative-brief"),
+    ("帮我做创作复盘", "post-mortem"),
+    ("看一下进度表", "progress-table"),
+    ("整理会议纪要", "meeting-minutes"),
+    ("复盘一下待办", "post-mortem"),
+]
+_pick_bad = []
+for _q, _want in _picks:
+    _got = _repo.pick_preload(_q)
+    if not _got or _got.name != _want:
+        _pick_bad.append("%s -> %s" % (_q, _got.name if _got else None))
+check("创作技能触发词预放到对应技能，不抢走进度表和纪要", not _pick_bad, str(_pick_bad))
+_off_repo = _sk.SkillSet({"skills": {"enabled": False, "dir": "skills"}, "redact_file": "redact.txt"}, FW)
+check("技能默认关闭：有创作技能时目录和预放仍是空的",
+      _off_repo.prompt_block() == "" and _off_repo.preload_block("给青绿山水出几个选题") == "" and _off_repo.enabled is False,
+      _off_repo.status())
+_only_c = _sk.SkillSet({"skills": {"enabled": True, "dir": "skills", "only": list(_creative)}, "redact_file": "redact.txt"}, FW)
+_only_story = _only_c.pick_preload("列一个分镜清单")
+check("skills.only 可以只启用六份创作技能",
+      [s.name for s in _only_c.valid] == _creative
+      and [s.name for s in _only_c.skipped] == ["meeting-minutes", "progress-table"]
+      and "topic-ideation：" in _only_c.prompt_block() and "progress-table" not in _only_c.prompt_block()
+      and _only_c.pick_preload("看一下进度表") is None
+      and _only_story is not None and _only_story.name == "storyboard"
+      and "镜号" in _only_c.read("storyboard") and "name: storyboard" not in _only_c.read("storyboard"),
+      _only_c.status())
+_ex_cfg = json.load(open(os.path.join(FW, "agents", "example.json"), encoding="utf-8"))
+_ex_sk = _ex_cfg.get("skills") or {}
+check("配置示例的技能开关仍是关闭，only 仍是空数组",
+      _ex_sk.get("enabled") is False and _ex_sk.get("only") == [] and _ex_sk.get("index_budget_chars") == 800,
+      str(_ex_sk))
 _inline, _ibody, _ierr = _sk.parse_skill('---\nname: demo-skill\ndescription: 演示触发词。\ntriggers: ["进度表", 纪要]\n---\n\n步骤。\n')
 _block, _bbody, _berr = _sk.parse_skill("---\nname: demo-skill\ndescription: 演示触发词。\ntriggers:\n  - 进度表\n  - 纪要\n---\n\n步骤。\n")
 check("triggers：一行列表和缩进列表都能解析",
