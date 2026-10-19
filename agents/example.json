@@ -75,7 +75,9 @@
   },
   "p2p": {
     "allow_open_ids": [],
-    "open_to_all": false
+    "open_to_all": false,
+    "allow_group_members": false,
+    "member_cache_ttl_sec": 600
   },
   "model_provider": "cursor",
   "agent": {

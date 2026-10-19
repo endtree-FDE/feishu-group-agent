@@ -70,6 +70,9 @@ def required_scopes(cfg):
     chats = cfg.get("chats") or {}
     if chats.get("auto_join") and not (cfg.get("chat_ids") or []):
         need.extend(["im:chat:read", "im:chat.members:read"])
+    p2p = cfg.get("p2p") or {}
+    if isinstance(p2p, dict) and p2p.get("allow_group_members"):
+        need.append("im:chat.members:read")
     out = []
     for item in need:
         if item not in out:

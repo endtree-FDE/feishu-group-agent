@@ -295,6 +295,15 @@
         },
         "open_to_all": {
           "type": "boolean"
+        },
+        "allow_group_members": {
+          "type": "boolean",
+          "description": "为 true 时，所服务群的当前成员可以私聊。不写或 false 时不查群成员。"
+        },
+        "member_cache_ttl_sec": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "群成员名单缓存秒数。不写是 600。失败时上次成功的名单最多再沿用两倍。"
         }
       }
     },

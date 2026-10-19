@@ -661,16 +661,191 @@ def clean_q(t):
     t = re.sub(r"@_user_\d+", "", t or "")
     for n in CFG.get("bot_names", []): t = re.sub("@" + re.escape(n) + r"\S*", "", t)
     return t.strip()
+def _p2p_cfg():
+    pc = CFG.get("p2p")
+    return pc if isinstance(pc, dict) else {}
+def member_cache_ttl():
+    """成员名单缓存秒数。没写、写错或负数都是 600。0 表示每次私聊都重新拉。"""
+    raw = _p2p_cfg().get("member_cache_ttl_sec", 600)
+    if isinstance(raw, bool): return 600
+    try: n = int(raw)
+    except (TypeError, ValueError): return 600
+    return n if n >= 0 else 600
+def _p2p_explicit(uid):
+    """allow_open_ids 与写入白名单是「或」。空字符串不算。"""
+    if not uid or uid == "?": return False
+    allow = _p2p_cfg().get("allow_open_ids") or []
+    if isinstance(allow, list) and any(isinstance(x, str) and x == uid for x in allow): return True
+    users = (CFG.get("write") or {}).get("allowed_users") or {}
+    return isinstance(users, dict) and uid in users
+def served_chat_ids():
+    """当前会回答的群。非空 chat_ids 就是这些群；自动认群生效时再加上已认下的群。待认、离开、忘群不算。"""
+    out, seen = [], set()
+    for cid in static_chat_ids() or []:
+        if valid_chat(cid) and cid not in seen:
+            seen.add(cid); out.append(cid)
+    if auto_join_active():
+        for row in all_chats():
+            cid = row.get("chat_id")
+            if row.get("status") == "admitted" and valid_chat(cid) and cid not in seen:
+                seen.add(cid); out.append(cid)
+    return out
+_MEMBER_LOCK = threading.Lock()
+_MEMBER_CACHE = {}      # chat_id -> {"ids": set, "at": float}  只存完整成功的名单
+_MEMBER_ATTEMPT = {}    # chat_id -> 上次拉取时刻。TTL 内不重复打接口
+_MEMBER_INFLIGHT = {}   # chat_id -> Event。并发私聊共用同一次刷新
+_MEMBER_CODE_RX = re.compile(r"^[A-Za-z0-9_.:-]{1,32}$")
+def _log_member_fail(cid, code):
+    """只写群编号和短错误码。调用方不得把接口原文传进来，原文里可能有 token。"""
+    safe_cid = cid if valid_chat(cid) else "?"
+    safe = str(code or "error")
+    if not _MEMBER_CODE_RX.match(safe): safe = "error"
+    log.info("p2p member check failed %s %s", safe_cid, safe)
+def _member_fail_code(err):
+    text = err or ""
+    low = text.lower()
+    if "timed out" in low or "timeout" in low: return "timeout"
+    m = re.search(r"\b(9999\d{4})\b", text)
+    if m: return m.group(1)
+    if re.search(r"scope|permission denied|access denied|无权限|权限不足", text, re.I): return "scope"
+    return "error"
+def _parse_members(j):
+    """返回 (open_id 集合, 是否完整, 人数或 None)。人数只在认出名单数组时才有。"""
+    data = {}
+    if isinstance(j, dict):
+        inner = j.get("data")
+        if isinstance(inner, dict) and any(isinstance(inner.get(k), list) for k in ("users", "bots", "items", "members")):
+            data = inner
+        elif any(isinstance(j.get(k), list) for k in ("users", "bots", "items", "members")):
+            data = j
+        elif isinstance(inner, dict):
+            data = inner
+    buckets = [k for k in ("users", "bots", "items", "members") if isinstance(data.get(k), list)]
+    if not buckets: return set(), False, None
+    ids = set()
+    for key in buckets:
+        for item in data[key]:
+            mid = ""
+            if isinstance(item, str): mid = item.strip()
+            elif isinstance(item, dict):
+                raw = item.get("member_id") if isinstance(item.get("member_id"), str) else item.get("open_id")
+                if isinstance(raw, str): mid = raw.strip()
+            if mid: ids.add(mid)
+    incomplete = False
+    trunc = data.get("truncations")
+    if isinstance(trunc, list) and trunc: incomplete = True
+    if data.get("has_more") is True or (isinstance(j, dict) and j.get("has_more") is True): incomplete = True
+    for total_key, list_key in (("user_total", "users"), ("bot_total", "bots"), ("member_total", "items"), ("member_total", "members")):
+        total, arr = data.get(total_key), data.get(list_key)
+        if isinstance(total, bool): continue
+        if isinstance(total, int) and isinstance(arr, list) and total > len(arr): incomplete = True
+    return ids, not incomplete, len(ids)
+def _fetch_chat_members(cid):
+    """以机器人身份拉一整份成员。lark_api 会补上 --profile 和 --as bot。失败或名单不完整都不返回可用集合。"""
+    if not valid_chat(cid):
+        _log_member_fail(cid, "error"); return {"ok": False, "ids": set(), "count": None, "code": "error"}
+    # im/v1/chats/{chat_id}/members ，member_id_type=open_id。--page-limit 0 表示翻完，不在默认 10 页处停。
+    argv = ["im", "+chat-members-list", "--chat-id", cid, "--member-id-type", "open_id",
+            "--page-all", "--page-limit", "0", "--format", "json"]
+    try: j, err = lark_api(argv, timeout=120)
+    except Exception:
+        _log_member_fail(cid, "error"); return {"ok": False, "ids": set(), "count": None, "code": "error"}
+    if not j:
+        code = _member_fail_code(err)
+        _log_member_fail(cid, code); return {"ok": False, "ids": set(), "count": None, "code": code}
+    ids, complete, count = _parse_members(j)
+    if count is None:
+        _log_member_fail(cid, "error"); return {"ok": False, "ids": set(), "count": None, "code": "error"}
+    if not complete:
+        # 半份名单不能用来放人。人数只给 --check 看，不写入缓存。
+        _log_member_fail(cid, "truncated"); return {"ok": False, "ids": set(), "count": count, "code": "truncated"}
+    return {"ok": True, "ids": ids, "count": count, "code": ""}
+def _member_ids_within(cid, max_age):
+    now = time.time()
+    with _MEMBER_LOCK:
+        entry = _MEMBER_CACHE.get(cid)
+        if entry and now - entry["at"] <= max_age: return set(entry["ids"])
+    return None
+def ensure_members(cid):
+    """返回该群 open_id 集合。没有可沿用的完整名单时返回 None。同一 TTL 内、以及并发的私聊，每个群最多打一次接口。"""
+    now = time.time(); ttl = member_cache_ttl()
+    with _MEMBER_LOCK:
+        entry = _MEMBER_CACHE.get(cid)
+        if entry and now - entry["at"] < ttl: return set(entry["ids"])
+        attempted = _MEMBER_ATTEMPT.get(cid)
+        if attempted is not None and now - attempted < ttl:
+            if entry and now - entry["at"] <= 2 * ttl: return set(entry["ids"])
+            return None
+        flight = _MEMBER_INFLIGHT.get(cid)
+        if flight is None:
+            flight = threading.Event(); _MEMBER_INFLIGHT[cid] = flight; leader = True
+        else: leader = False
+    if not leader:
+        flight.wait(150); return _member_ids_within(cid, 2 * member_cache_ttl())
+    result = {"ok": False, "ids": set()}
+    try: result = _fetch_chat_members(cid)
+    except Exception:
+        _log_member_fail(cid, "error"); result = {"ok": False, "ids": set()}
+    finally:
+        with _MEMBER_LOCK:
+            _MEMBER_ATTEMPT[cid] = time.time()
+            if result.get("ok"): _MEMBER_CACHE[cid] = {"ids": set(result["ids"]), "at": _MEMBER_ATTEMPT[cid]}
+            _MEMBER_INFLIGHT.pop(cid, None)
+        flight.set()
+    if result.get("ok"): return set(result["ids"])
+    # 拉取失败时，上次成功的名单最多再沿用两倍 TTL。超过就当这个群没有可用名单。
+    return _member_ids_within(cid, 2 * member_cache_ttl())
+def _is_served_member(uid):
+    if not uid or uid == "?": return False
+    for cid in served_chat_ids():
+        ids = ensure_members(cid)
+        if ids is not None and uid in ids: return True
+    return False
+def p2p_can_reply(uid):
+    """谁能得到私聊回复。open_to_all 优先；其次是显式名单或写入白名单；开关打开时再加上所服务群的当前成员。"""
+    pc = _p2p_cfg()
+    if pc.get("open_to_all"): return True
+    if _p2p_explicit(uid): return True
+    if not pc.get("allow_group_members"): return False
+    return _is_served_member(uid)
 def p2p_limited(uid, ctype):
-    """只限制私聊。已认群里的成员 @ 机器人仍可使用只读工具；写入另走白名单和确认码。
-    open_to_all 且不在私聊名单、也不在写入白名单时，私聊只能聊天，不能用飞书工具。"""
+    """只限制私聊。显式名单、写入白名单、凭群成员身份进来的人，工具权限一样。
+    只有 open_to_all 放进来、又对不上这三份的人，才能聊天但不能用飞书工具。"""
     if ctype != "p2p": return False
-    pc = CFG.get("p2p") or {}
-    if not isinstance(pc, dict) or not pc.get("open_to_all"): return False
-    allow = [x for x in (pc.get("allow_open_ids") or []) if isinstance(x, str)]
-    if uid in allow: return False
-    if uid in ((CFG.get("write") or {}).get("allowed_users") or {}): return False
-    return True
+    if _p2p_explicit(uid): return False
+    if _p2p_cfg().get("allow_group_members") and _is_served_member(uid): return False
+    if _p2p_cfg().get("open_to_all"): return True
+    return False
+def preload_p2p_members():
+    """正式启动后在后台先拉一遍。演练、自检和开关关闭时不调用。"""
+    if not FEAT.get("p2p") or not _p2p_cfg().get("allow_group_members"): return None
+    def work():
+        for cid in served_chat_ids():
+            if lifecycle.SHUTDOWN.is_set(): return
+            try: ensure_members(cid)
+            except Exception: _log_member_fail(cid, "error")
+    t = threading.Thread(target=work, name="p2p-members", daemon=True)
+    t.start(); return t
+def report_p2p_members():
+    """--check 用。开关关闭时不打接口。两个开关都开时先提示 open_to_all 优先。"""
+    pc = _p2p_cfg()
+    if pc.get("open_to_all") and pc.get("allow_group_members"):
+        print("HINT p2p.allow_group_members 与 open_to_all 同时打开。谁能私聊仍由 open_to_all 决定。")
+    if not pc.get("allow_group_members"): return
+    ids = served_chat_ids()
+    if not ids:
+        print("OK   p2p members groups=0"); return
+    for cid in ids:
+        got = _fetch_chat_members(cid)
+        if got.get("ok"):
+            with _MEMBER_LOCK:
+                now = time.time()
+                _MEMBER_CACHE[cid] = {"ids": set(got["ids"]), "at": now}
+                _MEMBER_ATTEMPT[cid] = now
+            print("OK   p2p members %s count=%d complete=yes" % (cid, got["count"]))
+        else:
+            shown = "?" if got.get("count") is None else str(got["count"])
+            print("DEGR p2p members %s count=%s complete=no %s" % (cid, shown, got.get("code") or "error"))
 def clip_question(q):
     raw = (CFG.get("agent") or {}).get("max_input_chars", 8000)
     try: n = int(raw)
@@ -1333,10 +1508,8 @@ def handle(ev):
     uid = ev.get("sender_id") or "?"
     if ctype == "p2p":
         if not FEAT.get("p2p"): return
-        # 私聊范围：p2p.allow_open_ids 优先；为空时 p2p.open_to_all=true 对所有人开放，否则只放行写入白名单里的成员
-        pc = CFG.get("p2p", {}); allow = pc.get("allow_open_ids")
-        if not allow and not pc.get("open_to_all", False): allow = list((CFG.get("write", {}).get("allowed_users") or {}).keys())
-        if allow and uid not in allow: return
+        # 不在名单里、也不是所服务群当前成员的人：不回复、不调用模型。
+        if not p2p_can_reply(uid): return
     else:
         if not is_for_me(ev) and not _thread_followup_ok(ev, uid): return
         gate = group_gate(ev.get("chat_id"), uid, clean_q(ev.get("content") or ""))
@@ -1724,8 +1897,10 @@ def self_check():
     if auto_join_active() and admit_mode() == "confirm" and not list(((CFG.get("write") or {}).get("allowed_users") or {})):
         print("HINT chats.admit=confirm 但 write.allowed_users 为空，没有人能发送 /认群。")
     pc = CFG.get("p2p") or {}
-    if pc.get("open_to_all") and not (pc.get("allow_open_ids") or []):
-        print("HINT p2p.open_to_all 已打开且私聊名单为空。任何人都能私聊；不在写入白名单里的人不能用飞书工具，但模型工作区仍是知识库。")
+    if isinstance(pc, dict) and pc.get("open_to_all") and not (pc.get("allow_open_ids") or []):
+        tail = "所服务群的当前成员仍可使用已开启的工具。" if pc.get("allow_group_members") else ""
+        print("HINT p2p.open_to_all 已打开且私聊名单为空。任何人都能私聊；不在写入白名单里的人不能用飞书工具，但模型工作区仍是知识库。" + tail)
+    report_p2p_members()
     if auto_join_active() and admit_mode() == "open":
         print("HINT chats.admit=open：别人第一次 @ 就会认群并回答。不想这样请改成 confirm 或 whitelist。")
     sks = TOOLS.skills
@@ -1812,6 +1987,7 @@ def main():
     log.info("starting %s (features=%s)", CFG["name"], json.dumps(FEAT, ensure_ascii=False))
     if static_chat_ids() is not None: record_static_chats()
     if auto_join_active(): sync_joined_chats()
+    preload_p2p_members()
     keys = consumer_keys()
     for key in keys[1:]:
         threading.Thread(target=_consume_forever, args=(key,), daemon=True).start()

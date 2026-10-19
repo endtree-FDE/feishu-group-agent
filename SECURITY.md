@@ -50,8 +50,10 @@ lark-cli config init --name <profile> --app-id 你的应用ID --app-secret-stdin
 
 常驻模式默认关闭。打开之后，改文件、删文件和执行命令的请求会被拒绝。上网只放行公网的搜索和网页读取，不放行本机和内网地址。
 
+私聊默认不按群成员放行。`p2p.allow_group_members` 不写或为 false 时，不会去查群成员。打开后，当前在所服务群里的成员可以私聊，工具权限和私聊名单相同；写入仍要白名单和确认码。`open_to_all` 优先于这个开关。成员名单默认缓存 600 秒，进群或退群不会立刻生效。查不到完整名单时拒绝，不回复群外的人，日志不写访问令牌。
+
 更细的规则见 [docs/安全红线.md](docs/安全红线.md)。
 
 ## English
 
-The version is the `VERSION` file. GitHub Release `v0.4.0` exists, so security fixes target the latest release and `main`. Report vulnerabilities through GitHub private vulnerability reporting: [private security advisories](https://github.com/endtree-FDE/feishu-group-agent/security/advisories/new). Do not include secrets, Feishu IDs, or customer names in public issues. The bot runs on the operator's machine; this repository must not contain App Secrets or filled-in configuration. It does not delete messages, documents, or Bitable records. Changing or deleting a calendar event still needs an allow-listed person and a confirmation code, and does not notify attendees.
+The version is the `VERSION` file. GitHub Release `v0.4.0` exists, so security fixes target the latest release and `main`. Report vulnerabilities through GitHub private vulnerability reporting: [private security advisories](https://github.com/endtree-FDE/feishu-group-agent/security/advisories/new). Do not include secrets, Feishu IDs, or customer names in public issues. The bot runs on the operator's machine; this repository must not contain App Secrets or filled-in configuration. It does not delete messages, documents, or Bitable records. Changing or deleting a calendar event still needs an allow-listed person and a confirmation code, and does not notify attendees. `p2p.allow_group_members` defaults to false. When enabled, current members of served groups may use private chat; lookups fail closed and do not log tokens. `open_to_all` still takes priority.
