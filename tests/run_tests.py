@@ -2114,6 +2114,8 @@ def _att_fake(argv):
         return {"ok": True, "data": {"messages": [_att_msg(mid, "chat_other", _now_ms)]}}
     if mid == "om_oldfile1":
         return {"ok": True, "data": {"messages": [_att_msg(mid, CH, "2000-01-01T00:00:00+00:00")]}}
+    if mid == "om_lista1":
+        return {"ok": True, "data": {"messages": [_att_msg(mid, CH, _now_ms, name="列表.txt")]}}
     if mid == "om_emptyid1":
         return {"ok": True, "data": {"messages": [{"chat_id": CH, "create_time": _now_ms, "msg_type": "file",
             "content": json.dumps({"file_key": "file_empty", "file_name": "空编号.txt"}, ensure_ascii=False)}]}}
