@@ -1,6 +1,7 @@
 # 工具层：只允许白名单内的 lark-cli 命令，统一 --as bot；写操作需确认码；全部写审计日志；缺权限优雅降级。
 import json, os, re, sqlite3, subprocess, struct, time, random, threading, datetime, glob, shutil, zipfile
 import guard, skills
+from channels.base import TOOL_CAPS
 
 def run_capture(cmd, cwd=None, timeout=60):
     """代替 subprocess.run：超时杀整棵进程树（Windows 上只杀父进程时孙进程仍占着管道，communicate 会一直卡住）"""
@@ -175,6 +176,7 @@ class Tools:
         self._db = None
         self._load_pending()
         self.fake = None  # 测试注入：callable(argv)->dict
+        self.channel = None  # 由 agentbot 在渠道建好后挂上。没有渠道时和以前一样直接调 lark-cli
         self.skills = skills.SkillSet(cfg, base)  # 技能目录；enabled 默认 false
 
     # ---------- 基础 ----------
@@ -193,6 +195,22 @@ class Tools:
         if name in _CAL_FOLLOW and name not in self.t:
             return bool((self.t.get("calendar_create") or {}).get("enabled"))
         return bool((spec or {}).get("enabled", False)) if isinstance(spec, dict) else False
+    def channel_allows(self, name):
+        """渠道没有这项能力时，提示词里不列、调用时也不打到飞书。飞书能力齐全，名单和以前一样。"""
+        cap = TOOL_CAPS.get(name)
+        ch = getattr(self, "channel", None)
+        if not cap or ch is None: return True
+        return ch.supports(cap)
+    def _require_cap(self, name):
+        if self.channel_allows(name): return
+        raise ToolError(self.channel.unavailable(TOOL_CAPS[name]))
+    def _transport(self, tool, argv, cwd=None, timeout=60):
+        """历史和附件的读取。飞书渠道原样调用 lark，参数不变。"""
+        ch = getattr(self, "channel", None)
+        def call():
+            return self.lark(tool, argv, cwd=cwd, timeout=timeout)
+        if ch is None: return call()
+        return ch.transport_read(tool, argv, call)
     def audit(self, **kw):
         kw["ts"] = datetime.datetime.now().isoformat(timespec="seconds")
         for k in ("args", "summary", "detail", "err", "result"):
@@ -254,6 +272,7 @@ class Tools:
         else:
             if name not in READ_TOOLS: raise ToolError("未知工具")
             if not self.enabled(name): raise ToolError("这项能力还没在配置里启用")
+            self._require_cap(name)
             call = getattr(self, "_" + name)
         try: res = call(args or {}, ctx)
         except ToolError as e:
@@ -287,8 +306,8 @@ class Tools:
         days = int(self.t["history"].get("days", 7))
         start = (datetime.datetime.now().astimezone() - datetime.timedelta(days=days)).isoformat(timespec="seconds")
         page = history_page_size(self.cfg)
-        j = self.lark("history", ["im", "+chat-messages-list", "--chat-id", ctx["chat_id"], "--start", start,
-                                  "--page-size", str(page), "--page-all", "--page-limit", str(self.t["history"].get("max_pages", 2)), "--no-reactions"])
+        j = self._transport("history", ["im", "+chat-messages-list", "--chat-id", ctx["chat_id"], "--start", start,
+                                        "--page-size", str(page), "--page-all", "--page-limit", str(self.t["history"].get("max_pages", 2)), "--no-reactions"])
         msgs = (j.get("data") or {}).get("messages") or []
         kw = (a.get("keyword") or "").strip(); kw_l = kw.lower(); lines = []
         for m in msgs:
@@ -408,7 +427,7 @@ class Tools:
         used = int((ctx or {}).get("_attach_used") or 0)
         if used >= cap:
             raise ToolError("这次回答里附件已经看了 %d 个，剩下的请分开再问。" % cap)
-        j = self.lark("message_attachment", ["im", "+messages-mget", "--message-ids", mid, "--no-reactions"])
+        j = self._transport("message_attachment", ["im", "+messages-mget", "--message-ids", mid, "--no-reactions"])
         msg = _pick_message(j.get("data") or {}, mid)
         if not msg: raise ToolError("没有找到这条消息")
         got = str(msg.get("message_id") or msg.get("id") or "")
@@ -474,6 +493,7 @@ class Tools:
         if name not in WRITE_TOOLS: raise ToolError("未知工具")
         if not self.w.get("enabled"): raise ToolError("写入功能还没启用")
         if not self.enabled(name): raise ToolError("这项写入能力还没在配置里启用")
+        self._require_cap(name)
         if not _actor_ok(ctx): raise ToolError("不能发起写入：缺少发送人或会话")
         if ctx["user"] not in (self.w.get("allowed_users") or {}):
             self.audit(kind="write_denied", tool=name, user=ctx["user"], chat=ctx["chat_id"], args=_brief(args))
@@ -715,7 +735,7 @@ class Tools:
     def fetch_attachments(self, message_id, ctx, tmp_root, must_enable=True):
         if must_enable and not self.enabled("attachment"): raise ToolError("图片和文件识别还没在配置里启用")
         d = os.path.join(tmp_root, "att_" + re.sub(r"\W", "", message_id)[-20:]); os.makedirs(d, exist_ok=True)
-        j = self.lark("attachment", ["im", "+messages-mget", "--message-ids", message_id, "--download-resources", "--no-reactions"], cwd=d, timeout=120)
+        j = self._transport("attachment", ["im", "+messages-mget", "--message-ids", message_id, "--download-resources", "--no-reactions"], cwd=d, timeout=120)
         files = []
         root_r = os.path.realpath(d)
         for p in glob.glob(os.path.join(d, "lark-im-resources", "**", "*"), recursive=True):
