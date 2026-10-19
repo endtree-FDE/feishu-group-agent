@@ -148,7 +148,7 @@ o = run([ev("m18", "回答里提到 杭州某某科技有限公司 吗")], name=
 o = run([dict(p2p, message_id="p3", message_type="file", content="[文件] a.txt")], name="att")
 check("私聊文件消息：调用 messages-mget 下载并回答", "[fake-lark] im +messages-mget" in o and "reply p3" in o, o)
 evs = [ev("c%d" % i, "并发%d" % i, sender_id="u%d" % i) for i in range(8)]
-# 假模型先停住，等 8 条都送进线程再放行。只加长 sleep 时，Windows 启动一慢，前面的题会先做完，queue full 就不是 2。
+# 前两条占住名额，等 8 条都做过排队判断再放行。只加长 sleep 或只等线程启动时，Windows 上后面的题还没排上队，名额就空了。
 o = run(evs, ("--parallel",), name="conc", extra_env={"AGENTBOT_FAKE_AGENT": "0", "AGENTBOT_FAKE_HOLD": os.path.join(T, "conc.hold")})
 check("并发上限 2 + 排队上限 4", "peak_active=2" in o and o.count("queue full") == 2, o)
 # ---------- 流式读取 / 卡死保护 / 部分结果 / 进度 ----------
