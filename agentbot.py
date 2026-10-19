@@ -11,6 +11,7 @@
 import json, os, re, subprocess, sys, time, logging, collections, threading, sqlite3, hashlib, atexit, shutil, datetime, signal
 
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
+import utf8io  # 管道上的标准流改为 UTF-8，避免中文 Windows 的代码页把日志解崩
 import acp_client, feishu_link, guard, lifecycle, memory, observe, proc_identity, providers
 from providers.base import PartialText
 from tools import Tools, ToolError, TOOL_DOC, MEMORY_TOOL_DOC, READ_TOOLS, WRITE_TOOLS, run_capture, parse_cli_json, clip_body, message_text, attachment_limits, inspect_download, disk_download_name, kb_catalog, history_page_size
@@ -1523,7 +1524,7 @@ def catch_up_mentions():
     cfg = _catchup_settings()
     if not cfg["enabled"]: return
     if DRY and os.environ.get("AGENTBOT_CATCHUP") != "1": return
-    try: hb = int(open(os.path.join(STATE, "heartbeat")).read().strip())
+    try: hb = int(open(os.path.join(STATE, "heartbeat"), encoding="utf-8").read().strip())
     except Exception: hb = 0
     if hb <= 0:
         log.info("catchup skip: no previous heartbeat"); return
@@ -1620,7 +1621,7 @@ def heartbeat():
             except Exception: log.exception("wake handler failed")
         now = time.time()
         if not gap and now - wrote >= 60 and not lifecycle.SHUTDOWN.is_set():
-            try: open(os.path.join(STATE, "heartbeat"), "w").write(str(int(now)))
+            try: open(os.path.join(STATE, "heartbeat"), "w", encoding="utf-8").write(str(int(now)))
             except OSError: pass
             wrote = now
             try: OBS.shrink_stdio()
@@ -1728,7 +1729,7 @@ def _consume_forever(event_key):
         created = feishu_link.created_token(p.pid)
         _track_consumer(p)
         if event_key == "im.message.receive_v1":
-            open(os.path.join(STATE, "consumer.pid"), "w").write(str(p.pid))
+            open(os.path.join(STATE, "consumer.pid"), "w", encoding="utf-8").write(str(p.pid))
         log.info("consumer %s pid %s", event_key, p.pid)
         down = threading.Event()
         def _err(proc=p, key=event_key, flag=down):

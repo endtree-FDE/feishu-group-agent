@@ -3,6 +3,7 @@ import json, os, subprocess, sys, tempfile, threading, time
 
 FW = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, FW)
+import utf8io  # noqa: F401
 import acp_client
 
 results = []

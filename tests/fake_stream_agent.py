@@ -1,5 +1,7 @@
 # 测试用假 cursor-agent：按提示词里的标记输出 stream-json（--stream-partial-output 格式，与 2026.10.16 版实测一致）
 import json, os, sys, time
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import utf8io  # noqa: F401  父进程按 UTF-8 读这条管道
 prompt = sys.argv[-1]; SID = "fake-session"
 _trace = os.environ.get("AGENTBOT_STREAM_TRACE")
 if _trace:

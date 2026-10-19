@@ -3,6 +3,7 @@ import json, os, shutil, subprocess, sys, tempfile, time
 
 FW = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, FW)
+import utf8io  # noqa: F401
 import lifecycle, proc_identity
 
 results = []
@@ -28,7 +29,7 @@ def _cfg(base):
 
 def _run_bot(cfg, args, timeout=30):
     return subprocess.run([sys.executable, os.path.join(FW, "agentbot.py"), cfg, *args],
-                          capture_output=True, text=True, encoding="utf-8", timeout=timeout)
+                          capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
 
 
 # ---------- 纯判断：创建时间对不上就是别人，不能当成本机器人 ----------
@@ -188,7 +189,7 @@ try:
     work = tempfile.mkdtemp(prefix="agentbot_lock_")
     cfg = _cfg(work)
     first = subprocess.Popen([sys.executable, os.path.join(FW, "agentbot.py"), cfg, "--lock-test", "8"],
-                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8")
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
     lock_path = os.path.join(work, "state", "bot.lock")
     for _ in range(50):
         if os.path.isfile(lock_path):
@@ -209,7 +210,7 @@ finally:
 
 
 def _py(src, env):
-    r = subprocess.run([sys.executable, "-c", src], cwd=FW, capture_output=True, text=True, encoding="utf-8",
+    r = subprocess.run([sys.executable, "-c", src], cwd=FW, capture_output=True, text=True, encoding="utf-8", errors="replace",
                        env=env, timeout=40)
     return r.returncode, (r.stdout or "") + (r.stderr or "")
 

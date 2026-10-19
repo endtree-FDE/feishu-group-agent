@@ -3,6 +3,7 @@ import base64, json, os, shutil, subprocess, sys, tempfile
 
 FW = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, FW)
+import utf8io  # noqa: F401  管道改为 UTF-8，不依赖 PYTHONUTF8
 import doctor, observe
 
 results = []
@@ -146,9 +147,9 @@ def run_user_scopes(argv):
     if "status" in argv:
         return 0, json.dumps({"identity": "user", "identities": {"bot": {"available": False, "status": "missing"}}}) + "\n", ""
     if "scopes" in argv:
-        # 1.0.98：已登录时应用权限在 userScopes，tokenType 固定写成 user。
+        # 1.0.98 实机：登录用户的 token。tokenType 固定是 user，userScopes 往往只有 offline_access。
         body = {"appId": "cli_placeholder", "brand": "feishu", "tokenType": "user",
-                "userScopes": doctor.required_scopes(cfg_min), "count": len(doctor.required_scopes(cfg_min))}
+                "userScopes": ["offline_access"], "count": 1}
         return 0, json.dumps(body) + "\n", "Querying app scopes...\n\n"
     return 1, "", "unexpected"
 
@@ -157,13 +158,29 @@ lines, code = doctor.report(cfg_min, r"D:\bots\placeholder", ["lark-cli"], run_u
                             lambda host: [("1.2.3.4", 443)], lambda host, port: True,
                             {"pypdf": True, "openpyxl": True, "PIL": True}, {"NO_PROXY": "open.feishu.cn"})
 text = "\n".join(lines)
-check("1.0.98 的 userScopes 是应用权限；bot 明确不可用仍是 FAIL",
-      code == 1 and "应用身份未就绪" in text and "没有解析到应用权限列表" not in text and "缺少" not in text
-      and "scopes" in text, text)
+check("1.0.98 用户 token 不是应用权限，降为 WARN；bot 明确不可用仍是 FAIL",
+      code == 1 and "应用身份未就绪" in text and "WARN scopes" in text and "用户 token" in text
+      and "缺少" not in text and "开放平台" in text, text)
 
 need = doctor.required_scopes(cfg_min)
-check("scopes 和 userScopes 同时存在时用 scopes",
+check("scopes 和 userScopes 同时存在、且没有 tokenType 时用 scopes",
       doctor.app_scopes(json.dumps({"scopes": need, "userScopes": ["contact:user.id:readonly"]})) == need)
+check("tokenType 为 user 时即使另有 scopes 字段也不当成应用权限",
+      doctor.app_scopes(json.dumps({"tokenType": "user", "scopes": need, "userScopes": ["offline_access"]})) is None)
+user_lines = "\n".join([
+    "Querying app scopes...",
+    "{",
+    '  "tokenType": "user",',
+    '  "userScopes": [',
+    '    "im:message:send_as_bot",',
+    '    "offline_access"',
+    "  ],",
+    '  "count": 2',
+    "}",
+])
+check("多行的用户 token JSON 不会被按行抠成应用权限", doctor.app_scopes(user_lines) is None, user_lines)
+check("tokenType 为 tenant 的 scopes 是应用权限",
+      doctor.app_scopes(json.dumps({"tokenType": "tenant", "scopes": need})) == need)
 check("嵌套的 appScopes 和对象列表也能读",
       doctor.app_scopes(json.dumps({"data": {"appScopes": [{"scope": item} for item in need]}})) == need)
 pretty = (
@@ -194,8 +211,50 @@ lines, code = doctor.report(cfg_min, r"D:\bots\placeholder", ["lark-cli"], run_u
                             lambda host: [("1.2.3.4", 443)], lambda host, port: True,
                             {"pypdf": True, "openpyxl": True, "PIL": True}, {"NO_PROXY": "open.feishu.cn"})
 text = "\n".join(lines)
-check("userScopes 里缺发送权限是 FAIL",
-      code == 1 and "缺少" in text and "im:message:send_as_bot" in text, text)
+check("userScopes 里缺发送权限是 WARN，不是 FAIL",
+      code == 0 and "FAIL" not in text and "WARN scopes" in text and "用户 token" in text
+      and "缺少" not in text and "开放平台" in text, text)
+
+
+def run_user_complete(argv):
+    if argv[1:2] == ["--version"] or (len(argv) > 1 and argv[1] == "--version"):
+        return 0, "lark-cli test\n", ""
+    if "show" in argv:
+        return 0, "profile ok\n", ""
+    if "status" in argv:
+        return 0, json.dumps({"identities": {"bot": {"available": True}}}) + "\n", ""
+    if "scopes" in argv:
+        body = {"tokenType": "user", "userScopes": list(need), "count": len(need)}
+        return 0, json.dumps(body), ""
+    return 1, "", "unexpected"
+
+
+lines, code = doctor.report(cfg_min, r"D:\bots\placeholder", ["lark-cli"], run_user_complete, lambda: [],
+                            lambda host: [("1.2.3.4", 443)], lambda host, port: True,
+                            {"pypdf": True, "openpyxl": True, "PIL": True}, {"NO_PROXY": "open.feishu.cn"})
+text = "\n".join(lines)
+check("userScopes 即使列全了必需权限也不算应用权限核对通过",
+      code == 0 and "FAIL" not in text and "OK   scopes" not in text and "用户 token" in text, text)
+
+
+def run_tenant_missing(argv):
+    if argv[1:2] == ["--version"] or (len(argv) > 1 and argv[1] == "--version"):
+        return 0, "lark-cli test\n", ""
+    if "show" in argv:
+        return 0, "profile ok\n", ""
+    if "status" in argv:
+        return 0, json.dumps({"identities": {"bot": {"available": True}}}) + "\n", ""
+    if "scopes" in argv:
+        return 0, json.dumps({"tokenType": "tenant", "scopes": short, "count": len(short)}), ""
+    return 1, "", "unexpected"
+
+
+lines, code = doctor.report(cfg_min, r"D:\bots\placeholder", ["lark-cli"], run_tenant_missing, lambda: [],
+                            lambda host: [("1.2.3.4", 443)], lambda host, port: True,
+                            {"pypdf": True, "openpyxl": True, "PIL": True}, {"NO_PROXY": "open.feishu.cn"})
+text = "\n".join(lines)
+check("tenant 权限列表里缺发送权限是 FAIL",
+      code == 1 and "FAIL scopes" in text and "缺少" in text and "im:message:send_as_bot" in text, text)
 
 win_argv = doctor.windows_process_argv()
 win_script = base64.b64decode(win_argv[win_argv.index("-EncodedCommand") + 1]).decode("utf-16-le")
@@ -312,7 +371,7 @@ try:
     env["AGENTBOT_FAKE_AGENT"] = "0"
     env["AGENTBOT_FAKE_LARK"] = fake_path
     r = subprocess.run([sys.executable, os.path.join(FW, "agentbot.py"), path, "--dry-run", events],
-                       capture_output=True, text=True, encoding="utf-8", env=env, timeout=40)
+                       capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=40)
     out = (r.stdout or "") + (r.stderr or "")
     ev_path = os.path.join(work, "logs", "events.jsonl")
     body = open(ev_path, encoding="utf-8").read() if os.path.isfile(ev_path) else ""
@@ -330,7 +389,22 @@ doctor.run_doctor = fake_run
 agentbot.main()
 '''
     env["CFG"] = path
-    r = subprocess.run([sys.executable, "-c", doctor_src], cwd=FW, capture_output=True, text=True, encoding="utf-8", env=env, timeout=30)
+    r = subprocess.run([sys.executable, "-c", doctor_src], cwd=FW, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=30)
+    gbk_env = dict(env)
+    gbk_env["PYTHONUTF8"] = "0"
+    gbk_env["PYTHONIOENCODING"] = "gbk"
+    gbk_ev = dict(ev, message_id="om_gbk", content='@小助手 编码探针中文不崩')
+    gbk_events = os.path.join(work, "gbk.jsonl")
+    open(gbk_events, "w", encoding="utf-8").write(json.dumps({"event": gbk_ev}, ensure_ascii=False) + "\n")
+    try:
+        gbk = subprocess.run([sys.executable, os.path.join(FW, "agentbot.py"), path, "--dry-run", gbk_events],
+                             capture_output=True, text=True, encoding="utf-8", errors="replace", env=gbk_env, timeout=40)
+        gbk_out = (gbk.stdout or "") + (gbk.stderr or "")
+        gbk_ok = gbk.returncode == 0 and "编码探针中文不崩" in gbk_out
+    except UnicodeDecodeError as exc:
+        gbk_out = str(exc)
+        gbk_ok = False
+    check("PYTHONUTF8=0 且标准流是 gbk 时，干跑仍能按 UTF-8 读到中文", gbk_ok, gbk_out)
     out = (r.stdout or "") + (r.stderr or "")
     check("--doctor 不写心跳、不启动接收进程",
           r.returncode == 0 and "DOCTOR_RAN" in out and not os.path.isfile(os.path.join(work, "state", "heartbeat"))

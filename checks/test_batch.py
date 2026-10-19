@@ -3,6 +3,7 @@
 import os, sys, tempfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
+import utf8io  # noqa: F401
 os.chdir(ROOT)
 
 failures = []
@@ -74,7 +75,7 @@ def wizard(args, outdir=None):
     cmd = [sys.executable, WIZ] + args
     if outdir:
         cmd += ["--outdir", outdir]
-    proc = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
+    proc = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace")
     return proc.returncode, proc.stdout + proc.stderr
 
 code, out = wizard(["--name", "drydeepseek", "--provider", "deepseek", "--dry-run"])

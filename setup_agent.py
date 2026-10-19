@@ -4,6 +4,7 @@ import argparse, json, os, re, sys
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, ROOT)
+import utf8io  # noqa: F401
 from providers.presets import PRESETS
 
 NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,40}$")

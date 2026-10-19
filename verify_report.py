@@ -1,6 +1,8 @@
 # 部署后验证的判断。只看调用方传进来的进程列表、锁文本和日志节选。
 # 不列进程，不发消息，不写心跳，不结束任何进程。
-import json, re, sys
+import json, os, re, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import utf8io  # noqa: F401
 import proc_identity
 
 _MAX_LOG = 2_000_000

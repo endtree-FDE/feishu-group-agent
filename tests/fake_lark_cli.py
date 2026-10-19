@@ -1,5 +1,7 @@
 # 测试用假 lark-cli。im messages delete 是 high-risk-write：缺 --yes 时退出码 10。其他命令不要求 --yes。
 import json, os, sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import utf8io  # noqa: F401
 argv = sys.argv[1:]
 logp = os.environ.get("AGENTBOT_FAKE_LARK_LOG")
 if logp:

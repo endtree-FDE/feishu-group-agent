@@ -4,7 +4,9 @@
 #   python kb_sync.py agents/example.json --pull-docs      拉取配置 kb_sync.docs_tokens 里的飞书文档到 staging（bot 身份，只读）
 #   python kb_sync.py agents/example.json --apply <日期>   把 staging/<日期> 合并进 kb（原子替换，保留 kb_prev）
 import sys, os, json, zipfile, hashlib, shutil, datetime, subprocess, re
-HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE); import guard
+HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
+import utf8io  # noqa: F401
+import guard
 CFG = json.load(open(sys.argv[1], encoding="utf-8-sig")); A = sys.argv[2:]
 BASE = os.path.abspath(CFG.get("base_dir") or os.path.dirname(os.path.abspath(sys.argv[1])))
 KB = os.path.join(BASE, CFG.get("kb_dir", "kb")); INBOX = os.path.join(BASE, "kb_inbox"); STG = os.path.join(BASE, "kb_staging")

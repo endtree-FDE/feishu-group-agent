@@ -12,6 +12,11 @@
 
 还没有收成 `0.4.0` 标签，也还没有 GitHub Release。发布草稿见 [docs/release-0.4.0.md](docs/release-0.4.0.md)。`VERSION` 仍是 `0.4.0-dev`。下面先写相对当前 `main` 新加的，再保留已经在 `main` 上、尚未打标签的内容。
 
+### 修复
+
+- `--doctor` 只在 `lark-cli auth scopes` 给出应用或 tenant 权限时才核对，缺了才失败。`lark-cli` 1.0.98 不接受 `--as bot`；已经登录时这条命令返回 `tokenType` 为 `user` 的 `userScopes`（用户 token，可能只有 `offline_access`）。这不再被当成应用权限，改为警告，并请到开放平台核对。
+- 文本文件读写写明 UTF-8，子进程按 UTF-8 解码。标准流被管道或重定向接走、且当前不是 UTF-8 时会改成 UTF-8。中文 Windows 不设置 `PYTHONUTF8` 和 `PYTHONIOENCODING` 也能跑测试。直接看控制台时仍用原来的代码页。
+
 ### 添加
 
 - 话题回复同时带了不同的 `root_id` 和 `thread_id` 时，仍算同一段对话。引用里的文件在追问时仍看得到正文，别的会话读不到。停机补答的文件消息不再把 `file_key` 当成提问。
@@ -43,4 +48,4 @@
 
 ## English
 
-The version is the `VERSION` file (`0.4.0-dev`). There is no GitHub Release yet. When publishing, drop the `-dev` suffix, tag that version, and keep this file in sync. Do not put secrets or Feishu IDs in release notes. The program does not read this file. New on this branch: several read-only tool calls per round, `message_ids`, remaining-round hints, configurable read caps, and `agent.tool_context_budget_chars`. Missing keys keep the previous behavior.
+The version is the `VERSION` file (`0.4.0-dev`). There is no GitHub Release yet. When publishing, drop the `-dev` suffix, tag that version, and keep this file in sync. Do not put secrets or Feishu IDs in release notes. The program does not read this file. New on this branch: several read-only tool calls per round, `message_ids`, remaining-round hints, configurable read caps, and `agent.tool_context_budget_chars`. Missing keys keep the previous behavior. `--doctor` warns instead of failing when `lark-cli` only returns a user token. Tests and the program read and write text as UTF-8 without `PYTHONUTF8` or `PYTHONIOENCODING`.
