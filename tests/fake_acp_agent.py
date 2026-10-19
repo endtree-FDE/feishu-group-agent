@@ -1,50 +1,35 @@
 # 测试用假 ACP 服务端：stdio 上收 JSON-RPC，按提示词里的标记回话。
 # 带 -p 时改走一次性 stream-json，用来验证常驻失败后回退到原来的 -p，而且不会把回退也当成 ACP。
-import json, os, sys, time
+import json, os, sys, threading, time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import utf8io  # noqa: F401
 
 PERM_ID = 8000
+_TRACE_SEQ = 0
+_TRACE_SEQ_LOCK = threading.Lock()
 
 
 def trace(obj):
-    """追加一行 JSON。常驻进程和回退的 -p 会同时写这个文件，必须整行写完再放锁。"""
+    """每个事件单独写一个文件。常驻进程和回退的 -p 会同时记跟踪，不能共用一次追加。"""
     path = os.environ.get("AGENTBOT_ACP_TRACE")
     if not path:
         return
+    global _TRACE_SEQ
+    with _TRACE_SEQ_LOCK:
+        _TRACE_SEQ += 1
+        seq = _TRACE_SEQ
     data = (json.dumps(obj, ensure_ascii=False) + "\n").encode("utf-8")
-    lock = path + ".lock"
-    deadline = time.time() + 5
-    while True:
-        try:
-            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            os.close(fd)
-            break
-        except FileExistsError:
-            if time.time() >= deadline:
-                try:
-                    os.remove(lock)
-                except OSError:
-                    pass
-                deadline = time.time() + 5
-            else:
-                time.sleep(0.02)
+    name = "%s.%020d.%d.%06d" % (path, time.time_ns(), os.getpid(), seq)
+    fd = os.open(name, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
     try:
-        fd = os.open(path, os.O_CREAT | os.O_WRONLY | os.O_APPEND, 0o644)
-        try:
-            view = data
-            while view:
-                n = os.write(fd, view)
-                if n <= 0:
-                    break
-                view = view[n:]
-        finally:
-            os.close(fd)
+        view = data
+        while view:
+            n = os.write(fd, view)
+            if n <= 0:
+                raise OSError("trace write stalled")
+            view = view[n:]
     finally:
-        try:
-            os.remove(lock)
-        except OSError:
-            pass
+        os.close(fd)
 
 
 def send(obj):

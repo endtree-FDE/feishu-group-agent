@@ -574,40 +574,66 @@ def acfg(name, progress=False, memory_on=False, **agent):
         c["progress"] = {"enabled": True, "mode": "card", "card_interval_sec": 1, "reaction": "OnIt", "done_reaction": "DONE", "status_message": True,
                          "fast_interval_sec": 1, "fast_phase_sec": 120, "slow_interval_sec": 60, "min_gap_sec": 0, "max_edits": 17, "thinking_panel": True, "thinking_chars": 1200}
     pth = os.path.join(T, name + ".json"); json.dump(c, open(pth, "w", encoding="utf-8"), ensure_ascii=False); return pth
-def load_trace(path):
-    if not os.path.exists(path): return []
-    out = []
-    for i, l in enumerate(open(path, encoding="utf-8"), 1):
-        if not l.strip():
-            continue
+def _is_trace_name(name, base):
+    if name == base:
+        return True
+    rest = name[len(base):] if name.startswith(base) else ""
+    parts = rest.split(".")
+    # 事件文件名是 base.纳秒.进程号.序号，三段都是数字。旁边的 .bak 不算。
+    return len(parts) == 4 and parts[0] == "" and all(p.isdigit() for p in parts[1:])
+def trace_files(path):
+    folder = os.path.dirname(path) or "."
+    base = os.path.basename(path)
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return []
+    found = [os.path.join(folder, name) for name in names if _is_trace_name(name, base)]
+    found.sort()
+    return found
+def clear_trace(path):
+    for p in trace_files(path):
         try:
-            out.append(json.loads(l))
-        except json.JSONDecodeError as e:
-            raise AssertionError("trace %s line %d is not json: %r" % (os.path.basename(path), i, l[:120])) from e
+            os.remove(p)
+        except OSError:
+            pass
+def load_trace(path):
+    out = []
+    for p in trace_files(path):
+        for i, l in enumerate(open(p, encoding="utf-8"), 1):
+            if not l.strip():
+                continue
+            try:
+                out.append(json.loads(l))
+            except json.JSONDecodeError as e:
+                raise AssertionError("trace %s line %d is not json: %r" % (os.path.basename(p), i, l[:120])) from e
     return out
 def _trace_lines_stay_json():
-    import importlib.util, threading
-    path = os.path.join(T, "trace_lock.jsonl")
-    if os.path.exists(path): os.remove(path)
-    spec = importlib.util.spec_from_file_location("fake_acp_agent_lock", FAKE_ACP)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    os.environ["AGENTBOT_ACP_TRACE"] = path
-    try:
-        def worker(i):
-            for n in range(20):
-                mod.trace({"event": "t", "i": i, "n": n, "blob": "甲" * 400})
-        threads = [threading.Thread(target=worker, args=(i,)) for i in range(4)]
-        for th in threads: th.start()
-        for th in threads: th.join()
-    finally:
-        os.environ.pop("AGENTBOT_ACP_TRACE", None)
-    lines = [l for l in open(path, encoding="utf-8") if l.strip()]
-    return len(lines) == 80 and all(json.loads(l).get("event") == "t" for l in lines)
-check("ACP 跟踪文件并发追加仍是一行一个 JSON", _trace_lines_stay_json())
+    """两个进程同时记跟踪。每个事件一个文件，读回来仍是完整 JSON，不靠撞锁。"""
+    path = os.path.join(T, "trace_parts.jsonl")
+    clear_trace(path)
+    code = (
+        "import importlib.util, os\n"
+        "spec = importlib.util.spec_from_file_location('fake_acp_parts', os.environ['FAKE'])\n"
+        "mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)\n"
+        "mod.trace({'event': 't', 'i': int(os.environ['I']), 'blob': '甲' * 4000})\n"
+    )
+    procs = []
+    for i in (1, 2):
+        env = dict(os.environ, AGENTBOT_ACP_TRACE=path, FAKE=FAKE_ACP, I=str(i))
+        procs.append(subprocess.Popen([sys.executable, "-c", code], env=env))
+    codes = [p.wait(timeout=30) for p in procs]
+    files = trace_files(path)
+    rows = load_trace(path)
+    one_line = []
+    for p in files:
+        text = open(p, encoding="utf-8").read()
+        one_line.append(text.endswith("\n") and text.count("\n") == 1)
+    return codes == [0, 0] and len(files) == 2 and len(rows) == 2 and all(one_line) and {r.get("i") for r in rows} == {1, 2}
+check("两个进程同时记跟踪时，每个事件仍是完整 JSON", _trace_lines_stay_json())
 def run_acp(events, name, cfg_path, extra_env=None, args=()):
     trace = os.path.join(T, name + ".trace")
-    if os.path.exists(trace): os.remove(trace)
+    clear_trace(trace)
     p = os.path.join(T, name + ".jsonl")
     open(p, "w", encoding="utf-8").write("\n".join(json.dumps({"event": e}, ensure_ascii=False) for e in events) + "\n")
     env = dict(os.environ, AGENTBOT_FAKE_LARK=FP, AGENTBOT_ACP_TRACE=trace, AGENTBOT_AGENT_CMD=json.dumps([sys.executable, FAKE_ACP]))
@@ -867,7 +893,7 @@ g["handle"](dict(base, message_id="ac14", content="@%s 先问档案"))
 open(%r, "w", encoding="utf-8").write("# 群档案\n标记SNAP_NEW\n")
 g["handle"](dict(base, message_id="ac15", root_id="ac14", content="@%s 再问档案"))
 ''' % (FP, os.path.join(T, "acp_snap.trace"), sys.executable, FAKE_ACP, FW, acfg("acp_snap", memory_on=True), os.path.join(FW, "agentbot.py"), CH, json.dumps(M), BN, os.path.join(T, "memory", "groups", CH, "GROUP.md"), BN)
-if os.path.exists(os.path.join(T, "acp_snap.trace")): os.remove(os.path.join(T, "acp_snap.trace"))
+clear_trace(os.path.join(T, "acp_snap.trace"))
 env = dict(os.environ); env.pop("AGENTBOT_FAKE_AGENT", None); env.pop("AGENTBOT_FAKE_DUMP_PROMPT", None)
 pr = subprocess.run([sys.executable, "-c", snap_src], cwd=FW, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=60)
 o = (pr.stdout or "") + (pr.stderr or ""); tr = load_trace(os.path.join(T, "acp_snap.trace")); ps = prompts_of(tr)
@@ -895,7 +921,7 @@ g["handle"](dict(base, message_id="acpre0", content="@%s 请整理会议纪要")
 open(%r, "w", encoding="utf-8").write("# 群档案\n标记PRE_NEW\n")
 g["handle"](dict(base, message_id="acpre1", root_id="acpre0", content="@%s 看一下进度表"))
 ''' % (FP, _pre_trace, sys.executable, FAKE_ACP, FW, os.path.join(T, "acp_pre.json"), os.path.join(FW, "agentbot.py"), CH, json.dumps(M), BN, os.path.join(T, "memory", "groups", CH, "GROUP.md"), BN)
-if os.path.exists(_pre_trace): os.remove(_pre_trace)
+clear_trace(_pre_trace)
 env = dict(os.environ); env.pop("AGENTBOT_FAKE_AGENT", None); env.pop("AGENTBOT_FAKE_DUMP_PROMPT", None)
 pr = subprocess.run([sys.executable, "-c", pre_src], cwd=FW, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=60)
 o = (pr.stdout or "") + (pr.stderr or ""); tr = load_trace(_pre_trace); ps = prompts_of(tr)
@@ -920,7 +946,7 @@ g["handle"](dict(base, message_id="idle0", content="@%s 第一句"))
 time.sleep(1.6)
 g["handle"](dict(base, message_id="idle1", root_id="idle0", content="@%s 第二句"))
 ''' % (FP, idle_trace, sys.executable, FAKE_ACP, acfg("acp_idle", acp_idle_sec=1), os.path.join(FW, "agentbot.py"), CH, json.dumps(M), BN, BN)
-if os.path.exists(idle_trace): os.remove(idle_trace)
+clear_trace(idle_trace)
 pr = subprocess.run([sys.executable, "-c", idle_src], cwd=FW, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=60)
 o = (pr.stdout or "") + (pr.stderr or ""); ids, news = new_ids(load_trace(idle_trace))
 check("空闲超过 acp_idle_sec：同一话题重新开会话",
