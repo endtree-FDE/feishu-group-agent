@@ -59,6 +59,7 @@
     "max_fact_chars": 300,
     "scope": "topic",
     "max_turns": 6,
+    "max_turn_chars": 2000,
     "context_budget_chars": 8000,
     "trim_note": true,
     "ttl_hours": 24,
@@ -87,6 +88,7 @@
     "max_chars": 3500,
     "body_max_chars": 20000,
     "max_tool_rounds": 4,
+    "tool_context_budget_chars": 120000,
     "reply_chunk_chars": 3500,
     "acp_max_sessions": 8,
     "acp_idle_sec": 1800,
@@ -99,10 +101,13 @@
     "history": {
       "enabled": true,
       "days": 7,
-      "max_pages": 2
+      "max_pages": 2,
+      "page_size": 50,
+      "max_lines": 150
     },
     "docs_search": {
-      "enabled": true
+      "enabled": true,
+      "max_chars": 4000
     },
     "docs_read": {
       "enabled": true,
@@ -111,13 +116,15 @@
     },
     "calendar_read": {
       "enabled": true,
-      "calendar_id": ""
+      "calendar_id": "",
+      "max_chars": 4000
     },
     "base_read": {
       "enabled": true,
       "base_token": "REPLACE_BASE_TOKEN",
       "table_id": "REPLACE_TABLE_ID",
-      "search_fields": []
+      "search_fields": [],
+      "max_chars": 5000
     },
     "attachment": {
       "enabled": true,
