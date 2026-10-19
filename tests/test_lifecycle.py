@@ -207,11 +207,13 @@ first = None
 try:
     work = tempfile.mkdtemp(prefix="agentbot_lock_")
     cfg = _cfg(work)
-    first = subprocess.Popen([sys.executable, os.path.join(FW, "agentbot.py"), cfg, "--lock-test", "8"],
+    # 慢的 Windows 上，第二个解释器光导入就可能超过 8 秒。先等到锁写完，再给足持锁时间。
+    first = subprocess.Popen([sys.executable, os.path.join(FW, "agentbot.py"), cfg, "--lock-test", "45"],
                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
     lock_path = os.path.join(work, "state", "bot.lock")
     body = ""
-    for _ in range(50):
+    deadline = time.time() + 20
+    while time.time() < deadline and first.poll() is None:
         if os.path.isfile(lock_path):
             try:
                 body = open(lock_path, encoding="utf-8").read()
@@ -388,9 +390,9 @@ try:
     one = tempfile.mkdtemp(prefix="agentbot_app1_")
     two = tempfile.mkdtemp(prefix="agentbot_app2_")
     cfg1, cfg2 = _cfg(one), _cfg(two)
-    first = subprocess.Popen([sys.executable, os.path.join(FW, "agentbot.py"), cfg1, "--lock-test", "8"],
+    first = subprocess.Popen([sys.executable, os.path.join(FW, "agentbot.py"), cfg1, "--lock-test", "45"],
                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", env=app_env)
-    deadline = time.time() + 8
+    deadline = time.time() + 20
     while time.time() < deadline and first.poll() is None:
         if any(name.endswith(".lock") for name in os.listdir(lock_dir)):
             break
