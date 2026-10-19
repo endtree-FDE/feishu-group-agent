@@ -8,7 +8,9 @@
 
 ## [Unreleased]
 
-还没有新的未发布改动。
+### 添加
+
+- 回答质量回归 `python evals/run.py`。用例在 `evals/cases/suite.json`，假模型基线在 `evals/baseline/ci.json`。说明见 [docs/回归测试.md](docs/回归测试.md)。不改默认配置。正式运行仍不读这些文件。CI 只跑假模型那一档，不连接飞书，也不拿单实例锁。
 
 ## [0.5.0] - 2026-10-19
 

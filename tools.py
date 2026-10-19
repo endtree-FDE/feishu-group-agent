@@ -210,6 +210,10 @@ class Tools:
         def call():
             return self.lark(tool, argv, cwd=cwd, timeout=timeout)
         if ch is None: return call()
+        # 内存渠道可以在下载目录里放夹具文件。飞书没有这个方法，参数和调用都不改。
+        stage = getattr(ch, "stage_download", None)
+        if cwd and stage:
+            stage(tool, argv, cwd)
         return ch.transport_read(tool, argv, call)
     def audit(self, **kw):
         kw["ts"] = datetime.datetime.now().isoformat(timespec="seconds")
@@ -247,6 +251,9 @@ class Tools:
             self.log.info("[fake-lark] %s -> ok=%s", " ".join(argv[:2]), j.get("ok"))
         elif self.dry and (tool in WRITE_TOOLS and os.environ.get("AGENTBOT_DRY_LIVE_WRITES") != "1" or tool not in WRITE_TOOLS and not self.cfg.get("dry_run_live_reads")):
             self.log.info("[tools-dry-run] lark-cli %s", " ".join(argv)); return {"ok": True, "data": {"dry_run": True}}
+        elif os.environ.get("AGENTBOT_EVAL_NO_LARK") == "1":
+            # 回归测试专用。变量不存在时仍走原来的 lark-cli。这里拒绝真正去连飞书。
+            raise ToolError("回归测试不会调用飞书", "eval blocked lark")
         else:
             for attempt in range(3):
                 try:

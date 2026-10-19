@@ -833,7 +833,18 @@ def clip_question(q):
 
 # ---------- agent ----------
 # 模型调用在 providers/。工具、技能、记忆、脱敏仍在这一层，三种模型都走这里。
+def _eval_note(kind, text):
+    """回归测试把提示词和阶段写到调用方指定的文件。没设环境变量时立刻返回，不改变回答。"""
+    path = os.environ.get("AGENTBOT_EVAL_PROMPT_LOG")
+    if not path or not text:
+        return
+    try:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"kind": kind, "text": text}, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
 def run_agent(prompt, on_stage=None, sess=None):
+    _eval_note("prompt", prompt)
     return get_provider().complete(prompt, sess, on_stage)
 
 
@@ -1601,6 +1612,8 @@ def _handle_claimed(ev, mid, ctype, uid):
                 extra = ("\n\n".join(cached) + ("\n\n" + extra if extra else "")).strip()
             def hook(stage, think=None, end=False, text=None):
                 # text 是回答的文字片段，由模型层拼成最终答案，不刷进进度卡片，也不写入 inflight。
+                if stage:
+                    _eval_note("stage", stage)
                 if think is not None: prog.add_thinking(think, end)
                 elif stage:
                     prog.set_stage(stage)
