@@ -64,6 +64,9 @@ def test_feishu_argv():
 
 
 def test_memory_and_degrade():
+    # 回归夹具只在环境变量存在时生效。这里先清掉，避免默认能力被夹具改掉。
+    os.environ.pop("AGENTBOT_MEMORY_FIXTURE", None)
+    os.environ.pop("AGENTBOT_MEMORY_TRACE", None)
     cfg = {
         "profile": "placeholder", "bot_open_id": "ou_bot_placeholder", "bot_names": ["小助手"],
         "write": {"enabled": True, "allowed_users": {"user_admin": "管理员"}, "resources": {"folder_token": "fld_placeholder"}, "confirm_ttl_sec": 300},
@@ -252,10 +255,60 @@ print("GONE", int(any(hasattr(agentbot, n) for n in ("_is_recall", "_member_type
           and "ONE 1" in out and "GONE 0" in out, out)
 
 
+def test_eval_fixture():
+    """回归测试的夹具和追踪。变量不存在时，内存渠道和以前一样。"""
+    import shutil
+    cfg = {"bot_open_id": "bot_eval", "bot_names": ["小助手"], "profile": "eval_profile"}
+    os.environ.pop("AGENTBOT_MEMORY_FIXTURE", None)
+    os.environ.pop("AGENTBOT_MEMORY_TRACE", None)
+    plain = MemoryChannel(cfg)
+    check("没设夹具时仍没有日历，也没有预置文件", Cap.CALENDAR not in plain.capabilities() and plain.files == {})
+    folder = tempfile.mkdtemp(prefix="agentbot_fix_")
+    try:
+        src = os.path.join(folder, "note.txt")
+        open(src, "w", encoding="utf-8").write("夹具正文")
+        fix = os.path.join(folder, "fix.json")
+        json.dump({
+            "caps": ["calendar"],
+            "members": {"chat_eval": ["user_member"]},
+            "messages": [{"message_id": "eval_h1", "chat_id": "chat_eval", "content": "历史一句", "message_type": "text"}],
+            "files": {"eval_f1": [{"name": "note.txt", "path": src}]},
+        }, open(fix, "w", encoding="utf-8"), ensure_ascii=False)
+        trace = os.path.join(folder, "trace.jsonl")
+        os.environ["AGENTBOT_MEMORY_FIXTURE"] = fix
+        os.environ["AGENTBOT_MEMORY_TRACE"] = trace
+        loaded = MemoryChannel(cfg)
+        check("夹具可以补上日历能力", Cap.CALENDAR in loaded.capabilities())
+        check("夹具里的成员和历史能读到",
+              loaded.members.get("chat_eval") == ["user_member"]
+              and "历史一句" in json.dumps(loaded.history, ensure_ascii=False))
+        kind, payload = loaded.classify({"event": {"message_id": "eval_wrap", "content": "包一层"}})
+        check("包在 event 里的消息能交给核心", kind == "message" and (payload or {}).get("content") == "包一层")
+        kind2, payload2 = loaded.classify({"message_id": "eval_flat", "content": "平的"})
+        check("平铺消息仍按原来的方式收下", kind2 == "message" and (payload2 or {}).get("message_id") == "eval_flat")
+        down = os.path.join(folder, "down")
+        os.makedirs(down)
+        loaded.stage_download("attachment", ["im", "+messages-mget", "--message-ids", "eval_f1"], down)
+        got_path = os.path.join(down, "lark-im-resources", "x", "note.txt")
+        got = open(got_path, encoding="utf-8").read() if os.path.isfile(got_path) else ""
+        check("下载目录能放上夹具文件", got == "夹具正文", got)
+        loaded.send_text("eval_f1", "回复", "k1")
+        loaded.push_text("user", "user_member", "主动", "k2")
+        lines = open(trace, encoding="utf-8").read()
+        check("设置了追踪文件才记下发送", '"send_text"' in lines and '"push_text"' in lines, lines)
+    finally:
+        os.environ.pop("AGENTBOT_MEMORY_FIXTURE", None)
+        os.environ.pop("AGENTBOT_MEMORY_TRACE", None)
+        shutil.rmtree(folder, ignore_errors=True)
+    again = MemoryChannel(cfg)
+    check("清掉变量后又回到默认能力", Cap.CALENDAR not in again.capabilities() and again.files == {})
+
+
 def main():
     test_defaults()
     test_feishu_argv()
     test_memory_and_degrade()
+    test_eval_fixture()
     test_wecom_skeleton()
     test_push_text()
     test_wired_default()

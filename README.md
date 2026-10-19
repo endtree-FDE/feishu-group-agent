@@ -163,6 +163,7 @@ A screenshot placeholder, with rules for hiding ids, is in [docs/demo/README.md]
 | `setup_agent.py` | 干跑生成配置。不加 `--write` 不写文件 |
 | `scripts/` | Windows 上的启动、停止、看门狗、计划任务、`verify_windows.ps1` |
 | `tests/run_tests.py` | 离线测试。通过时最后一行打印条数 |
+| `evals/run.py` | 回答质量回归。假模型不连飞书；用法见 [docs/回归测试.md](docs/回归测试.md) |
 | `docs/快速开始.md` | 新人 15 分钟跑起来 |
 | `docs/排障.md` | 常见问题 |
 | `docs/release-0.5.0.md` | v0.5.0 发布说明（2026-10-19） |
