@@ -254,7 +254,7 @@
           "type": "string"
         },
         "only": {
-          "description": "不写、空数组或 false：合法技能全部选用。字符串或字符串数组才收窄目录、预放和 skill_read。",
+          "description": "不写、空数组或 false：合法技能全部选用。字符串或字符串数组才收窄目录、预放和 skill_read。创作流程可点名 topic-ideation、short-video-script、storyboard、aigc-prompt-pack、creative-brief、post-mortem。example.json 里仍是空数组。",
           "anyOf": [
             {
               "type": "array",

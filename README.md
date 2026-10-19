@@ -10,7 +10,7 @@
 
 ## English
 
-A template for a Feishu (Lark) group bot that runs on your own computer. It answers @mentions in `chat_ids`, or—only if that list is empty and `chats.auto_join` is on—in groups that pass the admit gate (default: an allow-listed member sends `/认群`). It also answers allow-listed private chats, using Cursor or any OpenAI-compatible model whose API key stays in an environment variable. It can read recent chat, docs, calendars, and Bitable, and it writes only after a one-time confirmation code. Configuration in this repository uses placeholders. Do not commit App Secrets, filled agent configs, customer-name lists, memory, logs, or real knowledge-base files. Apache-2.0.
+A template for a Feishu (Lark) group bot that runs on your own computer. It answers @mentions in `chat_ids`, or—only if that list is empty and `chats.auto_join` is on—in groups that pass the admit gate (default: an allow-listed member sends `/认群`). It also answers allow-listed private chats, using Cursor or any OpenAI-compatible model whose API key stays in an environment variable. It can read recent chat, docs, calendars, and Bitable, and it writes only after a one-time confirmation code. Creative-workflow skills (topic scoring, spoken script, storyboard, a tool-neutral prompt pack, a brief, and a retro) live under `skills/` and stay off until `skills.enabled` is true. Configuration in this repository uses placeholders. Do not commit App Secrets, filled agent configs, customer-name lists, memory, logs, or real knowledge-base files. Apache-2.0.
 
 ## 架构
 
@@ -51,7 +51,7 @@ flowchart LR
 - 话题红线默认不设。要限制什么，写在自己的配置里。
 - 同一个应用只跑一个进程。看门狗发现卡住会在本机重启，不往群里说话。
 - 知识库可以定时收进来，先放待审区，你确认后才换上。
-- 技能默认关着。打开后，提示词里只放一行目录，命中触发词才放入步骤。见 [docs/技能.md](docs/技能.md)。
+- 技能默认关着。打开后，提示词里只放一行目录，命中触发词才放入步骤。创作流程（选题、口播、分镜、提示词、策划书、复盘）也在 `skills/` 里，默认不启用；要只用这几份时，在配置里点名。见 [docs/技能.md](docs/技能.md)。
 - 常驻模式默认关着。`agent.mode` 写成 `acp` 后，Cursor 只启动一次。见 [docs/常驻模式.md](docs/常驻模式.md)。
 - 模型可以换成你自己的账号：`model_provider` 写成 `openai_compat`，密钥放在环境变量。见 [docs/模型接口.md](docs/模型接口.md)。拿去参赛时的字段对照见 [docs/用本框架参赛.md](docs/用本框架参赛.md)。
 

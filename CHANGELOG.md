@@ -8,6 +8,11 @@
 
 ## [Unreleased]
 
+### 添加
+
+- 六份创作流程技能，沿用原来的 `skills/<名字>/SKILL.md`、目录和触发词预放。分别是选题打分（`topic-ideation`）、短视频口播稿（`short-video-script`）、分镜表（`storyboard`）、不绑定某一家工具的提示词包（`aigc-prompt-pack`）、项目策划书（`creative-brief`）、创作复盘（`post-mortem`）。用户明确要求保存时，才提议已有的 `docs_create`、`docs_append` 或 `base_create`，确认码和写入白名单不变。
+- `agents/example.json` 的 `skills.enabled` 仍是 `false`，`skills.only` 仍是 `[]`。不改配置时，提示词和没有这些文件时一样。只启用创作技能的写法在 [docs/技能.md](docs/技能.md) 和 [agents/CONFIG.md](agents/CONFIG.md)。
+
 ## [0.4.1] - 2026-10-19
 
 下面是用户能看到的变化。没写进旧配置的键，仍用各项自己的默认值。发布说明见 [docs/release-0.4.1.md](docs/release-0.4.1.md)。
@@ -72,4 +77,4 @@
 
 ## English
 
-The version is the `VERSION` file (`0.4.1`), released on 2026-10-19. Do not put secrets or Feishu IDs in release notes. The program does not read this file. Missing keys keep the previous behavior. (#58) Confirmation codes are bound to the initiator, chat, and topic. Used or cancelled codes are stored in `used_writes` before they run and cannot be replayed after a restart. Untrusted text cannot become a tool call or a confirmation code. Redirect checks connect only to addresses that were already validated. One Feishu app has one receiver. Lock files become visible only after they are fully written. Confirm, status, help, and memory commands skip the per-user gap and use `rate_limit.max_commands_per_min` (default 40). (#59) `p2p.allow_group_members` defaults to false. When enabled, current members of served groups may use private chat, which needs `im:chat.members:read`. `open_to_all` still wins, and a failed or truncated member list fails closed. Upgrade steps are in `docs/升级到0.4.1.md`. 0.4.0 still includes several read-only tool calls per round, configurable read caps, and the (#57) doctor and UTF-8 fixes.
+The version is the `VERSION` file (`0.4.1`), released on 2026-10-19. Do not put secrets or Feishu IDs in release notes. The program does not read this file. Missing keys keep the previous behavior. Unreleased: six creative-workflow skills are opt-in. `skills.enabled` stays false in `agents/example.json`, and an empty `skills.only` still means every valid skill once skills are turned on. Writes still need the allow-list and a confirmation code. (#58) Confirmation codes are bound to the initiator, chat, and topic. Used or cancelled codes are stored in `used_writes` before they run and cannot be replayed after a restart. Untrusted text cannot become a tool call or a confirmation code. Redirect checks connect only to addresses that were already validated. One Feishu app has one receiver. Lock files become visible only after they are fully written. Confirm, status, help, and memory commands skip the per-user gap and use `rate_limit.max_commands_per_min` (default 40). (#59) `p2p.allow_group_members` defaults to false. When enabled, current members of served groups may use private chat, which needs `im:chat.members:read`. `open_to_all` still wins, and a failed or truncated member list fails closed. Upgrade steps are in `docs/升级到0.4.1.md`. 0.4.0 still includes several read-only tool calls per round, configurable read caps, and the (#57) doctor and UTF-8 fixes.
