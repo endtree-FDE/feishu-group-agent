@@ -584,7 +584,7 @@ def ingest(obj):
 # ---------- 限流 + 并发 ----------
 RL = CFG.get("rate_limit", {}); RLL = threading.Lock(); last_user = {}; hour_hits = collections.deque()
 MAXC = int(CFG.get("max_concurrency", 2)); SEM = threading.BoundedSemaphore(MAXC); QUEUE_MAX = int(CFG.get("max_queue", 4))
-_active = 0; _waiting = 0; _peak = 0; _AL = threading.Lock()
+_active = 0; _waiting = 0; _peak = 0; _passed = 0; _held = 0; _AL = threading.Lock(); _HOLD_GO = threading.Event()
 def rate_ok(uid):
     now = time.time()
     with RLL:
@@ -1316,7 +1316,7 @@ def handle(ev):
         LATE.note = ""
 
 def _handle_claimed(ev, mid, ctype, uid):
-    global _active, _waiting, _peak
+    global _active, _waiting, _peak, _passed, _held
     sess = session_key(ev); mtype = ev.get("message_type") or "text"
     ctx = {"user": uid, "chat_id": ev.get("chat_id"), "chat_type": ctype, "message_id": mid, "limited": p2p_limited(uid, ctype)}
     q = clean_q(ev.get("content") or "")
@@ -1347,9 +1347,11 @@ def _handle_claimed(ev, mid, ctype, uid):
     cached = [t for t in (_load_att_text(s) for s in skipped) if t]
     if not q and mtype in ("image", "file", "media", "post", "merge_forward"): q = "请看我发的内容，概括要点。"
     if not q: reply(mid, CFG["texts"]["empty"]); return
+    hold_on = bool(os.environ.get("AGENTBOT_FAKE_HOLD"))
     with _AL:
         full = _waiting >= QUEUE_MAX
         if not full: _waiting += 1
+        if hold_on: _passed += 1  # 含被拒绝的。测试要等每一条都做过这个判断再放行。
     if full: log.warning("queue full, skip %s", mid); reply(mid, CFG["texts"]["busy"]); return
     extra, cleanup = "", None
     prog = Progress(mid)
@@ -1358,7 +1360,11 @@ def _handle_claimed(ev, mid, ctype, uid):
     try: prog.start()
     except Exception as e: log.warning("progress start error (ignored): %s", e)
     with SEM:
-        with _AL: _waiting -= 1; _active += 1; _peak = max(_peak, _active); act = _active
+        with _AL:
+            _waiting -= 1; _active += 1; _peak = max(_peak, _active); act = _active
+            if os.environ.get("AGENTBOT_FAKE_HOLD"): _held += 1
+        # 占住名额，直到主线程确认后面的消息也做过排队判断。只看文件或 sleep，Windows 上线程启动慢时名额会先空出来。
+        if os.environ.get("AGENTBOT_FAKE_HOLD"): _HOLD_GO.wait()
         log.info("agent start %s active=%d peak=%d", mid, act, _peak); t0 = time.time(); prog.set_stage("正在思考…"); q_model = ""
         try: lifecycle.touch(STATE, mid, "正在思考…", REDACT_NAMES)
         except Exception: log.warning("inflight note failed %s", mid)
@@ -1682,12 +1688,39 @@ def main():
     if DRY:
         startup_recover()
         src = _opt("--dry-run"); f = open(src, encoding="utf-8-sig") if src else sys.stdin; ths = []
-        for line in f:
-            line = line.strip()
-            if not line.startswith("{"): continue
-            obj = json.loads(line)
-            if PARALLEL: t = threading.Thread(target=ingest, args=(obj,)); t.start(); ths.append(t)
-            else: ingest(obj)
+        hold = os.environ.get("AGENTBOT_FAKE_HOLD")
+        if hold:
+            global _passed, _held
+            _HOLD_GO.clear()
+            with _AL: _passed = 0; _held = 0
+        if hold and not PARALLEL: _HOLD_GO.set()  # 不并行时没有别的线程来放行
+        n = 0
+        try:
+            for line in f:
+                line = line.strip()
+                if not line.startswith("{"): continue
+                obj = json.loads(line)
+                if PARALLEL:
+                    t = threading.Thread(target=ingest, args=(obj,)); t.start(); ths.append(t); n += 1
+                    # 先等这一条占住名额再送下一条，避免 8 条同时过检查时被拒的变成 4 条。
+                    if hold and n <= MAXC:
+                        deadline = time.time() + 30
+                        while time.time() < deadline:
+                            with _AL:
+                                if _held >= n: break
+                            time.sleep(0.01)
+                else:
+                    ingest(obj)
+            if hold and PARALLEL:
+                deadline = time.time() + 30
+                while time.time() < deadline:
+                    with _AL:
+                        if n and _passed >= n: break
+                    time.sleep(0.01)
+                with _AL:
+                    if _passed < n: log.warning("fake hold timeout passed=%d started=%d", _passed, n)
+        finally:
+            if hold: _HOLD_GO.set()
         for t in ths: t.join()
         log.info("dry-run finished peak_active=%d max_concurrency=%d", _peak, MAXC); return
     check_conflicts(); acquire_lock()

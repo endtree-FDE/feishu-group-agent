@@ -4,18 +4,16 @@
 
 程序不读取 `VERSION` 或本文件。删掉它们时，机器人的行为与现在相同。
 
-当前 `VERSION` 是 `0.4.0-dev`。还没有对应的 GitHub Release。发布时请把 `VERSION` 改成不带 `-dev` 的版本号，打同名标签（例如 `0.4.0`），并让本文件里的版本节和标签一致。Release 说明不要写密钥、群号、open_id 或客户名。
+当前 `VERSION` 是 `0.4.0`，发布日期是 2026-10-19。发布说明见 [docs/release-0.4.0.md](docs/release-0.4.0.md)。说明里不要写密钥、群号、open_id 或客户名。
 
-`main` 上最近一次合并还没有版本标签。下面只记这条线相对于该快照新加的、用户能感知的部分。
+## [0.4.0] - 2026-10-19
 
-## [Unreleased]
-
-还没有收成 `0.4.0` 标签，也还没有 GitHub Release。发布草稿见 [docs/release-0.4.0.md](docs/release-0.4.0.md)。`VERSION` 仍是 `0.4.0-dev`。下面先写相对当前 `main` 新加的，再保留已经在 `main` 上、尚未打标签的内容。
+下面是用户能看到的变化。没写进旧配置的键，仍用各项自己的默认值。
 
 ### 修复
 
-- `--doctor` 只在 `lark-cli auth scopes` 给出应用或 tenant 权限时才核对，缺了才失败。`lark-cli` 1.0.98 不接受 `--as bot`；已经登录时这条命令返回 `tokenType` 为 `user` 的 `userScopes`（用户 token，可能只有 `offline_access`）。这不再被当成应用权限，改为警告，并请到开放平台核对。
-- 文本文件读写写明 UTF-8，子进程按 UTF-8 解码。标准流被管道或重定向接走、且当前不是 UTF-8 时会改成 UTF-8。中文 Windows 不设置 `PYTHONUTF8` 和 `PYTHONIOENCODING` 也能跑测试。直接看控制台时仍用原来的代码页。
+- （#57）`--doctor` 只在 `lark-cli auth scopes` 给出应用或 tenant 权限时才核对，缺了才失败。`lark-cli` 1.0.98 不接受 `--as bot`；已经登录时这条命令返回 `tokenType` 为 `user` 的 `userScopes`（用户 token，可能只有 `offline_access`）。这不再被当成应用权限，改为警告，并请到开放平台核对。
+- （#57）文本文件读写写明 UTF-8，子进程按 UTF-8 解码。标准流被管道或重定向接走、且当前不是 UTF-8 时会改成 UTF-8。中文 Windows 不设置 `PYTHONUTF8` 和 `PYTHONIOENCODING` 也能跑测试。直接看控制台时仍用原来的代码页。
 
 ### 添加
 
@@ -28,9 +26,9 @@
 - `skills.only`：不写、`[]` 或 `false` 时，文件夹里合法的技能仍然全部可用。写成名字列表后，目录、触发词预放和 `skill_read` 只认这些名字。写错的名字在 `--check` 里提示，不因此失败。
 - `commands.status`：不写或为 `true` 时，`/状态`、`/status` 或单独一个「状态」直接回复当前开关，不调用模型。写成 `false` 时，这几个字仍交给模型。「状态怎么样」不是这条命令。
 - `memory.trim_note`：不写或为 `true` 时，短期对话超过字数预算会在提示词里注明省略了几条，本地记录还在。写成 `false` 时仍丢掉旧对话，但不再写这句话。没超过预算时不加。
-- 集成保留已在 `main` 上的能力：只读工具连续多轮（`agent.max_tool_rounds`，不写是 4）、当前会话历史附件（`tools.message_attachment`）、`stall_sec`、`shutdown_wait_sec`、`link_jump_sec`、`catchup.max_age_sec`、`logs/events.jsonl`、`--doctor`、`scripts/verify_windows.ps1`。旧配置没写这些键时行为与现在的默认相同。
+- 只读工具连续多轮（`agent.max_tool_rounds`，不写是 4）、当前会话历史附件（`tools.message_attachment`）、`stall_sec`、`shutdown_wait_sec`、`link_jump_sec`、`catchup.max_age_sec`、`logs/events.jsonl`、`--doctor`、`scripts/verify_windows.ps1`。旧配置没写这些键时行为与现在的默认相同。
 - 模型预设 `deepseek`、`dashscope`、`zhipu`、`pangu`。只补空着的地址、模型名和变量名。密钥仍只读环境变量。没写 `model_provider` 时仍是 Cursor。
-- 新人 15 分钟说明、排障、行为准则，以及 v0.4.0 发布说明草稿。例子都是编的。
+- 新人 15 分钟说明、排障、行为准则，以及 v0.4.0 发布说明。例子都是编的。
 - GitHub Actions 增加 `windows-latest` 作业：用 Windows PowerShell 5.1（`powershell.exe`）解析 `.ps1`、干跑不改系统的函数，并检查含中文的脚本带 UTF-8 BOM，然后跑测试。
 - `python checks/check_config.py` 按 JSON Schema 检查配置类型。密钥写进 `api_key_env` 或 `base_url` 会失败。缺了的键和不认识的键不失败。
 - `python setup_agent.py` 可以干跑生成 `agents/<名字>.json`，并打印计划任务命令。不加 `--write` 不写文件，也不注册任务。
@@ -41,6 +39,7 @@
 - 长期记忆开着且档案被字数预算截断时，按本群问题召回命中的事实。`memory.recall` 为 `false` 时不召回。
 - GitHub Actions：Windows 和 Linux 上跑测试与编译检查；另有 Windows PowerShell 5.1 作业检查脚本；Linux 上再跑 gitleaks 和 `checks/history_scan.py`。
 - Issue 模板、Pull Request 模板、贡献说明里的代码风格。
+- 可选的宽松读数见 [docs/宽松配置示例.md](docs/宽松配置示例.md)。只读轮数、一次回答里的附件数、PDF 页数、文档字数，以及 `history.max_lines`、`docs_search` / `calendar_read` / `base_read` 的 `max_chars`、`memory.max_turn_chars`、`agent.tool_context_budget_chars` 都可以调大。`agents/example.json` 和程序默认值不变。确认码和写入白名单也不放宽。
 
 ### 安全
 
@@ -48,4 +47,4 @@
 
 ## English
 
-The version is the `VERSION` file (`0.4.0-dev`). There is no GitHub Release yet. When publishing, drop the `-dev` suffix, tag that version, and keep this file in sync. Do not put secrets or Feishu IDs in release notes. The program does not read this file. New on this branch: several read-only tool calls per round, `message_ids`, remaining-round hints, configurable read caps, and `agent.tool_context_budget_chars`. Missing keys keep the previous behavior. `--doctor` warns instead of failing when `lark-cli` only returns a user token. Tests and the program read and write text as UTF-8 without `PYTHONUTF8` or `PYTHONIOENCODING`.
+The version is the `VERSION` file (`0.4.0`), released on 2026-10-19. Do not put secrets or Feishu IDs in release notes. The program does not read this file. Missing keys keep the previous behavior. This version includes several read-only tool calls per round, `message_ids`, configurable read caps, and `agent.tool_context_budget_chars`. It also keeps a topic together when `root_id` and `thread_id` differ, hides internal ids in voice, sticker, and card messages, strips tool markers from long-term memory, and falls back when a web search returns no text. (#57) `--doctor` warns instead of failing when `lark-cli` only returns a user token, and no longer treats that token as an app permission. Tests and the program read and write text as UTF-8 without `PYTHONUTF8` or `PYTHONIOENCODING`. An optional loose-limits example raises those caps without changing the defaults.
