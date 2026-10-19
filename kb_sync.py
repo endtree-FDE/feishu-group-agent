@@ -27,6 +27,26 @@ def write_report(dst, rep, cands, extra=""):
     old = os.path.join(dst, "_REPORT.md"); prev = open(old, encoding="utf-8").read() if os.path.exists(old) else ""
     open(old, "w", encoding="utf-8").write(prev + "\n## %s\n%s\n" % (datetime.datetime.now().strftime("%H:%M"), extra) + ("\n".join(rep) or "- 无红线删除（未配置 policy.redlines 或无命中）") +
         "\n\n### 客户名候选（需用户确认后写入 redact.txt）\n" + "\n".join("- " + c for c in sorted(cands)) + "\n")
+_KB_MEMBER_CAP = 8 * 1024 * 1024
+
+def _zip_member(zf, rel):
+    """知识库包里的单个文件。超过 8MB 或压缩比异常时不展开。"""
+    try:
+        info = zf.getinfo(rel)
+    except KeyError:
+        return None
+    size = int(info.file_size or 0)
+    comp = int(info.compress_size or 0)
+    if size > _KB_MEMBER_CAP:
+        return None
+    if size > 64 * 1024 and (comp <= 0 or size / float(comp) > 100):
+        return None
+    with zf.open(info, "r") as fp:
+        data = fp.read(_KB_MEMBER_CAP + 1)
+    if len(data) > _KB_MEMBER_CAP:
+        return None
+    return data
+
 def diff_list(dst):
     lines = []
     for root, _, fs in os.walk(dst):
@@ -45,7 +65,8 @@ if "--inbox" in A:
             man = json.loads(zf.read("MANIFEST.json"))
             for rel, sha in man["files"].items():
                 if guard.safe_path(dst, rel) is None: rep.append("- 跳过可疑路径 " + rel); continue
-                b = zf.read(rel)
+                b = _zip_member(zf, rel)
+                if b is None: rep.append("- 跳过过大或压缩异常 " + str(rel)); continue
                 if hashlib.sha256(b).hexdigest() != sha: rep.append("- 校验失败 " + rel); continue
                 cands |= put(dst, rel, b.decode("utf-8", "replace"), rep); n += 1
         os.makedirs(os.path.join(INBOX, "done"), exist_ok=True); shutil.move(zp, os.path.join(INBOX, "done", z))

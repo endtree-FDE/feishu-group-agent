@@ -1,22 +1,29 @@
 # 隐私与内容策略：客户名脱敏（redact.txt）、敏感信息打码（手机号/证件号/邮箱/密钥/本地路径）；
 # 话题红线不内置，只按配置 policy.redlines 执行（默认空 = 从不拦截）。agentbot 与 kb_sync 共用。
-import os, re
+import os, re, unicodedata
 
-_SENSITIVE = [(re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)"), "[手机号已隐藏]"),
+_SENSITIVE = [(re.compile(r"(?<!\d)1[3-9]\d(?:[\s\-]*\d){8}(?!\d)"), "[手机号已隐藏]"),
               (re.compile(r"(?<!\d)\d{17}[\dXx](?!\d)"), "[证件号已隐藏]"),
               (re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+"), "[邮箱已隐藏]"),
               (re.compile(r"(?i)(secret|token|password|passwd|api[_-]?key)\s*[:=]\s*\S+"), r"\1=[已隐藏]"),
+              (re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._\-]{8,}"), "Bearer [已隐藏]"),
+              (re.compile(r"(?i)(?<![A-Za-z0-9])sk-[A-Za-z0-9_\-]{12,}"), "[密钥已隐藏]"),
               (re.compile(r"(?i)(?<![A-Za-z])[A-Z]:[\\/][^\s，。；、：）)》」\"'`]*"), "[本地路径已隐藏]")]
 # 零宽、软连字符、双向文字控制符。先剥掉再匹配，避免在客户名中间插一个看不见的字就绕过。
 _INVIS = re.compile(r"[\u200b\u200c\u200d\u2060\ufeff\u00ad\u202a-\u202e\u2066-\u2069]")
 _FLEX = {}
 
 def normalize(text):
-    """去掉零宽和双向控制符，并把全角英文字母、数字折成半角。中文标点保持原样。"""
+    """去掉零宽、双向控制符和组合附加符号，并把全角英文字母、数字、全角空格折成半角。中文标点保持原样。"""
+    text = unicodedata.normalize("NFD", text or "")
     out = []
-    for ch in _INVIS.sub("", text or ""):
+    for ch in _INVIS.sub("", text):
+        if unicodedata.category(ch) == "Mn":
+            continue
         o = ord(ch)
-        if 0xFF10 <= o <= 0xFF19:
+        if ch == "\u3000":
+            out.append(" ")
+        elif 0xFF10 <= o <= 0xFF19:
             out.append(chr(o - 0xFF10 + ord("0")))
         elif 0xFF21 <= o <= 0xFF3A:
             out.append(chr(o - 0xFF21 + ord("A")))
@@ -52,13 +59,29 @@ def policy_hit(text, rules):
         if any(k and normalize(k) in t for k in r.get("keywords", ())): return r
     return None
 
-def _flex_name(name):
-    """6 个字及以上的名字，允许字与字之间插入少量空格或分隔符（拆字）。短名字不开，避免误伤。"""
-    rx = _FLEX.get(name)
+def _flex_cjk(name):
+    """6 个字及以上：字间可以没有分隔符。2 到 5 个字：必须真的被拆开，避免短词误伤。"""
+    key = ("cjk", name)
+    rx = _FLEX.get(key)
     if rx is None:
-        sep = r"[\s\u3000._·•]{0,2}"
+        sep = r"[\s._·•\-]{0,2}" if len(name) >= 6 else r"[\s._·•\-]{1,2}"
         rx = re.compile(sep.join(re.escape(ch) for ch in name))
-        _FLEX[name] = rx
+        _FLEX[key] = rx
+    return rx
+
+def _flex_ascii(name):
+    """名单里的英文或拼音：字母之间、词与词之间可以插空格、连字符或间隔号。不自动生成拼音。"""
+    key = ("asc", name.lower())
+    rx = _FLEX.get(key)
+    if rx is None:
+        tokens = re.findall(r"[A-Za-z0-9]+", name)
+        if not tokens or len("".join(tokens)) < 4:
+            rx = None
+        else:
+            letter = r"[\s._·•\-]*"
+            chunk = [letter.join(re.escape(ch) for ch in tok) for tok in tokens]
+            rx = re.compile(r"[\s._·•\-]+".join(chunk), re.I)
+        _FLEX[key] = rx
     return rx
 
 def redact(text, names, placeholder="某客户"):
@@ -68,20 +91,48 @@ def redact(text, names, placeholder="某客户"):
         if not n2: continue
         if n2.isascii():
             text = re.compile(re.escape(n2), re.I).sub(placeholder, text)
+            flex = _flex_ascii(n2)
+            if flex is not None:
+                text = flex.sub(placeholder, text)
         else:
             text = text.replace(n2, placeholder)
-        if len(n2) >= 6:
-            text = _flex_name(n2).sub(placeholder, text)
+            if len(n2) >= 2:
+                text = _flex_cjk(n2).sub(placeholder, text)
     for rx, rep in _SENSITIVE:
         text = rx.sub(rep, text)
     return text
 
+_MARK = re.compile(r"(?i)<<\s*(tool|mem|fake_tool|end)\s*>>")
+_CONFIRM_FAKE = re.compile(r"(确认清空|确认|取消)[\s\u3000]*[0-9]{6}")
+
+def _fold_mark(ch):
+    o = ord(ch)
+    if ch in "＜〈《": return "<"
+    if ch in "＞〉》": return ">"
+    if 0xFF21 <= o <= 0xFF3A: return chr(o - 0xFF21 + ord("A"))
+    if 0xFF41 <= o <= 0xFF5A: return chr(o - 0xFF41 + ord("a"))
+    if 0xFF10 <= o <= 0xFF19: return chr(o - 0xFF10 + ord("0"))
+    return ch
+
 def neutralize(text):
-    """不可信正文里的工具标记改成看不出的样子，避免模型把文档或网页里的指令原样抄成一次调用。"""
-    t = text or ""
-    for a, b in (("<<TOOL>>", "〈TOOL〉"), ("<<MEM>>", "〈MEM〉"), ("<<FAKE_TOOL>>", "〈FAKE_TOOL〉"), ("<<END>>", "〈END〉")):
-        t = t.replace(a, b)
-    return t
+    """不可信正文里的工具标记和伪造确认码改掉。当前这条用户问题不要走这里，否则正常工具调用会坏。"""
+    t = _INVIS.sub("", text or "")
+    folded = "".join(_fold_mark(c) for c in t)
+    out, last = [], 0
+    for m in _MARK.finditer(folded):
+        out.append(t[last:m.start()])
+        out.append("〈" + m.group(1).upper() + "〉")
+        last = m.end()
+    out.append(t[last:])
+    t = "".join(out)
+    folded = "".join(_fold_mark(c) for c in t)
+    out, last = [], 0
+    for m in _CONFIRM_FAKE.finditer(folded):
+        out.append(t[last:m.start()])
+        out.append(m.group(1) + "〔数字无效〕")
+        last = m.end()
+    out.append(t[last:])
+    return "".join(out)
 
 def embeds_secret(text, names=()):
     """网址或搜索词里如果藏了客户名、手机号、邮箱、密钥，返回 True。"""

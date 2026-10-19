@@ -9,7 +9,7 @@
 #   https://agentclientprotocol.com/protocol/session-modes
 #   https://agentclientprotocol.com/protocol/schema
 # Cursor 官方示例的 protocolVersion 是 1。v2 草稿（/protocol/v2/）不在这条路径上。
-import ipaddress, json, os, re, socket, subprocess, threading, time, urllib.request
+import ipaddress, json, os, re, socket, ssl, subprocess, threading, time
 from urllib.parse import unquote, urljoin, urlparse
 import guard
 
@@ -252,6 +252,8 @@ _HTTP_URL = re.compile(r"https?://[^\s<>\"'\\]+", re.I)
 _IP_LITERAL = re.compile(r"^[0-9a-fA-FxX.:]+$")
 # 测试可以换成假的跳转探测。返回下一跳网址；没有跳转或网络失败时返回空字符串。
 _redirect_probe = None
+# 测试可以换成假的固定地址连接。生产环境只连已经检查过的那个 IP，不再解析主机名。
+_open_pinned_hook = None
 
 
 def _clip(text, n=80):
@@ -530,28 +532,101 @@ def _url_exfil(url, names=()):
     return guard.embeds_secret(unquote(url or ""), names)
 
 
-class _StopRedirect(Exception):
-    def __init__(self, url):
-        self.url = url
+def _public_addrs(host):
+    """两次解析一致、且都不是内网时，返回这些地址。裸 IP 不使用假 IP 例外。失败返回空集。"""
+    host = unquote(str(host or "")).strip().lower().rstrip(".")
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
+    if "%" in host:
+        host = host.split("%", 1)[0]
+    if not host or host == ".":
+        return set()
+    if any(c in host for c in "/\\@?# \t\r\n\x00"):
+        return set()
+    if host in ("localhost", "metadata.google.internal") or host.endswith(".localhost") or host.endswith(".local"):
+        return set()
+    ip = _parse_ip(host)
+    if ip is not None:
+        if _ip_is_blocked(ip, allow_fake=False):
+            return set()
+        return {str(ip)}
+    if _IP_LITERAL.match(host) and any(c.isdigit() for c in host):
+        return set()
+    try:
+        first = _lookup_host(host)
+        second = _lookup_host(host)
+    except Exception:
+        return set()
+    if not first or not second or _infos_blocked(first, allow_fake=True) or _infos_blocked(second, allow_fake=True):
+        return set()
+    addrs = _addrs_of(first)
+    if not addrs or addrs != _addrs_of(second):
+        return set()
+    return addrs
 
 
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        raise _StopRedirect(newurl)
+def _open_pinned(scheme, host, ip, port, url, timeout=2):
+    """只连接调用方已经检查过的 IP。不再解析 host，避免探测这一下被重新绑到内网。"""
+    try:
+        addr = ipaddress.ip_address(str(ip))
+    except ValueError:
+        return ""
+    if _ip_is_blocked(addr, allow_fake=True):
+        return ""
+    raw = urlparse(url)
+    path = raw.path or "/"
+    if raw.query:
+        path += "?" + raw.query
+    if any(c in path for c in "\r\n\x00"):
+        return ""
+    sock = socket.create_connection((str(ip), int(port)), timeout=timeout)
+    try:
+        if (scheme or "").lower() == "https":
+            sock = ssl.create_default_context().wrap_socket(sock, server_hostname=host)
+        req = "GET %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n" % (path, host)
+        sock.sendall(req.encode("ascii", "replace"))
+        sock.settimeout(timeout)
+        buf = b""
+        while b"\r\n\r\n" not in buf and len(buf) < 8192:
+            chunk = sock.recv(1024)
+            if not chunk:
+                break
+            buf += chunk
+    finally:
+        try: sock.close()
+        except Exception: pass
+    head = buf.split(b"\r\n\r\n", 1)[0].decode("iso-8859-1", "replace")
+    lines = head.split("\r\n")
+    if not lines or not re.match(r"HTTP/\d(?:\.\d)?\s+3\d\d", lines[0]):
+        return ""
+    for line in lines[1:]:
+        if line.lower().startswith("location:"):
+            return line.split(":", 1)[1].strip()
+    return ""
 
 
 def _probe_redirect(url):
-    """只看第一跳的 Location，不跟着走。失败当没有跳转（这一跳本身已经检查过）。"""
+    """只看第一跳的 Location。探测连接钉在已经检查过的地址上。
+    返回 False 表示这一跳没法安全地看（解析失败或落到内网），调用方应拒绝。
+    空字符串表示没有跳转。cursor-agent 自己随后的抓取仍会再解析一次，这里管不到。"""
     if _redirect_probe is not None:
-        return _redirect_probe(url)
-    opener = urllib.request.build_opener(_NoRedirect)
+        return _redirect_probe(url) or ""
+    parts = urlparse((url or "").strip())
+    host = parts.hostname
+    if not host:
+        return False
+    addrs = _public_addrs(host)
+    if not addrs:
+        return False
+    ip = sorted(addrs)[0]
+    scheme = (parts.scheme or "").lower()
+    port = parts.port or (443 if scheme == "https" else 80)
+    opener = _open_pinned_hook or _open_pinned
     try:
-        opener.open(url, timeout=2)
-        return ""
-    except _StopRedirect as e:
-        return e.url or ""
+        loc = opener(scheme, host, ip, port, url)
     except Exception:
         return ""
+    return loc or ""
 
 
 def _chain_public(url, names=()):
@@ -568,6 +643,8 @@ def _chain_public(url, names=()):
             nxt = _probe_redirect(cur)
         except Exception:
             return True
+        if nxt is False:
+            return False
         if not nxt:
             return True
         cur = urljoin(cur, nxt)
@@ -820,7 +897,7 @@ class Pool:
                     self._handle_line(line, gen)
         except Exception as e:
             if gen == self.gen:
-                self.log.warning("acp read: %s", e)
+                self.log.warning("acp read: %s", guard.redact(str(e), ()))
         finally:
             self._fail_pending("process exited", gen)
 
@@ -894,7 +971,7 @@ class Pool:
             try:
                 self._reply_permission(msg)
             except Exception as e:
-                self.log.warning("acp permission error: %s", e)
+                self.log.warning("acp permission error: %s", guard.redact(str(e), ()))
                 try:
                     self._write({"jsonrpc": "2.0", "id": msg["id"], "result": {"outcome": {"outcome": "cancelled"}}})
                 except Exception:
@@ -992,7 +1069,7 @@ class Pool:
             proc = self.proc
             if proc is None or proc.poll() is not None:
                 err = "process exited rc=%s" % (None if proc is None else proc.returncode)
-                tail = " | ".join(self._err_tail[-3:])
+                tail = " | ".join(guard.redact(x, ()) for x in self._err_tail[-3:])
                 raise AcpFail(err + ((" | " + tail) if tail else ""))
             if time.time() > deadline:
                 raise AcpFail("timeout %s" % method)

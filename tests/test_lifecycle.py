@@ -27,9 +27,9 @@ def _cfg(base):
     return path
 
 
-def _run_bot(cfg, args, timeout=30):
+def _run_bot(cfg, args, timeout=30, env=None):
     return subprocess.run([sys.executable, os.path.join(FW, "agentbot.py"), cfg, *args],
-                          capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
+                          capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout, env=env)
 
 
 # ---------- 纯判断：创建时间对不上就是别人，不能当成本机器人 ----------
@@ -112,6 +112,25 @@ def _alive(proc):
     return proc.poll() is None
 
 
+_pub = tempfile.mkdtemp(prefix="agentbot_pub_")
+try:
+    _pub_path = os.path.join(_pub, "bot.lock")
+    _pub_body = proc_identity.format_lock(7, "100", _pub)
+    proc_identity.publish_exclusive(_pub_path, _pub_body)
+    _pub_again = False
+    try:
+        proc_identity.publish_exclusive(_pub_path, proc_identity.format_lock(8, "200", _pub))
+    except FileExistsError:
+        _pub_again = True
+    _pub_names = sorted(os.listdir(_pub))
+    _pub_got = open(_pub_path, encoding="utf-8").read()
+    check("锁文件一次写成完整内容，第二次不会覆盖，也不留下临时文件",
+          _pub_got == _pub_body and _pub_again and _pub_names == ["bot.lock"]
+          and proc_identity.parse_lock(_pub_got)["pid"] == 7, _pub_got + " " + str(_pub_names))
+finally:
+    shutil.rmtree(_pub, ignore_errors=True)
+
+
 # ---------- 真进程：接管锁时不能把那个进程杀掉 ----------
 holder = None
 try:
@@ -191,11 +210,16 @@ try:
     first = subprocess.Popen([sys.executable, os.path.join(FW, "agentbot.py"), cfg, "--lock-test", "8"],
                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
     lock_path = os.path.join(work, "state", "bot.lock")
+    body = ""
     for _ in range(50):
         if os.path.isfile(lock_path):
-            break
-        time.sleep(0.1)
-    body = open(lock_path, encoding="utf-8").read() if os.path.isfile(lock_path) else ""
+            try:
+                body = open(lock_path, encoding="utf-8").read()
+            except OSError:
+                body = ""
+            if body.splitlines()[:1] == [str(first.pid)] and "created=" in body and "base=" in body:
+                break
+        time.sleep(0.05)
     second = _run_bot(cfg, ["--lock-test", "0.2"])
     out = (second.stdout or "") + (second.stderr or "")
     check("本机器人还在时第二个进程退出 3，锁的第一行仍是进程号",
@@ -349,6 +373,77 @@ already = start_txt.find("already running")
 req = start_txt.find("shutdown.request")
 check("启动脚本只在真正启动时清掉停止请求，已经在跑时不清",
       already >= 0 and req > already and "ParentProcessId" not in start_txt and "taskkill" not in start_txt.lower())
+
+def _write_id(path, bot_id):
+    data = json.load(open(path, encoding="utf-8"))
+    data["bot_open_id"] = bot_id
+    json.dump(data, open(path, "w", encoding="utf-8"), ensure_ascii=False)
+
+
+lock_dir = tempfile.mkdtemp(prefix="agentbot_applock_")
+app_env = dict(os.environ)
+app_env["AGENTBOT_APP_LOCK_DIR"] = lock_dir
+first = second = None
+try:
+    one = tempfile.mkdtemp(prefix="agentbot_app1_")
+    two = tempfile.mkdtemp(prefix="agentbot_app2_")
+    cfg1, cfg2 = _cfg(one), _cfg(two)
+    first = subprocess.Popen([sys.executable, os.path.join(FW, "agentbot.py"), cfg1, "--lock-test", "8"],
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", env=app_env)
+    deadline = time.time() + 8
+    while time.time() < deadline and first.poll() is None:
+        if any(name.endswith(".lock") for name in os.listdir(lock_dir)):
+            break
+        time.sleep(0.1)
+    second = _run_bot(cfg2, ["--lock-test", "0.2"], env=app_env)
+    out = (second.stdout or "") + (second.stderr or "")
+    check("同一应用在另一个目录启动时拒绝，并且不结束已经在收消息的那个",
+          second.returncode == 3 and "already has a receiver" in out and _alive(first) and "ou_placeholder" not in out, out)
+finally:
+    for proc in (second if isinstance(second, subprocess.Popen) else None, first):
+        if proc and _alive(proc):
+            proc.terminate()
+            try: proc.wait(timeout=5)
+            except subprocess.TimeoutExpired: proc.kill()
+
+both = []
+try:
+    one = tempfile.mkdtemp(prefix="agentbot_appA_")
+    two = tempfile.mkdtemp(prefix="agentbot_appB_")
+    cfg1, cfg2 = _cfg(one), _cfg(two)
+    _write_id(cfg2, "ou_placeholder_other_bot")
+    both = [
+        subprocess.Popen([sys.executable, os.path.join(FW, "agentbot.py"), cfg, "--lock-test", "1.2"],
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", env=app_env)
+        for cfg in (cfg1, cfg2)
+    ]
+    codes = [p.wait(timeout=15) for p in both]
+    outs = [((p.stdout.read() if p.stdout else "") or "") for p in both]
+    check("两个不同的应用可以同时各有一个接收进程",
+          codes == [0, 0] and all("REFUSED" not in o for o in outs), "\n".join(outs))
+finally:
+    for proc in both:
+        if _alive(proc):
+            proc.kill()
+            proc.wait(timeout=5)
+
+holder = None
+try:
+    work = tempfile.mkdtemp(prefix="agentbot_appstale_")
+    cfg = _cfg(work)
+    holder = _sleeper()
+    time.sleep(0.2)
+    snap = proc_identity.snapshot(holder.pid) or {}
+    path = proc_identity.app_lock_file("ou_placeholder_not_a_real_account", lock_dir)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    open(path, "w", encoding="utf-8").write(proc_identity.format_lock(holder.pid, snap.get("created") or "", work))
+    got = _run_bot(cfg, ["--lock-test", "0.2"], env=app_env)
+    out = (got.stdout or "") + (got.stderr or "")
+    check("应用锁被别的程序复用时可以接管，并且不结束它",
+          got.returncode == 0 and "stale app lock" in out and _alive(holder), out)
+finally:
+    if holder and _alive(holder):
+        holder.kill(); holder.wait(timeout=5)
 
 print("\n%d/%d passed" % (sum(1 for _, ok in results if ok), len(results)))
 sys.exit(0 if all(ok for _, ok in results) else 1)

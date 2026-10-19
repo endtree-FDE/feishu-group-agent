@@ -6,9 +6,7 @@
 
 ## 报告漏洞
 
-请不要在公开的 Issue、Pull Request 或群聊里贴漏洞细节，也不要贴 App Secret、访问令牌、填好的配置、群编号、用户编号或客户名单。
-
-使用 GitHub 的私人安全通报：
+请用 GitHub 私密漏洞上报（Private vulnerability reporting），不要在公开的 Issue、Pull Request 或群聊里贴漏洞细节，也不要贴 App Secret、访问令牌、填好的配置、群编号、用户编号或客户名单。
 
 [https://github.com/endtree-FDE/feishu-group-agent/security/advisories/new](https://github.com/endtree-FDE/feishu-group-agent/security/advisories/new)
 
@@ -27,8 +25,10 @@
 飞书 App Secret 只在你自己的电脑上输入：
 
 ```text
-lark-cli config init --app-id 你的应用ID --app-secret-stdin --brand feishu
+lark-cli config init --name <profile> --app-id 你的应用ID --app-secret-stdin --brand feishu
 ```
+
+`<profile>` 必须和配置里的 `profile` 相同。不写 `--name` 时，lark-cli 使用默认 profile，会覆盖这台电脑上其他机器人已经登录的 profile。
 
 模型密钥只放进环境变量。配置里的 `api_key_env` 只写变量名。
 
@@ -54,4 +54,4 @@ lark-cli config init --app-id 你的应用ID --app-secret-stdin --brand feishu
 
 ## English
 
-The version is the `VERSION` file. GitHub Release `v0.4.0` exists, so security fixes target the latest release and `main`. Report vulnerabilities through [GitHub private security advisories](https://github.com/endtree-FDE/feishu-group-agent/security/advisories/new). Do not include secrets, Feishu IDs, or customer names in public issues. The bot runs on the operator's machine; this repository must not contain App Secrets or filled-in configuration. It does not delete messages, documents, or Bitable records. Changing or deleting a calendar event still needs an allow-listed person and a confirmation code, and does not notify attendees.
+The version is the `VERSION` file. GitHub Release `v0.4.0` exists, so security fixes target the latest release and `main`. Report vulnerabilities through GitHub private vulnerability reporting: [private security advisories](https://github.com/endtree-FDE/feishu-group-agent/security/advisories/new). Do not include secrets, Feishu IDs, or customer names in public issues. The bot runs on the operator's machine; this repository must not contain App Secrets or filled-in configuration. It does not delete messages, documents, or Bitable records. Changing or deleting a calendar event still needs an allow-listed person and a confirmation code, and does not notify attendees.
