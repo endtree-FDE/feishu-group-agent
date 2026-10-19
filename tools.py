@@ -1,6 +1,6 @@
 # 工具层：只允许白名单内的 lark-cli 命令，统一 --as bot；写操作需确认码；全部写审计日志；缺权限优雅降级。
 import json, os, re, sqlite3, subprocess, struct, time, random, threading, datetime, glob, shutil, zipfile
-import guard, skills
+import guard, skills, usage
 from channels.base import TOOL_CAPS
 
 def run_capture(cmd, cwd=None, timeout=60):
@@ -216,11 +216,32 @@ class Tools:
             stage(tool, argv, cwd)
         return ch.transport_read(tool, argv, call)
     def audit(self, **kw):
+        count_usage = kw.pop("count_usage", True)
+        scope = kw.pop("scope", None)
+        raw_types = kw.pop("file_types", None)
         kw["ts"] = datetime.datetime.now().isoformat(timespec="seconds")
+        hits = 0
         for k in ("args", "summary", "detail", "err", "result"):
-            if isinstance(kw.get(k), str): kw[k] = guard.redact(kw[k], self.names)
+            if isinstance(kw.get(k), str):
+                kw[k], n_hit = guard.redact_counted(kw[k], self.names)
+                hits += n_hit
+        safe_types = []
+        for item in raw_types or []:
+            tok = str(item or "")
+            if re.fullmatch(r"[a-z0-9]{1,8}", tok):
+                safe_types.append(tok)
+        if safe_types:
+            kw["file_types"] = safe_types
+        if hits:
+            kw["redact_hits"] = hits
+        kw["traffic"] = usage.current_traffic()
         with self.al, open(os.path.join(self.audit_dir, datetime.date.today().strftime("%Y%m") + ".jsonl"), "a", encoding="utf-8") as f:
             f.write(json.dumps(kw, ensure_ascii=False) + "\n")
+        try:
+            usage.note_audit(kw.get("kind"), kw.get("tool"), file_types=safe_types, redact_hits=hits,
+                             chat_id=kw.get("chat") or "", scope=scope, count_tool=bool(count_usage) and kw.get("ok", True) is not False)
+        except Exception:
+            self.log.warning("usage audit note failed")
 
     def lark(self, tool, argv, cwd=None, timeout=60):
         argv = list(argv) + ["--profile", self.cfg["profile"], "--as", "bot"]
@@ -281,10 +302,18 @@ class Tools:
             if not self.enabled(name): raise ToolError("这项能力还没在配置里启用")
             self._require_cap(name)
             call = getattr(self, "_" + name)
+        if isinstance(ctx, dict):
+            ctx["_file_types"] = []
         try: res = call(args or {}, ctx)
         except ToolError as e:
-            self.audit(kind="read", tool=name, user=ctx["user"], chat=ctx["chat_id"], ok=False, err=e.user_msg); raise
-        self.audit(kind="read", tool=name, user=ctx["user"], chat=ctx["chat_id"], ok=True, args=_brief(args))
+            self.audit(kind="read", tool=name, user=ctx["user"], chat=ctx["chat_id"], ok=False, err=e.user_msg, count_usage=False); raise
+        types = list(ctx.get("_file_types") or []) if isinstance(ctx, dict) else []
+        fields = {"kind": "read", "tool": name, "user": ctx["user"], "chat": ctx["chat_id"], "ok": True,
+                  "file_types": types, "scope": (ctx or {}).get("chat_type")}
+        # 读文件只记类型。路径和原文件名可能是客户资料，不写进审计。
+        if name not in ("kb_read", "message_attachment", "attachment"):
+            fields["args"] = _brief(args)
+        self.audit(**fields)
         return res
 
     def _skill_read(self, a, ctx):
@@ -301,6 +330,8 @@ class Tools:
             raise ToolError("知识库里没有这个文件")
         if os.path.splitext(dest)[1].lower() not in _KB_EXT:
             raise ToolError("知识库只读取 md 和 txt")
+        if isinstance(ctx, dict):
+            ctx.setdefault("_file_types", []).append(usage.safe_file_type(dest))
         limit = (self.t.get("kb_read") or {}).get("max_chars", 8000)
         try:
             raw = open(dest, encoding="utf-8-sig", errors="replace").read()
@@ -446,7 +477,9 @@ class Tools:
         days = self._history_days()
         if time.time() - ts > days * 86400:
             raise ToolError("这条消息超过了最近 %d 天，不能读取附件" % days)
-        d, files, mtype, saved = self.fetch_attachments(mid, ctx, os.path.join(self.base, "tmp"), must_enable=False)
+        d, files, mtype, saved = self.fetch_attachments(mid, ctx, os.path.join(self.base, "tmp"), must_enable=False, count_usage=False)
+        if isinstance(ctx, dict):
+            ctx.setdefault("_file_types", []).extend(usage.safe_file_type(path) for path in files)
         saved_id = str((saved or {}).get("message_id") or (saved or {}).get("id") or "")
         saved_chat = _msg_chat(saved)
         if (saved_id and saved_id != mid) or (saved_chat and saved_chat != chat):
@@ -509,9 +542,11 @@ class Tools:
         argv, summary, steps = self._build_write(name, raw)
         notify = _want_notify(name, raw, ctx.get("question") or "")
         rec = {"tool": name, "argv": argv, "steps": steps, "summary": summary, "user": ctx["user"],
-               "chat_id": ctx["chat_id"], "scope": str(ctx.get("scope") or ""), "ts": time.time(), "notify_all": notify}
+               "chat_id": ctx["chat_id"], "scope": str(ctx.get("scope") or ""), "ts": time.time(), "notify_all": notify,
+               "usage_scope": "p2p" if ctx.get("chat_type") == "p2p" else "group"}
         code = self._reserve(rec)
-        self.audit(kind="write_proposed", tool=name, user=ctx["user"], chat=ctx["chat_id"], code=code, summary=summary)
+        self.audit(kind="write_proposed", tool=name, user=ctx["user"], chat=ctx["chat_id"], code=code, summary=summary,
+                   scope=ctx.get("chat_type"))
         ttl = int(self.w.get("confirm_ttl_sec", 300)) // 60
         return "将要执行：%s\n请发起人在 %d 分钟内 @我 回复「确认 %s」执行，或「取消 %s」。" % (summary, ttl, code, code)
 
@@ -530,9 +565,11 @@ class Tools:
         summary = "写入群记忆：%s" % text[:80]
         rec = {"tool": "memory_propose", "argv": [], "steps": [], "summary": summary, "memory_text": text,
                "user": ctx["user"], "chat_id": ctx["chat_id"], "scope": str(ctx.get("scope") or ""),
-               "ts": time.time(), "notify_all": False}
+               "ts": time.time(), "notify_all": False,
+               "usage_scope": "p2p" if ctx.get("chat_type") == "p2p" else "group"}
         code = self._reserve(rec)
-        self.audit(kind="write_proposed", tool="memory_propose", user=ctx["user"], chat=ctx["chat_id"], code=code, summary=summary)
+        self.audit(kind="write_proposed", tool="memory_propose", user=ctx["user"], chat=ctx["chat_id"], code=code, summary=summary,
+                   scope=ctx.get("chat_type"))
         ttl = int(self.w.get("confirm_ttl_sec", 300)) // 60
         return "将要记入本群记忆：%s\n请发起人在 %d 分钟内 @我 回复「确认 %s」执行，或「取消 %s」。没确认之前，不要把它当成已经记住。" % (text[:200], ttl, code, code)
 
@@ -633,10 +670,14 @@ class Tools:
         except Exception: return
         with self.pl:
             for code, ts, payload in rows:
-                if self._code_used(code) or now - float(ts or 0) > ttl:
+                if self._code_used(code):
                     self._drop_pending(code); continue
-                try: self.pending[code] = json.loads(payload)
-                except Exception: self._drop_pending(code)
+                try: rec = json.loads(payload)
+                except Exception:
+                    self._drop_pending(code); continue
+                if now - float(ts or 0) > ttl:
+                    self._expire_pending(code, rec if isinstance(rec, dict) else {}); continue
+                self.pending[code] = rec if isinstance(rec, dict) else {}
 
     def _save_pending(self, code, rec):
         """只插入。撞上已有的码就失败，不能覆盖别人还没确认的操作。"""
@@ -650,6 +691,14 @@ class Tools:
         except Exception as e:
             self.log.warning("pending save failed: %s", guard.redact(str(e), self.names)[:200])
             return False
+
+    def _expire_pending(self, code, payload=None):
+        """确认码过了有效期。审计只记动作，不把待写入的正文再抄一遍。"""
+        p = payload if isinstance(payload, dict) else (self.pending.get(code) or {})
+        self.pending.pop(code, None)
+        self._drop_pending(code)
+        self.audit(kind="write_expired", tool=str(p.get("tool") or ""), user=str(p.get("user") or ""),
+                   chat=str(p.get("chat_id") or ""), scope=p.get("usage_scope") or "")
 
     def _drop_pending(self, code):
         try:
@@ -688,7 +737,7 @@ class Tools:
     def _gc(self):
         ttl = int(self.w.get("confirm_ttl_sec", 300))
         for c in [c for c, p in self.pending.items() if time.time() - p["ts"] > ttl]:
-            self.pending.pop(c, None); self._drop_pending(c)
+            self._expire_pending(c, self.pending.get(c))
         try:
             self._state_db().execute("delete from used_writes where ts < ?", (time.time() - 86400,))
             self._state_db().commit()
@@ -707,7 +756,8 @@ class Tools:
             if not self._mark_used(code): return "确认没能记下，请稍后再试。"
             self.pending.pop(code, None); self._drop_pending(code)
         if cancel:
-            self.audit(kind="write_cancelled", tool=p["tool"], user=ctx["user"], code=code); return "已取消。"
+            self.audit(kind="write_cancelled", tool=p["tool"], user=ctx["user"], chat=ctx.get("chat_id"), code=code,
+                       scope=ctx.get("chat_type") or p.get("usage_scope")); return "已取消。"
         if p.get("tool") == "memory_propose":
             hook = getattr(self, "memory_hook", None)
             if not hook:
@@ -739,7 +789,7 @@ class Tools:
         return msg
 
     # ---------- 附件（图片/文件） ----------
-    def fetch_attachments(self, message_id, ctx, tmp_root, must_enable=True):
+    def fetch_attachments(self, message_id, ctx, tmp_root, must_enable=True, count_usage=True):
         if must_enable and not self.enabled("attachment"): raise ToolError("图片和文件识别还没在配置里启用")
         d = os.path.join(tmp_root, "att_" + re.sub(r"\W", "", message_id)[-20:]); os.makedirs(d, exist_ok=True)
         j = self._transport("attachment", ["im", "+messages-mget", "--message-ids", message_id, "--download-resources", "--no-reactions"], cwd=d, timeout=120)
@@ -761,7 +811,9 @@ class Tools:
             shutil.rmtree(d, ignore_errors=True)
             raise ToolError("只能读取当前会话里的附件")
         files = apply_original_names(files, msg, self.names)
-        self.audit(kind="read", tool="attachment", user=ctx["user"], chat=ctx["chat_id"], ok=True, n=len(files))
+        types = [usage.safe_file_type(path) for path in files]
+        self.audit(kind="read", tool="attachment", user=ctx["user"], chat=ctx["chat_id"], ok=True, n=len(files),
+                   file_types=types, count_usage=count_usage, scope=(ctx or {}).get("chat_type"))
         return d, files, (msg.get("msg_type") or msg.get("message_type") or ""), msg
 
     def expand_merge(self, message_id, ctx):

@@ -25,22 +25,26 @@ def code_of(detail):
     return found.group(1) if found else ""
 
 
-def _clean(value, names):
+def _clean(value, names, hits):
     if isinstance(value, str):
-        return guard.redact(value, names)[:500]
+        text, n_hit = guard.redact_counted(value, names)
+        hits[0] += n_hit
+        return text[:500]
     if isinstance(value, dict):
         out = {}
         for key, item in value.items():
             if _SECRET_KEY.search(str(key)):
                 out[str(key)] = "[已隐藏]"
             else:
-                out[str(key)] = _clean(item, names)
+                out[str(key)] = _clean(item, names, hits)
         return out
     if isinstance(value, list):
-        return [_clean(item, names) for item in value[:20]]
+        return [_clean(item, names, hits) for item in value[:20]]
     if isinstance(value, (int, float, bool)) or value is None:
         return value
-    return guard.redact(str(value), names)[:200]
+    text, n_hit = guard.redact_counted(str(value), names)
+    hits[0] += n_hit
+    return text[:200]
 
 
 class Observe:
@@ -57,22 +61,37 @@ class Observe:
         with self._lock:
             self._open[str(mid)] = []
 
-    def note_tool(self, mid, name, ok, code, elapsed, err):
+    def note_tool(self, mid, name, ok, code, elapsed, err, traffic="", file_types=None):
         row = {"tool": str(name or ""), "ok": bool(ok), "code": "" if code is None else str(code),
-               "elapsed": round(float(elapsed or 0), 3), "err": _clean(err or "", self.names)}
+               "elapsed": round(float(elapsed or 0), 3), "err": err or ""}
+        if traffic in ("live", "test", "replay"):
+            row["traffic"] = traffic
+        types = []
+        for item in file_types or []:
+            tok = str(item or "")
+            if re.fullmatch(r"[a-z0-9]{1,8}", tok) and tok not in types:
+                types.append(tok)
+        if types:
+            row["file_types"] = types
         with self._lock:
             self._open.setdefault(str(mid), []).append(row)
         self.write({"kind": "tool", "mid": str(mid)[:80], **row})
 
-    def finish(self, mid, ok, elapsed):
+    def finish(self, mid, ok, elapsed, traffic=""):
         with self._lock:
             tools = list(self._open.pop(str(mid), []))
         brief = [{"tool": t["tool"], "ok": t["ok"], "code": t["code"]} for t in tools]
-        self.write({"kind": "answer", "mid": str(mid)[:80], "ok": bool(ok),
-                    "elapsed": round(float(elapsed or 0), 3), "tools": brief})
+        row = {"kind": "answer", "mid": str(mid)[:80], "ok": bool(ok),
+               "elapsed": round(float(elapsed or 0), 3), "tools": brief}
+        if traffic in ("live", "test", "replay"):
+            row["traffic"] = traffic
+        self.write(row)
 
     def write(self, row):
-        row = _clean(dict(row), self.names)
+        hits = [0]
+        row = _clean(dict(row), self.names, hits)
+        if hits[0] > 0:
+            row["redact_hits"] = hits[0]
         row["ts"] = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime())
         os.makedirs(self.log_dir, exist_ok=True)
         line = json.dumps(row, ensure_ascii=False)

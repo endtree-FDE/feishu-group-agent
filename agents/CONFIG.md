@@ -435,6 +435,25 @@ python checks/check_config.py agents/example.json
 
 群里需要机器人已经在里面。权限：`im:message:send_as_bot`。日历编号是真的才需要 `calendar:calendar.event:read`；任务表编号是真的才需要 `base:record:read`。改完要发布版本。演练、自检和 `--doctor` 不发摘要。
 
+## 用量周报 report
+
+默认关。不写这一段，或 `enabled` 不是 `true`，就不会私聊，也不会占每周一次的名额。这是私聊，不是群消息。群里主动发的仍然只有早晨摘要。
+
+打开后，到了 `weekday` 和 `time`（不写是周一 `09:00`，时区不写是 `Asia/Shanghai`），把上一整周的合计私聊给主人。`window_min` 不写是 180，这三小时里重启也不会再发一份。`report.owner_open_ids` 有可用编号时用它；空着就用 `alerts.owner_open_ids`，不要求 `alerts` 已经打开。两边都空、或都是 `REPLACE_` 开头，就不发。
+
+统计在本机 `logs/usage.jsonl`。周报里没有问题原文、人名、open_id 或群编号，只有 `群 1` 这种标签。演练（`--dry-run` 或测试替身）和停机后的补答会做标记，不进合计。主人在私聊里发 `/report` 可以马上再看一份，这不占每周的名额；在群里发只回一句「已私聊」，明细不进群。
+
+不发送、只导出：`python agentbot.py agents/<名字>.json --report [--week 2026-W42] [--out 文件.md|文件.csv]`。`enabled` 为 false 时这条命令仍可用。细节见 [docs/用量周报.md](../docs/用量周报.md)。
+
+| 键 | 默认 | 填什么 |
+|---|---|---|
+| `enabled` | `false` | `true` 才到点私聊。 |
+| `owner_open_ids` | `[]` | 接收人。空着就用 `alerts.owner_open_ids`。 |
+| `weekday` | `mon` | `mon` 到 `sun`，或 `周一` 到 `周日`，或 `0` 到 `6`（`0` 是周一）。认不出来就不发。 |
+| `time` | `09:00` | `HH:MM`。写错就不发。 |
+| `timezone` | `Asia/Shanghai` | 认不出来的时区不发。 |
+| `window_min` | `180` | 到点之后多少分钟内还可以补发。`0` 表示只在那一分钟。负数按 180。 |
+
 ## 知识库目录 kb_index
 
 模型每次回答前，如果知识库里有 `.md` 或 `.txt`，提示词里会多一份目录：只有相对路径和第一行标题，没有正文。正文要模型输出 `kb_read` 才会读。

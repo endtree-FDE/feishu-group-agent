@@ -63,6 +63,14 @@
     "title_field": "",
     "done_values": ["已完成", "完成", "已关闭", "关闭", "取消", "已取消", "done", "closed", "cancelled", "canceled"]
   },
+  "report": {
+    "enabled": false,
+    "owner_open_ids": [],
+    "weekday": "mon",
+    "time": "09:00",
+    "timezone": "Asia/Shanghai",
+    "window_min": 180
+  },
   "features": {
     "memory": true,
     "p2p": true,
