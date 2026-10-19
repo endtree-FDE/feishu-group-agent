@@ -1,6 +1,6 @@
 # v0.4.0 发布说明
 
-版本号是仓库根目录的 `VERSION`：`0.4.0`。日期先写「待定」。这次只改定稿说明和版本号，不打标签，也不建 GitHub Release。程序不读取 `VERSION`，也不读取这份说明。正文不要写密钥、群号、open_id、客户名或个人电脑路径。
+版本号是仓库根目录的 `VERSION`：`0.4.0`。发布日期是 2026-10-19。程序不读取 `VERSION`，也不读取这份说明。正文不要写密钥、群号、open_id、客户名或个人电脑路径。
 
 下面的例子都是编的：机器人叫「示例助手」，人叫小李，群叫「城市挑战赛」。
 
@@ -15,6 +15,8 @@
 - 多少秒没有新输出算卡住，由 `agent.stall_sec` 决定，默认 300。写成 0 仍按 300，不能关掉卡死检测。
 - 本机增加 `logs/events.jsonl`。它和 `logs/journal.jsonl` 都不记问题原文。
 - `python agentbot.py agents/demo.json --doctor` 只做诊断，不发消息。Windows 上可以用 `scripts\verify_windows.ps1` 做部署后的只读检查。
+- （#57）`--doctor` 不再把用户 token 当成应用权限。`lark-cli` 1.0.98 的 `auth scopes` 在已经登录时返回 `tokenType` 为 `user` 的 `userScopes`，这只给警告，并请到开放平台核对。只有应用或 tenant 权限列表缺项时才失败。
+- （#57）测试和程序不再依赖 `PYTHONUTF8` 或 `PYTHONIOENCODING`。文本按 UTF-8 读写；标准流被管道或重定向接走、且当前不是 UTF-8 时才改成 UTF-8。直接看控制台时仍用原来的代码页。
 - `python setup_agent.py --name demo --provider deepseek --dry-run` 可以先看将要生成的配置，不写文件。
 - `python checks/check_config.py` 按 JSON Schema 检查类型，并拒绝把密钥写进配置。
 - `skills.only`：不写、`[]` 或 `false` 时，文件夹里合法的技能仍然全部可用。写成名字列表后，目录、触发词预放和 `skill_read` 只认这些名字。写错的名字在 `--check` 里提示，不因此失败。
@@ -34,8 +36,8 @@
 
 ## 还没做
 
-还没有打 `0.4.0` 标签，也还没有 GitHub Release。每晚用模型重写记忆默认不跑。不主动往群里发消息。
+每晚用模型重写记忆默认不跑。不主动往群里发消息。
 
 ## English
 
-`VERSION` is `0.4.0`. The date in the changelog is 待定. This text is the release note. It does not create a git tag or a GitHub Release. The program does not read this file. One round can run several read-only tools. `message_attachment` accepts `message_ids`. A reply whose `thread_id` differs from `root_id` stays in the same topic. Quoted files remain visible on follow-up and cannot be read from another chat. Catch-up does not treat a `file_key` as the question. Voice, stickers, and contact or chat cards are not sent to the model. System messages and recalls get no answer. Long-term memory strips tool markers on write and inject. An empty web-search turn in resident mode falls back to a one-shot answer. Missing read caps keep the previous defaults, including `history.max_lines` 150, search/calendar/base character caps, `memory.max_turn_chars` 2000, and `agent.tool_context_budget_chars` 120000. A separate loose-limits example raises those numbers; the defaults and `agents/example.json` stay as they are. Confirmation codes and write allow-lists are unchanged. Do not put secrets or real Feishu ids in the release notes.
+`VERSION` is `0.4.0`, released on 2026-10-19. This text is the release note for tag `v0.4.0`. The program does not read this file. One round can run several read-only tools. `message_attachment` accepts `message_ids`. A reply whose `thread_id` differs from `root_id` stays in the same topic. Quoted files remain visible on follow-up and cannot be read from another chat. Catch-up does not treat a `file_key` as the question. Voice, stickers, and contact or chat cards are not sent to the model. System messages and recalls get no answer. Long-term memory strips tool markers on write and inject. An empty web-search turn in resident mode falls back to a one-shot answer. Missing read caps keep the previous defaults, including `history.max_lines` 150, search/calendar/base character caps, `memory.max_turn_chars` 2000, and `agent.tool_context_budget_chars` 120000. A separate loose-limits example raises those numbers; the defaults and `agents/example.json` stay as they are. Confirmation codes and write allow-lists are unchanged. (#57) `--doctor` no longer treats a user token as an app permission: a `tokenType` of `user` is a warning, and only a real app or tenant scope list can fail the check. Tests and the program no longer depend on `PYTHONUTF8` or `PYTHONIOENCODING`. Nightly memory rewrite stays off, and the bot does not message groups on its own. Do not put secrets or real Feishu ids in the release notes.

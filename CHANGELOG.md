@@ -4,16 +4,16 @@
 
 程序不读取 `VERSION` 或本文件。删掉它们时，机器人的行为与现在相同。
 
-当前 `VERSION` 是 `0.4.0`。这一版的日期先写「待定」。还没有打同名标签，也还没有 GitHub Release。发布说明见 [docs/release-0.4.0.md](docs/release-0.4.0.md)。说明里不要写密钥、群号、open_id 或客户名。
+当前 `VERSION` 是 `0.4.0`，发布日期是 2026-10-19。发布说明见 [docs/release-0.4.0.md](docs/release-0.4.0.md)。说明里不要写密钥、群号、open_id 或客户名。
 
-## [0.4.0] - 待定
+## [0.4.0] - 2026-10-19
 
-这一版还没有打标签。下面是用户能看到的变化。没写进旧配置的键，仍用各项自己的默认值。
+下面是用户能看到的变化。没写进旧配置的键，仍用各项自己的默认值。
 
 ### 修复
 
-- `--doctor` 只在 `lark-cli auth scopes` 给出应用或 tenant 权限时才核对，缺了才失败。`lark-cli` 1.0.98 不接受 `--as bot`；已经登录时这条命令返回 `tokenType` 为 `user` 的 `userScopes`（用户 token，可能只有 `offline_access`）。这不再被当成应用权限，改为警告，并请到开放平台核对。
-- 文本文件读写写明 UTF-8，子进程按 UTF-8 解码。标准流被管道或重定向接走、且当前不是 UTF-8 时会改成 UTF-8。中文 Windows 不设置 `PYTHONUTF8` 和 `PYTHONIOENCODING` 也能跑测试。直接看控制台时仍用原来的代码页。
+- （#57）`--doctor` 只在 `lark-cli auth scopes` 给出应用或 tenant 权限时才核对，缺了才失败。`lark-cli` 1.0.98 不接受 `--as bot`；已经登录时这条命令返回 `tokenType` 为 `user` 的 `userScopes`（用户 token，可能只有 `offline_access`）。这不再被当成应用权限，改为警告，并请到开放平台核对。
+- （#57）文本文件读写写明 UTF-8，子进程按 UTF-8 解码。标准流被管道或重定向接走、且当前不是 UTF-8 时会改成 UTF-8。中文 Windows 不设置 `PYTHONUTF8` 和 `PYTHONIOENCODING` 也能跑测试。直接看控制台时仍用原来的代码页。
 
 ### 添加
 
@@ -47,4 +47,4 @@
 
 ## English
 
-The version is the `VERSION` file (`0.4.0`). The `0.4.0` section is dated 待定. There is no git tag and no GitHub Release yet. Do not put secrets or Feishu IDs in release notes. The program does not read this file. Missing keys keep the previous behavior. This version includes several read-only tool calls per round, `message_ids`, configurable read caps, and `agent.tool_context_budget_chars`. It also keeps a topic together when `root_id` and `thread_id` differ, hides internal ids in voice, sticker, and card messages, strips tool markers from long-term memory, and falls back when a web search returns no text. `--doctor` warns instead of failing when `lark-cli` only returns a user token. Tests and the program read and write text as UTF-8 without `PYTHONUTF8` or `PYTHONIOENCODING`. An optional loose-limits example raises those caps without changing the defaults.
+The version is the `VERSION` file (`0.4.0`), released on 2026-10-19. Do not put secrets or Feishu IDs in release notes. The program does not read this file. Missing keys keep the previous behavior. This version includes several read-only tool calls per round, `message_ids`, configurable read caps, and `agent.tool_context_budget_chars`. It also keeps a topic together when `root_id` and `thread_id` differ, hides internal ids in voice, sticker, and card messages, strips tool markers from long-term memory, and falls back when a web search returns no text. (#57) `--doctor` warns instead of failing when `lark-cli` only returns a user token, and no longer treats that token as an app permission. Tests and the program read and write text as UTF-8 without `PYTHONUTF8` or `PYTHONIOENCODING`. An optional loose-limits example raises those caps without changing the defaults.
