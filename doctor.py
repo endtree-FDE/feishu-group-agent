@@ -1,6 +1,6 @@
 # 只读诊断。不启动 event consume，不发消息，不写心跳。
 # 外部命令、进程列表、域名解析都由调用方传入，测试不必连真的飞书。
-import json, os, re, socket, subprocess
+import base64, csv, io, json, os, re, socket, subprocess
 
 _SCOPE_RX = re.compile(r"\b[a-z][a-z0-9_.]*(?::[a-z0-9_.]+){1,8}\b")
 _SECRET_KEY = re.compile(r"^(app_secret|api_key|api_secret|password|passwd)$", re.I)
@@ -154,15 +154,79 @@ def bot_ready(text):
     return None
 
 
-def app_scopes(text):
-    """auth scopes 里应用已开通的权限。用户令牌的 userScopes 不算。"""
-    obj = _json_obj(text)
-    if not isinstance(obj, dict):
+# lark-cli 1.0.98 的 auth scopes：没登录用户时字段是 scopes；已经登录时同一份应用权限改放到 userScopes。
+# 字段名叫 userScopes，内容仍是应用已开通的 scope，不是用户 OAuth 令牌。
+_SCOPE_KEYS = ("scopes", "appScopes", "app_scopes", "enabledScopes", "enabled_scopes",
+               "userScopes", "user_scopes", "scopeList", "scope_list")
+_SCOPE_NESTS = ("data", "result", "app", "appInfo", "application")
+
+
+def _scope_items(value):
+    """列表就返回名字（可以是空列表）。不是列表则返回 None。"""
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return []
+        if ":" not in raw and "," not in raw:
+            return None
+        value = [part for part in re.split(r"[\s,]+", raw) if part]
+    if not isinstance(value, list):
         return None
-    scopes = obj.get("scopes")
-    if isinstance(scopes, list):
-        return [str(item) for item in scopes]
+    out = []
+    for item in value:
+        if isinstance(item, dict):
+            name = item.get("scope") or item.get("name") or item.get("id") or item.get("key") or ""
+            name = str(name).strip()
+        else:
+            name = str(item).strip().strip(",|")
+        if name:
+            out.append(name)
+    return out
+
+
+def _scopes_in_obj(obj, depth=0):
+    if not isinstance(obj, dict) or depth > 3:
+        return None
+    for key in _SCOPE_KEYS:
+        found = _scope_items(obj.get(key))
+        if found is not None:
+            return found
+    for key in _SCOPE_NESTS:
+        found = _scopes_in_obj(obj.get(key), depth + 1)
+        if found is not None:
+            return found
     return None
+
+
+def scopes_from_text(text):
+    """pretty 的圆点列表，或 SCOPE / 权限 这种文本表格。一行一个权限名。"""
+    found = []
+    for line in (text or "").splitlines():
+        body = line.strip()
+        if not body or set(body) <= set("-|=:+ "):
+            continue
+        while body and body[0] in "•·*-|>":
+            body = body[1:].strip()
+        low = body.lower()
+        if low.startswith(("scope", "enabled scopes", "status", "querying", "app id", "权限", "名称")):
+            continue
+        token = body.split()[0].strip(",|") if body.split() else ""
+        if _SCOPE_RX.fullmatch(token):
+            found.append(token)
+    if found:
+        return list(dict.fromkeys(found))
+    if re.search(r"Enabled scopes\s*\(\s*0\s*\)", text or "", re.I):
+        return []
+    return None
+
+
+def app_scopes(text):
+    """auth scopes 里应用已开通的权限。认 JSON 字段名变体，也认文本表格。"""
+    obj = _json_obj(text)
+    found = _scopes_in_obj(obj) if obj else None
+    if found is not None:
+        return found
+    return scopes_from_text(text)
 
 
 def duplicate_findings(procs, base, profile):
@@ -322,16 +386,29 @@ def default_connect(host, port):
     return True
 
 
+def windows_process_script():
+    """固定脚本。单引号里的 `t 在 PowerShell 5.1 不是制表符，所以用 [char]9。
+
+    先打出 #count=。一个都没枚举到是没看见进程表，不是「没有机器人」。
+    """
+    return r"""$OutputEncoding = New-Object System.Text.UTF8Encoding $false
+[Console]::OutputEncoding = $OutputEncoding
+$rows = @(Get-CimInstance Win32_Process)
+Write-Output ('#count=' + $rows.Count)
+foreach ($p in $rows) {
+  $cmd = [string]$p.CommandLine
+  if (-not $cmd) { continue }
+  if ($cmd -notmatch 'agentbot\.py|lark-cli') { continue }
+  $flat = (($cmd -replace '\s+', ' ').Trim())
+  Write-Output ($p.ProcessId.ToString() + [char]9 + $flat)
+}
+"""
+
+
 def windows_process_argv():
-    """Windows PowerShell 5.1。不用 pwsh。命令是固定的，不拼用户输入。"""
-    script = (
-        "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false; "
-        "$OutputEncoding = [Console]::OutputEncoding; "
-        "Get-CimInstance Win32_Process | "
-        "Where-Object { $_.CommandLine -and ($_.CommandLine -match 'agentbot\\.py|lark-cli') } | "
-        "ForEach-Object { '{0}`t{1}' -f $_.ProcessId, (($_.CommandLine -replace '[`r`n`t]', ' ')) }"
-    )
-    return ["powershell", "-NoProfile", "-NonInteractive", "-Command", script]
+    """Windows PowerShell 5.1。不用 pwsh。-EncodedCommand 避免 -Command 再剥一层引号。"""
+    encoded = base64.b64encode(windows_process_script().encode("utf-16-le")).decode("ascii")
+    return ["powershell", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded]
 
 
 def decode_process_output(raw):
@@ -344,21 +421,159 @@ def decode_process_output(raw):
     return raw.decode("utf-8", "replace")
 
 
+def _keep_proc(pid, cmd):
+    pid = (pid or "").strip()
+    cmd = (cmd or "").strip()
+    if not pid.isdigit() or not cmd:
+        return None
+    if "agentbot.py" not in cmd and "lark-cli" not in cmd:
+        return None
+    return {"pid": int(pid), "cmdline": cmd}
+
+
+def _split_proc_line(line):
+    """pid 与命令行。制表符、5.1 单引号留下的字面 `t、表格里的多空格都认。"""
+    raw = (line or "").strip()
+    if not raw or raw.startswith("#"):
+        return None, None
+    if "\t" in raw:
+        pid, cmd = raw.split("\t", 1)
+        return pid.strip(), cmd.strip()
+    mark = "`t"
+    if mark in raw:
+        pid, cmd = raw.split(mark, 1)
+        return pid.strip(), cmd.strip()
+    found = re.match(r"^(\d+)\s+(.*)$", raw)
+    if not found:
+        return None, None
+    return found.group(1), found.group(2).strip()
+
+
+def _join_wrap(prev, extra):
+    extra = (extra or "").strip()
+    if not prev:
+        return extra
+    if not extra:
+        return prev
+    if extra.startswith('"') or extra.startswith("'"):
+        return prev + " " + extra
+    return prev + extra
+
+
+def _parse_format_list(lines):
+    props = {}
+    order = []
+    procs = []
+    visible = False
+
+    def flush():
+        nonlocal visible
+        pid = (props.get("ProcessId") or "").strip()
+        cmd = props.get("CommandLine") or ""
+        if pid.isdigit():
+            visible = True
+        item = _keep_proc(pid, cmd)
+        if item:
+            procs.append(item)
+
+    for line in lines:
+        found = re.match(r"^([A-Za-z][A-Za-z0-9]*)\s+:\s?(.*)$", line.rstrip())
+        if found:
+            key, value = found.group(1), found.group(2).strip()
+            props[key] = value
+            order.append(key)
+            continue
+        if line.startswith((" ", "\t")) and order:
+            key = order[-1]
+            props[key] = _join_wrap(props.get(key) or "", line)
+            continue
+        if not line.strip():
+            flush()
+            props = {}
+            order = []
+    flush()
+    return procs, visible
+
+
+def _parse_csv_snapshot(text):
+    sample = (text or "").lstrip("\ufeff")
+    first = next((line for line in sample.splitlines() if line.strip()), "")
+    # Format-Table 的表头是空格对齐，不是 CSV。必须有逗号才按 CSV 读。
+    if "," not in first or "ProcessId" not in first or "CommandLine" not in first:
+        return None
+    reader = csv.DictReader(io.StringIO(sample))
+    if not reader.fieldnames:
+        return None
+    procs = []
+    rows = 0
+    for row in reader:
+        if not row:
+            continue
+        norm = {(key or "").strip().lower(): (value or "") for key, value in row.items()}
+        pid = (norm.get("processid") or "").strip()
+        cmd = (norm.get("commandline") or "").strip()
+        if not pid and not cmd:
+            continue
+        rows += 1
+        item = _keep_proc(pid, cmd)
+        if item:
+            procs.append(item)
+    return procs, rows > 0
+
+
+def parse_process_snapshot(text):
+    """返回 (匹配的进程, 是否真的看见了进程表)。
+
+    没看见进程表时，调用方应报 WARN，不要报 OK serving=0。
+    """
+    raw = text or ""
+    if raw.startswith("\ufeff"):
+        raw = raw[1:]
+    csv_found = _parse_csv_snapshot(raw)
+    if csv_found is not None:
+        return csv_found
+    lines = raw.splitlines()
+    if any(re.match(r"^(ProcessId|CommandLine)\s+:", line) for line in lines):
+        return _parse_format_list(lines)
+    procs = []
+    visible = False
+    counted = None
+    for line in lines:
+        stripped = line.strip()
+        count = re.match(r"^#count=(\d+)\s*$", stripped)
+        if count:
+            counted = int(count.group(1))
+            if counted > 0:
+                visible = True
+            continue
+        pid, cmd = _split_proc_line(line)
+        if pid is None:
+            continue
+        if not str(pid).strip().isdigit():
+            continue
+        visible = True
+        item = _keep_proc(pid, cmd)
+        if item:
+            procs.append(item)
+    if counted == 0 and not procs:
+        visible = False
+    return procs, visible
+
+
 def parse_cim_lines(text):
-    out = []
-    for line in (text or "").splitlines():
-        line = line.strip()
-        if "\t" not in line:
-            continue
-        pid, cmd = line.split("\t", 1)
-        pid = pid.strip()
-        cmd = cmd.strip()
-        if not pid.isdigit() or not cmd:
-            continue
-        if "agentbot.py" not in cmd and "lark-cli" not in cmd:
-            continue
-        out.append({"pid": int(pid), "cmdline": cmd})
-    return out
+    procs, _visible = parse_process_snapshot(text)
+    return procs
+
+
+def interpret_process_output(returncode, raw):
+    """看懂了进程表就返回列表（可以是空的）。没看懂、命令失败、输出是空的，返回 None。"""
+    text = decode_process_output(raw or b"")
+    if returncode not in (0, None) and not text.strip():
+        return None
+    procs, visible = parse_process_snapshot(text)
+    if not visible:
+        return None
+    return procs
 
 
 def _linux_processes():
@@ -381,10 +596,7 @@ def _windows_processes():
         got = subprocess.run(windows_process_argv(), capture_output=True, timeout=25)
     except (OSError, subprocess.TimeoutExpired):
         return None
-    text = decode_process_output(got.stdout or b"")
-    if got.returncode != 0 and not text.strip():
-        return None
-    return parse_cim_lines(text)
+    return interpret_process_output(got.returncode, got.stdout or b"")
 
 
 def default_processes():
