@@ -131,7 +131,9 @@ o = run([ev("m18", "回答里提到 杭州某某科技有限公司 吗")], name=
 o = run([dict(p2p, message_id="p3", message_type="file", content="[文件] a.txt")], name="att")
 check("私聊文件消息：调用 messages-mget 下载并回答", "[fake-lark] im +messages-mget" in o and "reply p3" in o, o)
 evs = [ev("c%d" % i, "并发%d" % i, sender_id="u%d" % i) for i in range(8)]
-o = run(evs, ("--parallel",), name="conc"); check("并发上限 2 + 排队上限 4", "peak_active=2" in o and o.count("queue full") == 2, o)
+# 假模型多停一会儿。Windows 上 0.3 秒有时不够把 8 条都送进队列，正在跑的会先空出来，queue full 就不是 2。
+o = run(evs, ("--parallel",), name="conc", extra_env={"AGENTBOT_FAKE_AGENT": "2"})
+check("并发上限 2 + 排队上限 4", "peak_active=2" in o and o.count("queue full") == 2, o)
 # ---------- 流式读取 / 卡死保护 / 部分结果 / 进度 ----------
 def mkcfg(name, mode="text", delete_status=False, **agent):
     c = json.loads(json.dumps(cfg)); c["agent"].update(agent)
