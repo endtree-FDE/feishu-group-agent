@@ -3,6 +3,7 @@ import json, os, subprocess, sys, tempfile, time
 
 FW = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, FW)
+import utf8io  # noqa: F401
 import feishu_link
 
 results = []
@@ -113,7 +114,7 @@ try:
     json.dump(cfg, open(path, "w", encoding="utf-8"), ensure_ascii=False)
     env = dict(os.environ)
     env["CFG"] = path
-    r = subprocess.run([sys.executable, "-c", src], cwd=FW, capture_output=True, text=True, encoding="utf-8", env=env, timeout=30)
+    r = subprocess.run([sys.executable, "-c", src], cwd=FW, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=30)
     out = (r.stdout or "") + (r.stderr or "")
     check("机器人使用同一套判断：安静不加计数，时钟跳跃才加",
           r.returncode == 0 and "QUIET 0" in out and "JUMP 99" in out and "GEN 1" in out and "HAS True" in out, out)
@@ -152,7 +153,7 @@ for mode, expect, title in (
         env = dict(os.environ)
         env["CFG"] = path
         env["MODE"] = mode
-        r = subprocess.run([sys.executable, "-c", poke], cwd=FW, capture_output=True, text=True, encoding="utf-8", env=env, timeout=30)
+        r = subprocess.run([sys.executable, "-c", poke], cwd=FW, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=30)
         out = (r.stdout or "") + (r.stderr or "")
         check(title, r.returncode == 0 and expect in out.split(), out)
     finally:

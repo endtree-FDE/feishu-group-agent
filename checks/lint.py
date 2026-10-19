@@ -4,6 +4,8 @@
 import pathlib, py_compile, sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+import utf8io  # noqa: F401
 SKIP = {".git", "__pycache__", "memory", "logs", "state", "audit", "kb_inbox", "kb_staging", "kb_prev", "kb_new"}
 
 def main():

@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 # 公开前复查：扫描已提交的历史，查找账号、群号、open_id、密钥和客户名。
 # 只打印打码后的种类、路径和提交号。不改写历史，不调用 filter-repo。
-import re, subprocess, sys
+import os, re, subprocess, sys
 from collections import defaultdict
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import utf8io  # noqa: F401
 
-ROOT = subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip()
+ROOT = subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True, encoding="utf-8", errors="replace").strip()
 
 # 这些是仓库里故意留下的占位和虚构例子，不算泄漏。
 FIXTURE_PHONE = "1" + "3812345678"
@@ -28,7 +30,7 @@ PATTERNS = {
 }
 
 def git(*args):
-    p = subprocess.run(["git", "-C", ROOT, *args], capture_output=True, text=True, errors="replace")
+    p = subprocess.run(["git", "-C", ROOT, *args], capture_output=True, text=True, encoding="utf-8", errors="replace")
     return p.returncode, p.stdout, p.stderr
 
 def mask(value):

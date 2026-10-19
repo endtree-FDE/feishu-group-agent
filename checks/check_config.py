@@ -4,6 +4,8 @@
 import json, os, re, sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
+import utf8io  # noqa: F401
 SCHEMA_PATH = os.path.join(ROOT, "agents", "config.schema.json")
 ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,80}$")
 

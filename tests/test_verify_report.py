@@ -3,6 +3,7 @@ import json, os, re, subprocess, sys
 
 FW = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, FW)
+import utf8io  # noqa: F401
 import verify_report
 
 results = []
@@ -149,12 +150,12 @@ check("诊断里的 FAIL 让退出失败",
       any(level == "FAIL" and "scopes" in info for level, _n, info in doc_rows) and doc_rows[-1][0] == "FAIL")
 
 got = subprocess.run([sys.executable, os.path.join(FW, "verify_report.py")], input=json.dumps(snap),
-                     capture_output=True, text=True, encoding="utf-8", timeout=30)
+                     capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
 check("标准输入的判断不发消息，没有 FAIL 时退出码 0",
       got.returncode == 0 and "fail=0" in (got.stdout or "") and "consume" not in (got.stderr or ""), got.stdout)
 
 bad = subprocess.run([sys.executable, os.path.join(FW, "verify_report.py")], input="",
-                     capture_output=True, text=True, encoding="utf-8", timeout=30)
+                     capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
 check("没有输入时失败，且不列进程", bad.returncode == 1 and "FAIL" in (bad.stdout or ""))
 
 ps1 = open(os.path.join(FW, "scripts", "verify_windows.ps1"), encoding="utf-8").read()

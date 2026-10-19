@@ -11,7 +11,7 @@ jobs:
   test:
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -40,6 +40,17 @@ jobs:
           PYTHONUTF8: "1"
           PYTHONIOENCODING: utf-8
         run: python tests/run_tests.py
+      - name: Tests without UTF-8 mode
+        if: runner.os == 'Windows'
+        shell: powershell
+        env:
+          PYTHONUTF8: "0"
+        run: |
+          if (Test-Path Env:PYTHONIOENCODING) { Remove-Item Env:PYTHONIOENCODING }
+          # 控制台代码页改成 936，尽量模拟中文 Windows。Python 在管道上仍看系统 ANSI 代码页；
+          # PYTHONUTF8=0 让默认编码不再是 UTF-8。
+          chcp 936 | Out-Host
+          python tests/run_tests.py
 
   secrets:
     name: secret scan

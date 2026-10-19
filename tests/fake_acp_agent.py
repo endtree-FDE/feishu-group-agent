@@ -1,6 +1,8 @@
 # 测试用假 ACP 服务端：stdio 上收 JSON-RPC，按提示词里的标记回话。
 # 带 -p 时改走一次性 stream-json，用来验证常驻失败后回退到原来的 -p，而且不会把回退也当成 ACP。
 import json, os, sys, time
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import utf8io  # noqa: F401
 
 TRACE = os.environ.get("AGENTBOT_ACP_TRACE")
 PERM_ID = 8000

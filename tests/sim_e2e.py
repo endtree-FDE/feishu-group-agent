@@ -4,6 +4,8 @@
 import json, os, re, shutil, subprocess, sys, tempfile, time, zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
+import utf8io  # noqa: F401
 FAILS = []
 
 
@@ -169,9 +171,9 @@ def run_bot(base, cfg, question, script, fake, by_id, mid):
         "AGENTBOT_FAKE_LARK": fake_path,
         "AGENTBOT_FAKE_LARK_BY_ID": by_path,
         "AGENTBOT_FAKE_SCRIPT": script_path,
-        "PYTHONUTF8": "1",
-        "PYTHONIOENCODING": "utf-8",
+        "PYTHONUTF8": "0",
     })
+    env.pop("PYTHONIOENCODING", None)
     proc = subprocess.run(
         [sys.executable, os.path.join(ROOT, "agentbot.py"), cfg_path, "--dry-run", ev_path],
         capture_output=True, text=True, encoding="utf-8", errors="replace",

@@ -154,10 +154,16 @@ def bot_ready(text):
     return None
 
 
-# lark-cli 1.0.98 的 auth scopes：没登录用户时字段是 scopes；已经登录时同一份应用权限改放到 userScopes。
-# 字段名叫 userScopes，内容仍是应用已开通的 scope，不是用户 OAuth 令牌。
-_SCOPE_KEYS = ("scopes", "appScopes", "app_scopes", "enabledScopes", "enabled_scopes",
-               "userScopes", "user_scopes", "scopeList", "scope_list")
+# lark-cli 1.0.98 的 auth scopes 不接受 --as bot（带上退出码 2）。
+# 官方实现（cmd/auth/scopes.go + getAppInfo）：开放平台若按身份标了 token_types，
+# JSON 固定是 tokenType=user 和 userScopes，里面只有用户 token 的 scope。
+# 实机登录后常见 userScopes 只有 offline_access，机器人实际用的 tenant 权限不在这份列表里。
+# 接口没按身份分类时字段才是 scopes，那一份才是应用权限。这一版没有别的命令能列出 tenant 权限。
+_PLAIN_SCOPE_KEYS = ("scopes", "enabledScopes", "enabled_scopes", "scopeList", "scope_list")
+_EXPLICIT_APP_KEYS = ("appScopes", "app_scopes", "tenantScopes", "tenant_scopes", "botScopes", "bot_scopes")
+_USER_SCOPE_KEYS = ("userScopes", "user_scopes")
+_USER_TOKEN_TYPES = {"user", "uat", "user_access_token"}
+_APP_TOKEN_TYPES = {"tenant", "bot", "app", "tat", "tenant_access_token", "application"}
 _SCOPE_NESTS = ("data", "result", "app", "appInfo", "application")
 
 
@@ -184,18 +190,63 @@ def _scope_items(value):
     return out
 
 
-def _scopes_in_obj(obj, depth=0):
+def _find_named(obj, keys, depth=0):
     if not isinstance(obj, dict) or depth > 3:
         return None
-    for key in _SCOPE_KEYS:
+    for key in keys:
         found = _scope_items(obj.get(key))
         if found is not None:
             return found
     for key in _SCOPE_NESTS:
-        found = _scopes_in_obj(obj.get(key), depth + 1)
+        found = _find_named(obj.get(key), keys, depth + 1)
         if found is not None:
             return found
     return None
+
+
+def _token_type(obj, depth=0):
+    if not isinstance(obj, dict) or depth > 3:
+        return ""
+    for key in ("tokenType", "token_type"):
+        val = obj.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip().lower()
+    for key in _SCOPE_NESTS:
+        found = _token_type(obj.get(key), depth + 1)
+        if found:
+            return found
+    return ""
+
+
+def classify_scopes(text):
+    """返回 ('app', 列表)、('user', 列表) 或 (None, None)。
+
+    app 才能拿去和已启用能力比对。user 是用户 token，不能当成应用权限。
+    """
+    obj = _json_obj(text)
+    if isinstance(obj, dict):
+        token = _token_type(obj)
+        explicit = _find_named(obj, _EXPLICIT_APP_KEYS)
+        plain = _find_named(obj, _PLAIN_SCOPE_KEYS)
+        user = _find_named(obj, _USER_SCOPE_KEYS)
+        if token in _APP_TOKEN_TYPES:
+            for found in (explicit, plain, user):
+                if found is not None:
+                    return "app", found
+        if explicit is not None and token not in _USER_TOKEN_TYPES:
+            return "app", explicit
+        if token in _USER_TOKEN_TYPES or (explicit is None and plain is None and user is not None):
+            return "user", user if user is not None else []
+        if plain is not None:
+            return "app", plain
+        if explicit is not None:
+            return "app", explicit
+        # 已经是 JSON 就不要再按行去抠权限名，否则用户 token 里的 scope 会被当成应用权限。
+        return None, None
+    found = scopes_from_text(text)
+    if found is not None:
+        return "app", found
+    return None, None
 
 
 def scopes_from_text(text):
@@ -221,12 +272,11 @@ def scopes_from_text(text):
 
 
 def app_scopes(text):
-    """auth scopes 里应用已开通的权限。认 JSON 字段名变体，也认文本表格。"""
-    obj = _json_obj(text)
-    found = _scopes_in_obj(obj) if obj else None
-    if found is not None:
+    """应用或 tenant 权限。用户 token（tokenType=user / 只有 userScopes）返回 None。"""
+    kind, found = classify_scopes(text)
+    if kind == "app":
         return found
-    return scopes_from_text(text)
+    return None
 
 
 def duplicate_findings(procs, base, profile):
@@ -308,12 +358,15 @@ def report(cfg, base, exe, run, processes, resolve, connect, modules, env):
             add("OK", "auth", "bot" if ready is True else "status 成功")
         else:
             add("FAIL", "auth", "应用身份未就绪或 status 失败")
+        # 不带 --as。1.0.98 拒绝 --as bot，而且 auth scopes 在按身份分类时只给用户 token。
         scope_code, scope_out, scope_err = run(list(exe) + ["auth", "scopes", "--profile", profile])
         scope_text = (scope_out or "") + "\n" + (scope_err or "")
-        found = app_scopes(scope_text)
-        if usage_error(scope_code, scope_text) or (scope_code != 0 and found is None):
+        kind, found = classify_scopes(scope_text)
+        if usage_error(scope_code, scope_text) or (scope_code != 0 and kind is None):
             add("WARN", "scopes", "列不出应用权限，请在开放平台核对")
-        elif found is None:
+        elif kind == "user":
+            add("WARN", "scopes", "拿到的是用户 token，不是应用权限，请在开放平台核对")
+        elif kind != "app" or found is None:
             add("WARN", "scopes", "没有解析到应用权限列表，请在开放平台核对")
         else:
             missing = [item for item in required_scopes(cfg) if item not in found]
