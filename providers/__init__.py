@@ -3,6 +3,7 @@
 import os
 
 from providers.base import PartialText
+from providers.presets import PRESETS, uses_openai_compat
 
 
 def create(cfg, log, kb):
@@ -14,9 +15,11 @@ def create(cfg, log, kb):
         if name in ("", "cursor"):
             from providers.cursor import CursorProvider
             p = CursorProvider(cfg, log, kb)
-        elif name == "openai_compat":
+        elif uses_openai_compat(name):
             from providers.openai_compat import OpenAICompatProvider
             p = OpenAICompatProvider(cfg, log)
+            if name in PRESETS:
+                p.name = name
         elif name == "fake":
             from providers.fake import FakeProvider
             p = FakeProvider(cfg, log)

@@ -37,16 +37,23 @@ flowchart TB
     P5 --> ASM
   end
 
-  subgraph L5["⑤ 模型运行层：思考与查资料"]
+  subgraph L5["⑤ 模型运行层：两条里选一条"]
     direction LR
-    ACP["cursor-agent 常驻进程<br/>配置里的模型 · ask 只读"]:::model --> STREAM["流式事件<br/>思考·工具·文字片段"]:::model
-    ACP -. 按需读全文 .-> SKD["skills/某技能/SKILL.md"]:::store
-    ACP -. 按需读原文 .-> KBF["kb/某文件.md"]:::store
+    CHOOSE{"model_provider"}:::model
+    CUR["cursor-agent<br/>本机登录 · 可常驻 · ask 只读"]:::model
+    OAI["OpenAI 兼容接口<br/>DeepSeek · 通义 · 智谱 · 盘古<br/>或自填 / 比赛地址<br/>密钥只在环境变量"]:::model
+    STREAM["流式事件<br/>思考 · 文字片段"]:::model
+    CHOOSE --> CUR
+    CHOOSE --> OAI
+    CUR --> STREAM
+    OAI --> STREAM
+    CUR -. 可自己翻工作区 .-> SKD["skills/某技能/SKILL.md"]:::store
+    CUR -. 可自己翻工作区 .-> KBF["kb/某文件.md"]:::store
   end
 
   subgraph L6["⑥ 工具与写操作层：动飞书前先确认"]
     direction LR
-    TL["工具调用<br/>TOOL 行 → 以后 MCP"]:::model --> RD["只读：群历史·文档<br/>日程·多维表格"]:::feishu
+    TL["工具调用<br/>最多 max_tool_rounds 轮"]:::model --> RD["只读：群历史·文档·知识库<br/>日程·表格·当前会话附件"]:::feishu
     TL --> WR["写提案：建文档<br/>加日程·加记录"]:::guard --> CF["三重白名单<br/>+ 6 位确认码"]:::guard --> AUD[("审计日志")]:::store
   end
 
@@ -60,21 +67,23 @@ flowchart TB
     direction LR
     MEMF[("memory/<br/>groups/群/GROUP.md+facts.jsonl<br/>users/人/USER.md+facts.jsonl<br/>topics/话题.md · daily/日期.md")]:::store
     DB[("state.db<br/>最近对话原文")]:::store
-    KB[("kb/ + _INDEX.md")]:::store
+    KB[("kb/<br/>目录只有文件名和标题")]:::store
+    EV[("logs/events.jsonl<br/>logs/journal.jsonl<br/>不含问题原文")]:::store
     SK[("skills/")]:::store
   end
 
   subgraph L9["⑨ 后台流水线：知识库同步 + 记忆整理"]
     direction LR
     SRC["资料目录 research / news<br/>飞书群文档"]:::ops --> INB["inbox → staging<br/>客户名脱敏 + 可配红线"]:::ops --> APL["人工审 → apply<br/>重建 _INDEX"]:::ops
-    NIGHT["每日整理<br/>过期·合并·重写档案"]:::ops
+    NIGHT["每日整理记忆<br/>设计，默认不跑"]:::ops
   end
 
   subgraph L10["⑩ 运维：一个机器人 = 一份配置"]
     direction LR
     CFG["agents/你的机器人.json<br/>群·白名单·资源·开关"]:::ops
     PER["persona.md · redact.txt<br/>policy.redlines（默认空）· skills 选装"]:::ops
-    WD["计划任务+看门狗<br/>心跳·单实例"]:::ops
+    WD["计划任务+看门狗<br/>心跳·单实例·优雅停机"]:::ops
+    DIAG["--doctor · verify_windows.ps1<br/>只读，不发消息"]:::ops
     TST["离线测试·dry-run<br/>bot.log 分阶段耗时"]:::ops
   end
 

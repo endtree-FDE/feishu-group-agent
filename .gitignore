@@ -5,6 +5,7 @@ __pycache__/
 # 填了真实飞书编号的机器人配置。仓库里只保留占位示例。
 agents/*.json
 !agents/example.json
+!agents/config.schema.json
 
 # 运行时状态、日志、记忆、审计
 state/

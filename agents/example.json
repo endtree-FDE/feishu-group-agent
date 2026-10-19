@@ -2,10 +2,18 @@
   "name": "example",
   "base_dir": ".",
   "kb_dir": "kb",
+  "kb_index": {
+    "enabled": true,
+    "budget_chars": 1000
+  },
   "profile": "REPLACE_PROFILE",
   "bot_open_id": "REPLACE_BOT_OPEN_ID",
-  "bot_names": ["小助手"],
-  "chat_ids": ["REPLACE_CHAT_ID"],
+  "bot_names": [
+    "小助手"
+  ],
+  "chat_ids": [
+    "REPLACE_CHAT_ID"
+  ],
   "chats": {
     "auto_join": false,
     "admit": "confirm",
@@ -13,14 +21,26 @@
   },
   "conflict_pidfiles": [],
   "shutdown_wait_sec": 15,
+  "link_jump_sec": 20,
   "reply_in_thread": true,
-  "catchup": {"enabled": true, "overlap_sec": 300, "max_messages": 20, "max_age_sec": 43200},
-  "thread_followup": {"enabled": true, "who": "initiator_or_whitelist"},
+  "catchup": {
+    "enabled": true,
+    "overlap_sec": 300,
+    "max_messages": 20,
+    "max_age_sec": 43200
+  },
+  "thread_followup": {
+    "enabled": true,
+    "who": "initiator_or_whitelist"
+  },
   "max_concurrency": 2,
   "max_queue": 4,
   "rate_limit": {
     "min_gap_per_user": 20,
     "max_per_hour": 30
+  },
+  "observability": {
+    "journal": true
   },
   "features": {
     "memory": true,
@@ -33,6 +53,8 @@
     "enabled": false,
     "dir": "memory",
     "profile_budget_chars": 1500,
+    "recall": true,
+    "recall_budget_chars": 400,
     "max_fact_chars": 300,
     "scope": "topic",
     "max_turns": 6,
@@ -71,26 +93,73 @@
   "redact_file": "redact.txt",
   "help_pattern": "你(能|会|可以)(干|做|帮)(什么|啥)|你有(什么|哪些|啥)(权限|功能|能力)|^有(什么|哪些|啥)(权限|功能)[?？]?$|你是谁|怎么用你",
   "tools": {
-    "history": {"enabled": true, "days": 7, "max_pages": 2},
-    "docs_search": {"enabled": true},
-    "docs_read": {"enabled": true, "allow_tokens": [], "max_chars": 20000},
-    "calendar_read": {"enabled": true, "calendar_id": ""},
+    "history": {
+      "enabled": true,
+      "days": 7,
+      "max_pages": 2
+    },
+    "docs_search": {
+      "enabled": true
+    },
+    "docs_read": {
+      "enabled": true,
+      "allow_tokens": [],
+      "max_chars": 20000
+    },
+    "calendar_read": {
+      "enabled": true,
+      "calendar_id": ""
+    },
     "base_read": {
       "enabled": true,
       "base_token": "REPLACE_BASE_TOKEN",
       "table_id": "REPLACE_TABLE_ID",
       "search_fields": []
     },
-    "attachment": {"enabled": true, "max_mb": 20, "max_chars": 20000, "zip_max_files": 30, "zip_max_read": 8, "zip_max_mb": 40, "pdf_max_pages": 20, "pdf_scan_pages": 10},
-    "message_attachment": {"enabled": true, "max_per_answer": 4},
-    "web": {"allow_fake_ip_ranges": ["198.18.0.0/15"]},
-    "docs_create": {"enabled": true},
-    "docs_append": {"enabled": true},
-    "calendar_create": {"enabled": true},
-    "calendar_create_batch": {"enabled": true},
-    "calendar_update": {"enabled": true},
-    "calendar_delete": {"enabled": true},
-    "base_create": {"enabled": true}
+    "attachment": {
+      "enabled": true,
+      "max_mb": 20,
+      "max_chars": 20000,
+      "zip_max_files": 30,
+      "zip_max_read": 8,
+      "zip_max_mb": 40,
+      "pdf_max_pages": 20,
+      "pdf_scan_pages": 10
+    },
+    "message_attachment": {
+      "enabled": true,
+      "max_per_answer": 4
+    },
+    "web": {
+      "allow_fake_ip_ranges": [
+        "198.18.0.0/15"
+      ]
+    },
+    "kb_read": {
+      "enabled": true,
+      "max_chars": 8000
+    },
+    "docs_create": {
+      "enabled": true
+    },
+    "docs_append": {
+      "enabled": true
+    },
+    "calendar_create": {
+      "enabled": true
+    },
+    "calendar_create_batch": {
+      "enabled": true
+    },
+    "calendar_update": {
+      "enabled": true
+    },
+    "calendar_delete": {
+      "enabled": true
+    },
+    "base_create": {
+      "enabled": true
+    }
   },
   "write": {
     "enabled": true,
@@ -107,7 +176,9 @@
       "table_id": "REPLACE_TABLE_ID"
     },
     "base_time_field": "时间",
-    "base_select_fields": ["状态"]
+    "base_select_fields": [
+      "状态"
+    ]
   },
   "progress": {
     "enabled": false,

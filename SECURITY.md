@@ -2,7 +2,7 @@
 
 ## 支持的版本
 
-安全修复以 `main` 分支为准。这个仓库是模板，没有单独的版本号分支。
+版本号写在仓库根目录的 `VERSION`。还没有 GitHub Release。安全修复以 `main` 分支为准。以后打了 Release，就以最新的 Release 和 `main` 为准。
 
 ## 报告漏洞
 
@@ -46,10 +46,12 @@ lark-cli config init --app-id 你的应用ID --app-secret-stdin --brand feishu
 
 回答、进度、记忆和知识库同步会打码客户名、手机号、证件号、邮箱、密钥样子的字符串和电脑路径。话题红线默认是空的，由部署者自己写。
 
+`logs/events.jsonl` 和 `logs/journal.jsonl` 都不记问题原文。诊断命令 `--doctor` 和 `scripts/verify_windows.ps1` 不发消息。历史扫描只报告打码后的种类，不改写 Git 历史。发现历史里仍有真实编号时，先在私人渠道报告，不要把原文贴进公开 Issue。
+
 常驻模式默认关闭。打开之后，改文件、删文件和执行命令的请求会被拒绝。上网只放行公网的搜索和网页读取，不放行本机和内网地址。
 
 更细的规则见 [docs/安全红线.md](docs/安全红线.md)。
 
 ## English
 
-Report vulnerabilities through [GitHub private security advisories](https://github.com/endtree-FDE/feishu-group-agent/security/advisories/new). Do not include secrets, Feishu IDs, or customer names in public issues. The bot runs on the operator's machine; this repository must not contain App Secrets or filled-in configuration.
+The version is the `VERSION` file. There is no GitHub Release yet, so security fixes target `main`. After a release exists, they target the latest release and `main`. Report vulnerabilities through [GitHub private security advisories](https://github.com/endtree-FDE/feishu-group-agent/security/advisories/new). Do not include secrets, Feishu IDs, or customer names in public issues. The bot runs on the operator's machine; this repository must not contain App Secrets or filled-in configuration.

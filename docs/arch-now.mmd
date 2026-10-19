@@ -1,0 +1,24 @@
+flowchart TB
+  classDef feishu fill:#E8F1FF,stroke:#3370FF,color:#1F2329
+  classDef guard fill:#FFF1E8,stroke:#F77234,color:#1F2329
+  classDef model fill:#F5EEFF,stroke:#7F3BF5,color:#1F2329
+  classDef store fill:#FFFBE6,stroke:#D4A017,color:#1F2329
+  classDef ops fill:#F2F3F5,stroke:#8F959E,color:#1F2329
+
+  MSG["飞书：群里 @ 或允许的私聊"]:::feishu --> LARK["lark-cli 长连接"]:::feishu
+  LARK --> GUARD["门卫：去重、认群、限流、入口脱敏"]:::guard
+  GUARD --> PACK["程序拼提示词<br/>人设 · 记忆 · 技能目录 · 知识库目录 · 工具说明"]:::store
+  PACK --> CHOOSE{"model_provider"}:::model
+  CHOOSE -->|"没写或 cursor"| CUR["cursor-agent<br/>本机 cursor-agent login"]:::model
+  CHOOSE -->|"deepseek / dashscope / zhipu / pangu / openai_compat"| OAI["OpenAI 兼容 /chat/completions<br/>密钥只读环境变量"]:::model
+  CUR --> LOOP["模型要工具时，由程序执行"]:::guard
+  OAI --> LOOP
+  LOOP --> READ["只读，可连续多轮<br/>历史 · 文档 · 知识库 · 当前会话附件"]:::feishu
+  LOOP --> WRITE["写入提案"]:::guard
+  WRITE --> CONFIRM["白名单 + 发起人 6 位确认码"]:::guard
+  READ --> LOOP
+  CONFIRM --> OUT["出口脱敏后回复这一条"]:::feishu
+  LOOP --> OUT
+  OUT --> MSG
+  DOC["--doctor 只读诊断<br/>不发消息，不写心跳"]:::ops
+  LOGS["本机日志，不含问题原文<br/>events.jsonl · journal.jsonl"]:::store
