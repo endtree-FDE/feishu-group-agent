@@ -136,6 +136,9 @@
 - `max_fact_chars`：一条「记一下」最多多少字，默认 `300`。
 - `scope`：现在固定用 `topic`（按话题分开）。
 - `per_user`：按人记一份档案。**先保持 `false`。** 个人记忆默认不开启。
+- `growth`：从近期对话里提议新的长期记忆。**默认关。** 不写或 `enabled` 为 `false` 时，不调用模型，不发提案，`/忘记` 仍是立刻删除。打开之后的审批、命令和配置键见 [docs/记忆成长.md](../docs/记忆成长.md)。
+
+`agents/example.json` 里 `memory.growth.enabled` 仍是 `false`。旧配置没有这一段时，行为和以前一样。
 
 ## 技能 skills
 

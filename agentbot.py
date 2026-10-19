@@ -15,7 +15,7 @@ import json, os, re, subprocess, sys, time, logging, collections, threading, sql
 
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import utf8io  # 管道上的标准流改为 UTF-8，避免中文 Windows 的代码页把日志解崩
-import acp_client, channels, digest, feishu_link, guard, health_alert, knowledge, lifecycle, memory, observe, proc_identity, providers, usage
+import acp_client, channels, digest, feishu_link, guard, health_alert, knowledge, lifecycle, memory, memory_growth, observe, proc_identity, providers, usage
 from channels.base import Cap, can_update, status_modes
 from channels.feishu import MEMBER_ADDED, MEMBER_DELETED
 from providers.base import PartialText
@@ -314,6 +314,8 @@ def status_text(sess, chat_id=""):
     kb_line = knowledge.status_line(BASE, CFG, chat_id)
     if kb_line:
         lines.append(kb_line)
+    if memory_growth.enabled(CFG):
+        lines.append("记忆成长：开。提案要审批人确认后才写入，不确认不会记。")
     return "\n".join(lines)
 def _kb_command(kind, ctx):
     """ /kb 只动当前会话的索引。刷新要写入白名单，避免随便把群文件收进来。"""
@@ -1541,6 +1543,7 @@ def _direct_command(q):
     if q in ("/状态", "/status", "状态") and _status_cmd_on(): return True
     if knowledge.enabled(CFG) and knowledge.command_kind(q): return True
     if GMEM.is_command(q): return True
+    if memory_growth.is_command(CFG, q): return True
     if q in ("/help", "帮助") or (len(q) <= 30 and HELP_RX.search(q)): return True
     if usage.enabled(CFG) and q == "/report": return True
     return False
@@ -1617,7 +1620,9 @@ def _handle_claimed(ev, mid, ctype, uid):
     ctx["question"] = q
     q_log, q_hits = guard.redact_counted(q, REDACT_NAMES)
     q_topic = usage.topic_of(q_log)
-    if ctype != "p2p": _note_thread(ev, uid)
+    if ctype != "p2p":
+        _note_thread(ev, uid)
+        if memory_growth.enabled(CFG): memory_growth.note_activity(BASE, ev.get("chat_id"))
     log.info("Q %s %s/%s sess=%s from %s: %s", mid, ctype, mtype, sess, uid, q_log[:200])
     if _direct_command(q) and not command_ok(uid):
         reply(mid, (CFG.get("texts") or {}).get("wait") or "请稍等一下，我处理完上一条就回复你。"); return
@@ -1640,6 +1645,8 @@ def _handle_claimed(ev, mid, ctype, uid):
     kb_kind = knowledge.command_kind(q) if knowledge.enabled(CFG) else ""
     if kb_kind:
         reply(mid, _kb_command(kb_kind, ctx)); return
+    gh = memory_growth.handle_text(CFG, BASE, GMEM, q, ctx, REDACT_NAMES)
+    if gh is not None: reply(mid, gh); return
     mr = GMEM.handle(q, ctx)  # 记忆命令：/记忆、记一下/记住/备忘、/忘记 N、/忘记全部、确认清空（不调 agent）
     if mr is not None: reply(mid, mr); return
     if q in ("/help", "帮助") or (len(q) <= 30 and HELP_RX.search(q)):  # 问能力/权限：直接列能力和边界，不调 agent、不翻资料
@@ -1990,6 +1997,30 @@ def _outbound_send(kind, target, text, key):
         return "fail"
     return result if result in ("ok", "fail", "unknown") else "fail"
 
+def _growth_model(prompt):
+    """整理只调用一次模型，不走工具循环。关掉成长时 tick 不会进来。"""
+    try:
+        return get_provider().complete(prompt) or ""
+    except Exception as exc:
+        log.warning("memory growth model failed: %s", guard.redact(str(exc), REDACT_NAMES)[:160])
+        raise
+
+def _growth_fetch(chat):
+    """只拉这一个群的近期消息。历史工具关着时返回空，仍可以做过期复核。"""
+    if not TOOLS.enabled("history"):
+        return []
+    opt = memory_growth.settings(CFG)
+    start = (datetime.datetime.now().astimezone() - datetime.timedelta(hours=opt["lookback_hours"])).isoformat(timespec="seconds")
+    page = history_page_size(CFG)
+    try:
+        got = TOOLS._transport("history", ["im", "+chat-messages-list", "--chat-id", chat, "--start", start,
+                                           "--page-size", str(min(page, opt["max_messages"])), "--page-all",
+                                           "--page-limit", "2", "--no-reactions"])
+    except Exception as exc:
+        log.warning("memory growth history failed: %s", guard.redact(str(exc), REDACT_NAMES)[:160])
+        return []
+    return memory_growth.history_messages(got, chat, opt["max_messages"])
+
 def _digest_fetch(tool, argv):
     try:
         got = TOOLS.lark(tool, argv)
@@ -2027,6 +2058,10 @@ def maintenance_tick(now=None):
                 now=now, log=log, rules=guard.policy_rules(CFG, "kb"), stop=lifecycle.SHUTDOWN.is_set)
     except Exception:
         log.exception("kb refresh tick failed")
+    try:
+        memory_growth.tick(CFG, BASE, REDACT_NAMES, now, _served_ids(), _growth_model, _outbound_send, _growth_fetch, GMEM, log)
+    except Exception:
+        log.exception("memory growth tick failed")
 
 def self_check():
     ok = True
@@ -2071,6 +2106,15 @@ def self_check():
         print("HINT report.time 不是 HH:MM，用量周报不会发。")
     if report_cfg["enabled"] and not report_cfg["weekday_ok"]:
         print("HINT report.weekday 认不出来，用量周报不会发。")
+    growth_cfg = memory_growth.settings(CFG)
+    _mem_cfg = CFG.get("memory") if isinstance(CFG.get("memory"), dict) else {}
+    _growth_raw = _mem_cfg.get("growth") if isinstance(_mem_cfg.get("growth"), dict) else {}
+    if _growth_raw.get("enabled") and not GMEM.enabled:
+        print("HINT memory.growth.enabled 已打开，但长期记忆是关的。不会提议，也不会写入。")
+    if growth_cfg["enabled"] and not growth_cfg["approvers"]:
+        print("HINT memory.growth 已打开，但 approver_open_ids 为空或还是占位符。不会调用模型，也不会写入。")
+    if growth_cfg["enabled"] and not growth_cfg["time_ok"]:
+        print("HINT memory.growth.time 不是 HH:MM，定时整理不会跑。话题闲下来仍可能整理。")
     sks = TOOLS.skills
     p("skills", not sks.invalid, sks.status())
     if knowledge.enabled(CFG):
