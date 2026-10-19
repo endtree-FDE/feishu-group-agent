@@ -1359,6 +1359,10 @@ def _handle_claimed(ev, mid, ctype, uid):
     except Exception as e: log.warning("progress start error (ignored): %s", e)
     with SEM:
         with _AL: _waiting -= 1; _active += 1; _peak = max(_peak, _active); act = _active
+        # 并发测试把前两名停在这里。只加长 sleep 时，Windows 上后面的题还没送进来，名额就已经空了。
+        hold = os.environ.get("AGENTBOT_FAKE_HOLD")
+        if hold:
+            while not os.path.exists(hold): time.sleep(0.05)
         log.info("agent start %s active=%d peak=%d", mid, act, _peak); t0 = time.time(); prog.set_stage("正在思考…"); q_model = ""
         try: lifecycle.touch(STATE, mid, "正在思考…", REDACT_NAMES)
         except Exception: log.warning("inflight note failed %s", mid)
@@ -1682,12 +1686,29 @@ def main():
     if DRY:
         startup_recover()
         src = _opt("--dry-run"); f = open(src, encoding="utf-8-sig") if src else sys.stdin; ths = []
+        hold = os.environ.get("AGENTBOT_FAKE_HOLD")
+        if hold and not PARALLEL:
+            try: open(hold, "w", encoding="utf-8").write("go")
+            except OSError: pass
+        n = 0
         for line in f:
             line = line.strip()
             if not line.startswith("{"): continue
             obj = json.loads(line)
-            if PARALLEL: t = threading.Thread(target=ingest, args=(obj,)); t.start(); ths.append(t)
-            else: ingest(obj)
+            if PARALLEL:
+                t = threading.Thread(target=ingest, args=(obj,)); t.start(); ths.append(t); n += 1
+                # 测试闩锁：先等前 MAXC 条占住名额，再送剩下的。8 条几乎同时过检查时，被拒的会是 4 条而不是 2 条。
+                if hold and n <= MAXC:
+                    deadline = time.time() + 30
+                    while time.time() < deadline:
+                        with _AL:
+                            if _active >= n: break
+                        time.sleep(0.01)
+            else:
+                ingest(obj)
+        if hold and PARALLEL:
+            try: open(hold, "w", encoding="utf-8").write("go")
+            except OSError: pass
         for t in ths: t.join()
         log.info("dry-run finished peak_active=%d max_concurrency=%d", _peak, MAXC); return
     check_conflicts(); acquire_lock()
