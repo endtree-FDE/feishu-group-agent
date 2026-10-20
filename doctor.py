@@ -347,6 +347,9 @@ def report(cfg, base, exe, run, processes, resolve, connect, modules, env):
         add("FAIL", "config", "含有密钥字段 %s，请从配置里删掉" % ", ".join(secrets))
     else:
         add("OK", "config", "没有 app_secret")
+    from providers.settings import doctor_lines
+    for level, name, info in doctor_lines(cfg, env):
+        add(level, name, info)
 
     profile = str(cfg.get("profile") or "")
     if not profile:

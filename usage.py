@@ -44,6 +44,7 @@ _READ_BUCKET = {
     "docs_read": "docs", "docs_search": "docs",
     "calendar_read": "calendar", "base_read": "base",
     "kb_read": "file", "attachment": "file", "message_attachment": "file",
+    "web_search": "web_search",
 }
 _WRITE_ACTION = {
     "write_proposed": "proposed", "write_done": "confirmed",
@@ -305,7 +306,7 @@ def _scope_for(chat_id, scope):
 
 def _scrub(row):
     kind = row.get("kind")
-    if kind not in ("turn", "tool", "write", "redact", "error", "health", "link"):
+    if kind not in ("turn", "tool", "write", "redact", "error", "health", "link", "tokens"):
         return None
     out = {"t": float(row.get("t") or time.time()), "kind": kind}
     traffic = row.get("traffic")
@@ -368,6 +369,14 @@ def _scrub(row):
                 out["downtime_sec"] = max(0, int(row.get("downtime_sec") or 0))
             except (TypeError, ValueError):
                 out["downtime_sec"] = 0
+    elif kind == "tokens":
+        try:
+            out["prompt"] = max(0, int(row.get("prompt") or 0))
+            out["completion"] = max(0, int(row.get("completion") or 0))
+        except (TypeError, ValueError):
+            return None
+        if out["prompt"] == 0 and out["completion"] == 0:
+            return None
     return out
 
 
@@ -442,6 +451,20 @@ def note_error(category, chat_id=None, scope=None):
 
 def note_health(action):
     _append({"kind": "health", "traffic": current_traffic(), "action": action})
+
+
+def note_tokens(prompt_tokens, completion_tokens, chat_id=None, scope=None):
+    """只记输入和输出的 token 数。不记模型原文，也不记密钥。"""
+    try:
+        prompt = max(0, int(prompt_tokens or 0))
+        completion = max(0, int(completion_tokens or 0))
+    except (TypeError, ValueError):
+        return
+    if prompt == 0 and completion == 0:
+        return
+    label, kept = _placed(chat_id, scope)
+    _append({"kind": "tokens", "traffic": current_traffic(), "group": label, "scope": kept,
+             "prompt": prompt, "completion": completion})
 
 
 def note_link(event, downtime_sec=0, when=None):
@@ -523,6 +546,7 @@ def _blank():
         "errors": {"model": 0, "timeout": 0, "permission": 0},
         "topics": {name: 0 for name in _TOPICS},
         "health": {"down": 0, "remind": 0, "recover": 0},
+        "prompt_tokens": 0, "completion_tokens": 0,
     }
 
 
@@ -561,6 +585,9 @@ def _apply(bucket, row):
         action = row.get("action")
         if action in bucket["health"]:
             bucket["health"][action] += 1
+    elif kind == "tokens":
+        bucket["prompt_tokens"] += int(row.get("prompt") or 0)
+        bucket["completion_tokens"] += int(row.get("completion") or 0)
 
 
 def _link_stats(events, start, end):
@@ -620,11 +647,14 @@ def _pair(cur, prev):
 
 
 def _countable(row):
-    """只收已经洗过的行。群标签必须是 g1 这种形式，坏行整行丢掉。"""
+    """只收已经洗过的行。群标签必须是 g1 这种形式，坏行整行丢掉。
+
+    模型用量和健康、连接事件一样，没有聊天上下文时也记进合计。
+    """
     kind = row.get("kind")
-    if kind not in ("turn", "tool", "write", "redact", "error", "health", "link"):
+    if kind not in ("turn", "tool", "write", "redact", "error", "health", "link", "tokens"):
         return False
-    if kind in ("health", "link"):
+    if kind in ("health", "link", "tokens"):
         return True
     return bool(_LABEL.match(str(row.get("group") or "")))
 
@@ -646,6 +676,8 @@ def _snapshot(rows, start, end, link_rows):
         if row.get("kind") == "health":
             continue
         label = row.get("group") or ""
+        if not _LABEL.match(str(label)):
+            continue
         bucket = groups.get(label)
         if bucket is None:
             bucket = _blank()
@@ -673,6 +705,8 @@ def _materialize(bucket, drops, downtime):
         "health": dict(bucket["health"]),
         "drops": drops,
         "downtime": downtime,
+        "prompt_tokens": int(bucket.get("prompt_tokens") or 0),
+        "completion_tokens": int(bucket.get("completion_tokens") or 0),
         "scope": bucket.get("scope") or "group",
     }
 
@@ -697,6 +731,8 @@ def _view(cur, prev, title, group, scope, include_link):
         "downtime": _pair(cur["downtime"], prev["downtime"]) if include_link else None,
         "health": {name: _pair(cur["health"].get(name, 0), prev["health"].get(name, 0)) for name in ("down", "remind", "recover")} if include_link else None,
         "topics": [(name, _pair(cur["topics"].get(name, 0), prev["topics"].get(name, 0))) for name in topic_names],
+        "prompt_tokens": _pair(int(cur.get("prompt_tokens") or 0), int(prev.get("prompt_tokens") or 0)),
+        "completion_tokens": _pair(int(cur.get("completion_tokens") or 0), int(prev.get("completion_tokens") or 0)),
     }
 
 
@@ -832,6 +868,13 @@ def render_markdown(report, moment_label, tz_name, names=()):
                 health["remind"]["cur"], _fmt_delta(health["remind"]["cur"], health["remind"]["prev"]),
                 health["recover"]["cur"], _fmt_delta(health["recover"]["cur"], health["recover"]["prev"]),
             ))
+        pin = section.get("prompt_tokens") or {}
+        pout = section.get("completion_tokens") or {}
+        if pin.get("cur") or pin.get("prev") or pout.get("cur") or pout.get("prev"):
+            lines.append("模型用量：输入 %d（%s），输出 %d（%s）" % (
+                pin.get("cur") or 0, _fmt_delta(pin.get("cur") or 0, pin.get("prev") or 0),
+                pout.get("cur") or 0, _fmt_delta(pout.get("cur") or 0, pout.get("prev") or 0),
+            ))
         topics = _top_topics(section["topics"])
         if topics:
             shown = "、".join("%s %d" % (name, pair["cur"]) for name, pair in topics)
@@ -877,6 +920,11 @@ def render_csv(report):
         for name in ("model", "timeout", "permission"):
             pair = section["errors"][name]
             put(section, "error_" + name, pair["cur"], pair["prev"])
+        pin = section.get("prompt_tokens") or {}
+        pout = section.get("completion_tokens") or {}
+        if pin.get("cur") or pin.get("prev") or pout.get("cur") or pout.get("prev"):
+            put(section, "model_prompt_tokens", pin.get("cur") or 0, pin.get("prev") or 0)
+            put(section, "model_completion_tokens", pout.get("cur") or 0, pout.get("prev") or 0)
         if section["drops"] is not None:
             put(section, "error_connection_drops", section["drops"]["cur"], section["drops"]["prev"])
             put(section, "error_connection_downtime_sec", section["downtime"]["cur"], section["downtime"]["prev"])

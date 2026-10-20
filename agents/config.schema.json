@@ -51,12 +51,85 @@
       "enum": [
         "cursor",
         "openai_compat",
+        "openai_compatible",
+        "anthropic",
+        "claude",
         "fake",
         "deepseek",
         "dashscope",
         "zhipu",
         "pangu"
       ]
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "可替换的模型。不写时仍用 model_provider，没写就是 cursor。密钥只写环境变量名。",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": [
+            "",
+            "cursor",
+            "openai_compat",
+            "openai_compatible",
+            "anthropic",
+            "claude",
+            "fake",
+            "deepseek",
+            "dashscope",
+            "zhipu",
+            "pangu"
+          ]
+        },
+        "preset": {
+          "type": "string",
+          "enum": ["", "deepseek", "dashscope", "zhipu", "pangu"]
+        },
+        "base_url": {
+          "type": "string",
+          "pattern": "^$|^https?://\\S+$"
+        },
+        "model": {
+          "type": "string"
+        },
+        "api_key_env": {
+          "type": "string",
+          "pattern": "^$|^[A-Za-z_][A-Za-z0-9_]{0,80}$"
+        },
+        "temperature": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "timeout_sec": {
+          "type": "number",
+          "minimum": 0
+        },
+        "max_tokens": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "search": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "可选网页搜索。不写或 enabled 为 false 时不调用。",
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "backend": {
+          "type": "string",
+          "enum": ["", "tavily", "searxng", "searx"]
+        },
+        "base_url": {"type": "string"},
+        "api_key_env": {
+          "type": "string",
+          "pattern": "^$|^[A-Za-z_][A-Za-z0-9_]{0,80}$"
+        },
+        "timeout_sec": {"type": "number", "minimum": 0},
+        "max_results": {"type": "integer", "minimum": 1}
+      }
     },
     "dry_run_live_reads": {
       "type": "boolean"

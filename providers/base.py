@@ -1,4 +1,4 @@
-# 模型接口。三种实现（cursor、openai_compat、fake）都从这里进、从这里出。
+# 模型接口。cursor、openai_compat、anthropic、fake 都从这里进、从这里出。
 # 输入是已经拼好的 prompt、会话键、进度回调；输出是最终文字，或 PartialText（时间到了，只有半截）。
 class PartialText(str):
     """卡死或超过防卡死上限时，已经输出的那部分文字。可能是空字符串。"""

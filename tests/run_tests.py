@@ -3193,6 +3193,10 @@ _acp._open_pinned_hook = None
 _acp._lookup_host = _old_lookup2
 _acp.configure_web({})
 
+print("\n-- providers --", flush=True)
+_pv = subprocess.run([sys.executable, os.path.join(FW, "tests", "test_providers.py")], cwd=FW)
+results.append(("可替换模型", _pv.returncode == 0))
+
 print("\n-- knowledge --", flush=True)
 _kb = subprocess.run([sys.executable, os.path.join(FW, "tests", "test_knowledge.py")], cwd=FW)
 results.append(("分群知识库", _kb.returncode == 0))
