@@ -10,6 +10,8 @@
 
 不要提交一张未打码的真实会话截图。
 
+`switch-list.svg` 和 `switch-confirm.svg` 是「在飞书里开关功能」的占位图，不是真实会话。换上截图时仍要遮住上面列出的内容。
+
 ## English
 
 This folder is reserved for a later diagram or short animation. It is empty so a real chat is not published.
