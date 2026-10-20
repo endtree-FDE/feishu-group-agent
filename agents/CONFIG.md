@@ -406,9 +406,11 @@ python checks/check_config.py agents/example.json
 
 ## 本机日志 observability
 
-这两份日志都只在运行的那台电脑上，不要提交，也不要外传。它们记的不是同一件事。
+这几份日志都只在运行的那台电脑上，不要提交，也不要外传。它们记的不是同一件事。
 
 `observability.journal` 不写或为 `true` 时，每道交给模型的题在 `logs/journal.jsonl` 追加一行。里面只有时间、群聊或私聊、是否成功、字数、耗时、用过的工具名。没有问题原文、没有工具参数、没有回复正文、没有路径和编号。写成 `false` 就不再追加。原来的 `metric` 行仍在 `logs/bot.log` 里。升级旧配置时不用改；不想记这一行就写成 `"observability": {"journal": false}`。
+
+`logs/calls.jsonl` 是调用链。`observability.calls` 不写，或 `enabled` 不为 `false` 时，每道交给模型的题追加一条：收到的消息、用过的技能和工具、每步耗时和 token、结果。写入前先脱敏，客户名变成「某客户」，密钥、手机号、路径和编号不留原文。`retain_days` 不写是 30，更早的行在下次写入时丢掉。写成 `false` 或 `"enabled": false` 就不记。主人在私聊里发「最近调用」或「这条怎么答的」可以看。用量周报只加一段合计，没有记录时周报正文和以前一样。说明见 [docs/调用记录.md](../docs/调用记录.md)。
 
 `logs/events.jsonl` 是诊断日志，没有单独的开关。每道题记一条回答，每个工具记一条：消息编号、工具名、是否成功、飞书错误码、耗时。问题原文不写进去。看起来像手机号、邮箱或密钥的字符串会打码。大约 2MB 轮转，保留 5 份 `.1`。`--doctor` 不写这个文件，也不写心跳。
 

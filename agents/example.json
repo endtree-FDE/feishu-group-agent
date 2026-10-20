@@ -41,7 +41,11 @@
   },
   "commands": {"status": true},
   "observability": {
-    "journal": true
+    "journal": true,
+    "calls": {
+      "enabled": true,
+      "retain_days": 30
+    }
   },
   "alerts": {
     "enabled": false,

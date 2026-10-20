@@ -238,6 +238,20 @@
       "properties": {
         "journal": {
           "type": "boolean"
+        },
+        "calls": {
+          "description": "不写或 enabled 不为 false 时，每轮回答在 logs/calls.jsonl 记一条已脱敏的调用链。false 表示不记。",
+          "oneOf": [
+            {"type": "boolean"},
+            {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "enabled": {"type": "boolean"},
+                "retain_days": {"type": "integer", "minimum": 1}
+              }
+            }
+          ]
         }
       }
     },

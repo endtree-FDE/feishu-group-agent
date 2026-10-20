@@ -228,6 +228,8 @@ def note_usage(obj):
     try:
         import usage
         usage.note_tokens(prompt, completion)
+        import calltrace
+        calltrace.add_tokens(prompt, completion)
     except Exception:
         return
 
