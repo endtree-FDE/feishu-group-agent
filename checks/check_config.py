@@ -25,6 +25,8 @@ def load_schema():
 
 
 def _is_type(value, typ):
+    if isinstance(typ, list):
+        return any(_is_type(value, item) for item in typ)
     if typ == "string":
         return isinstance(value, str)
     if typ == "boolean":

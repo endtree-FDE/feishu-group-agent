@@ -1,0 +1,42 @@
+{"t": 1791165600, "traffic": "live", "kind": "turn", "group": "g1", "scope": "group", "ok": 1, "partial": 0, "elapsed_ms": 2000, "topic": "文档", "redact_hits": 1}
+{"t": 1791165660, "traffic": "live", "kind": "turn", "group": "g1", "scope": "group", "ok": 1, "partial": 0, "elapsed_ms": 4000, "topic": "帮助", "redact_hits": 0}
+{"t": 1791165720, "traffic": "live", "kind": "tool", "group": "g1", "scope": "group", "tool": "web_search"}
+{"t": 1791165780, "traffic": "live", "kind": "tool", "group": "g1", "scope": "group", "tool": "file", "file_type": "pdf"}
+{"t": 1791165840, "traffic": "live", "kind": "write", "group": "g1", "scope": "group", "action": "proposed"}
+{"t": 1791165900, "traffic": "live", "kind": "write", "group": "g1", "scope": "group", "action": "confirmed"}
+{"t": 1791770400, "traffic": "live", "kind": "turn", "group": "g1", "scope": "group", "ok": 1, "partial": 0, "elapsed_ms": 1000, "topic": "文档", "redact_hits": 1}
+{"t": 1791770460, "traffic": "live", "kind": "turn", "group": "g1", "scope": "group", "ok": 1, "partial": 0, "elapsed_ms": 2000, "topic": "文档", "redact_hits": 1}
+{"t": 1791770520, "traffic": "live", "kind": "turn", "group": "g1", "scope": "group", "ok": 1, "partial": 0, "elapsed_ms": 3000, "topic": "帮助", "redact_hits": 0}
+{"t": 1791770580, "traffic": "live", "kind": "turn", "group": "g1", "scope": "group", "ok": 1, "partial": 0, "elapsed_ms": 4000, "topic": "记忆", "redact_hits": 0}
+{"t": 1791770640, "traffic": "live", "kind": "turn", "group": "g1", "scope": "group", "ok": 1, "partial": 0, "elapsed_ms": 5000, "topic": "搜索", "redact_hits": 0}
+{"t": 1791770700, "traffic": "live", "kind": "turn", "group": "g1", "scope": "group", "ok": 0, "partial": 1, "elapsed_ms": 10000, "topic": "其他", "redact_hits": 0}
+{"t": 1791770800, "traffic": "live", "kind": "redact", "group": "g1", "scope": "group", "hits": 1}
+{"t": 1791770900, "traffic": "live", "kind": "tool", "group": "g1", "scope": "group", "tool": "web_search"}
+{"t": 1791770960, "traffic": "live", "kind": "tool", "group": "g1", "scope": "group", "tool": "web_search"}
+{"t": 1791771020, "traffic": "live", "kind": "tool", "group": "g1", "scope": "group", "tool": "file", "file_type": "pdf"}
+{"t": 1791771080, "traffic": "live", "kind": "tool", "group": "g1", "scope": "group", "tool": "file", "file_type": "pdf"}
+{"t": 1791771140, "traffic": "live", "kind": "tool", "group": "g1", "scope": "group", "tool": "file", "file_type": "docx"}
+{"t": 1791771200, "traffic": "live", "kind": "tool", "group": "g1", "scope": "group", "tool": "docs"}
+{"t": 1791771260, "traffic": "live", "kind": "tool", "group": "g1", "scope": "group", "tool": "docs"}
+{"t": 1791771320, "traffic": "live", "kind": "tool", "group": "g1", "scope": "group", "tool": "calendar"}
+{"t": 1791771400, "traffic": "live", "kind": "write", "group": "g1", "scope": "group", "action": "proposed"}
+{"t": 1791771401, "traffic": "live", "kind": "write", "group": "g1", "scope": "group", "action": "proposed"}
+{"t": 1791771402, "traffic": "live", "kind": "write", "group": "g1", "scope": "group", "action": "proposed"}
+{"t": 1791771403, "traffic": "live", "kind": "write", "group": "g1", "scope": "group", "action": "confirmed"}
+{"t": 1791771404, "traffic": "live", "kind": "write", "group": "g1", "scope": "group", "action": "cancelled"}
+{"t": 1791771405, "traffic": "live", "kind": "write", "group": "g1", "scope": "group", "action": "expired"}
+{"t": 1791771500, "traffic": "live", "kind": "error", "group": "g1", "scope": "group", "category": "model"}
+{"t": 1791771560, "traffic": "live", "kind": "error", "group": "g1", "scope": "group", "category": "timeout"}
+{"t": 1791771620, "traffic": "live", "kind": "error", "group": "g1", "scope": "group", "category": "permission"}
+{"t": 1791860400, "traffic": "live", "kind": "turn", "group": "g2", "scope": "p2p", "ok": 1, "partial": 0, "elapsed_ms": 800, "topic": "表格", "redact_hits": 0}
+{"t": 1791860460, "traffic": "live", "kind": "tool", "group": "g2", "scope": "p2p", "tool": "web_search"}
+{"t": 1791860520, "traffic": "live", "kind": "tool", "group": "g2", "scope": "p2p", "tool": "file", "file_type": "png"}
+{"t": 1791860580, "traffic": "live", "kind": "tool", "group": "g2", "scope": "p2p", "tool": "file", "file_type": "pdf"}
+{"t": 1791941400, "traffic": "live", "kind": "link", "event": "down"}
+{"t": 1791942000, "traffic": "live", "kind": "link", "event": "up", "downtime_sec": 600}
+{"t": 1791941400, "traffic": "live", "kind": "health", "action": "down"}
+{"t": 1791942000, "traffic": "live", "kind": "health", "action": "recover"}
+{"t": 1791860700, "traffic": "test", "kind": "turn", "group": "g1", "scope": "group", "ok": 1, "partial": 0, "elapsed_ms": 50, "topic": "其他", "redact_hits": 0}
+{"t": 1791860760, "traffic": "replay", "kind": "turn", "group": "g1", "scope": "group", "ok": 1, "partial": 0, "elapsed_ms": 50, "topic": "其他", "redact_hits": 0}
+{"t": 1791860800, "kind": "turn", "traffic": "live", "group": "oc_poisonchat", "topic": "原始问题不要出现XYZ", "user": "ou_poisonowner", "text": "原始问题不要出现XYZ"}
+{"t": 1791860860, "kind": "ignored", "note": "原始问题不要出现XYZ", "open_id": "ou_poisonowner", "chat": "oc_poisonchat"}

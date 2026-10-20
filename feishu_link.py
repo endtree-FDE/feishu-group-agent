@@ -155,6 +155,7 @@ class LinkWatch:
         self._last_wake_wall = 0.0
         self.link_up = False
         self.link_since = None
+        self.on_change = None
         self._lock = threading.Lock()
 
     def start(self, now_mono=None, now_wall=None):
@@ -167,6 +168,7 @@ class LinkWatch:
     def mark_link(self, up, now=None):
         """连接状态变化时才改计时。已经是断开时再记一次断开，不把计时清零。"""
         now = time.time() if now is None else float(now)
+        changed = None
         with self._lock:
             if self.link_since is None:
                 self.link_up = bool(up)
@@ -174,8 +176,16 @@ class LinkWatch:
                 return
             if bool(up) == bool(self.link_up):
                 return
+            prev_up = bool(self.link_up)
+            prev_since = float(self.link_since)
             self.link_up = bool(up)
             self.link_since = now
+            changed = (bool(up), prev_up, prev_since, now)
+        if changed and self.on_change:
+            try:
+                self.on_change(*changed)
+            except Exception:
+                pass
 
     def link_snapshot(self):
         with self._lock:

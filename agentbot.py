@@ -6,6 +6,8 @@
 #   --check            自检：配置、目录、当前模型接口、lark-cli，可选探测权限（--probe），不启动 consumer
 #   --doctor           只读诊断：登录、scope、事件订阅、网络、依赖、重复进程。不发消息，不写心跳
 #   --alert-check      看门狗在重启前调用：心跳过期才通知主人。不拿锁，不启动长连接
+#   --report [--week 2026-W42|YYYY-MM-DD] [--out 文件.md|文件.csv]
+#                      只打印或导出用量周报，不发送。默认关着时这条命令仍可用
 #   环境变量 AGENTBOT_FAKE_AGENT=秒：用 sleep 代替模型（仅测试，优先于 model_provider）
 #   环境变量 AGENTBOT_AGENT_CMD='["python","fake.py"]'：替换 cursor-agent 可执行文件（仅测试，用来模拟 stream-json 或 ACP）
 # 模型从哪来看配置 model_provider，没写就是 cursor。cursor 的登录和额度是运行这台电脑的人自己的账号，程序里不写账号。
@@ -13,7 +15,7 @@ import json, os, re, subprocess, sys, time, logging, collections, threading, sql
 
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import utf8io  # 管道上的标准流改为 UTF-8，避免中文 Windows 的代码页把日志解崩
-import acp_client, channels, digest, feishu_link, guard, health_alert, lifecycle, memory, observe, proc_identity, providers
+import acp_client, channels, digest, feishu_link, guard, health_alert, lifecycle, memory, observe, proc_identity, providers, usage
 from channels.base import Cap, can_update, status_modes
 from channels.feishu import MEMBER_ADDED, MEMBER_DELETED
 from providers.base import PartialText
@@ -25,14 +27,16 @@ def _opt(name):
     i = ARGS.index(name); nxt = ARGS[i + 1] if i + 1 < len(ARGS) else ""
     return nxt if nxt and not nxt.startswith("--") else ""
 DRY = _opt("--dry-run") is not None; PARALLEL = "--parallel" in ARGS; LOCK_TEST = _opt("--lock-test"); CHECK = "--check" in ARGS; DOCTOR = "--doctor" in ARGS
+REPORT = "--report" in ARGS
 CFG = json.load(open(CFG_PATH, encoding="utf-8-sig"))
 acp_client.configure_web(CFG)
-if not CFG.get("bot_open_id") and not DRY:
+if not CFG.get("bot_open_id") and not DRY and not REPORT:
     sys.stderr.write("配置缺少 bot_open_id：请用户本人确认机器人 open_id 后填写；拒绝启动\n"); sys.exit(2)
 BASE = os.path.abspath(CFG.get("base_dir") or os.path.dirname(os.path.abspath(CFG_PATH)))
 KB = os.path.join(BASE, CFG.get("kb_dir", "kb"))
 STATE = os.path.join(BASE, "state"); LOGD = os.path.join(BASE, "logs"); TMP = os.path.join(BASE, "tmp")
 for d in (STATE, LOGD, TMP): os.makedirs(d, exist_ok=True)
+usage.configure(BASE, test=bool(DRY or os.environ.get("AGENTBOT_FAKE_AGENT") or os.environ.get("AGENTBOT_FAKE_LARK")))
 for k in ("NO_PROXY", "no_proxy"): os.environ[k] = "open.feishu.cn,.feishu.cn,.larksuite.com,localhost,127.0.0.1"
 FEAT = CFG.get("features", {})
 HELP_RX = re.compile(CFG.get("help_pattern", r"你(能|会|可以)(干|做|帮)(什么|啥)|你有(什么|哪些|啥)(权限|功能|能力)|^有(什么|哪些|啥)(权限|功能)[?？]?$|你是谁|怎么用你"))
@@ -304,6 +308,8 @@ def status_text(sess):
         lines.append("断线提醒：开。长连接断开时用发送接口通知主人，不依赖那条长连接。")
     if digest.enabled(CFG):
         lines.append("早晨摘要：开。到点每个群最多一条，不会点名所有人。")
+    if usage.enabled(CFG):
+        lines.append("用量周报：开。每周私聊主人一次，不含问题原文和编号。")
     return "\n".join(lines)
 def forget(sess):
     with DBL: DB.execute("delete from turns where sess=?", (sess,)); DB.commit()
@@ -920,11 +926,28 @@ def _tool_args(call):
         args = dict(args); args["name"] = call["name"]
     return args
 
+_FILE_TOOLS = {"message_attachment", "kb_read", "attachment"}
+_PERM_RX = re.compile(r"99991672|99991679|1770032|91403|131006|99991663|99991668|99991664|scope|permission|无权限|权限不足|没有权限", re.I)
+def _looks_permission(detail, err):
+    return bool(_PERM_RX.search("%s %s" % (detail or "", err or "")))
 def _note_tool(ctx, name, ok, detail, err, started):
+    types = None
+    if isinstance(ctx, dict) and name in _FILE_TOOLS:
+        types = []
+        for item in ctx.pop("_file_types", None) or []:
+            tok = str(item or "")
+            if re.fullmatch(r"[a-z0-9]{1,8}", tok) and tok not in types:
+                types.append(tok)
     try:
-        OBS.note_tool((ctx or {}).get("message_id") or "", name, ok, observe.code_of(detail), time.time() - started, err or "")
+        OBS.note_tool((ctx or {}).get("message_id") or "", name, ok, observe.code_of(detail), time.time() - started, err or "",
+                      traffic=usage.current_traffic(), file_types=types)
     except Exception:
         log.warning("observe tool failed %s", name)
+    if not ok and _looks_permission(detail, err):
+        try:
+            usage.note_error("permission", (ctx or {}).get("chat_id"), (ctx or {}).get("chat_type"))
+        except Exception:
+            log.warning("usage permission note failed")
 def _journal_on():
     """没写 observability.journal 时默认记本机日志。false 才关掉。"""
     o = CFG.get("observability")
@@ -945,6 +968,7 @@ def write_journal(kind, **fields):
         if isinstance(t, str) and re.match(r"^[a-z_]{1,40}$", t) and t not in tools:
             tools.append(t)
     rec["tools"] = tools
+    rec["traffic"] = usage.current_traffic()
     try:
         d = os.path.join(BASE, "logs"); os.makedirs(d, exist_ok=True)
         with open(os.path.join(d, "journal.jsonl"), "a", encoding="utf-8") as f:
@@ -1244,7 +1268,11 @@ def reply_key(mid, index, total):
     if total <= 1: return ("re_" + str(mid))[:50]
     return ("re_%s_%d" % (mid, index))[:50]
 def reply(mid, text):
-    text = _with_late(guard.redact(text, REDACT_NAMES))
+    cleaned, hits = guard.redact_counted(text, REDACT_NAMES)
+    if hits and usage.has_chat():
+        try: usage.note_redact(hits)
+        except Exception: log.warning("usage redact note failed")
+    text = _with_late(cleaned)
     chunks = split_reply(text)
     total = len(chunks)
     ok_all = True
@@ -1488,6 +1516,7 @@ def _direct_command(q):
     if q in ("/状态", "/status", "状态") and _status_cmd_on(): return True
     if GMEM.is_command(q): return True
     if q in ("/help", "帮助") or (len(q) <= 30 and HELP_RX.search(q)): return True
+    if usage.enabled(CFG) and q == "/report": return True
     return False
 def handle(ev):
     mid = ev.get("message_id") or ev.get("id")
@@ -1535,6 +1564,8 @@ def handle(ev):
             reply(mid, note); finished = True; return
         _handle_claimed(ev, mid, ctype, uid); finished = True
     finally:
+        try: usage.unbind()
+        except Exception: pass
         # 停机时这题还没走完：留着 received，下次启动补答。异常且并非停机，仍记成已回答，和以前一样。
         if lifecycle.should_mark_answered(lifecycle.shutdown_requested(STATE), finished):
             mark_answered(mid)
@@ -1544,15 +1575,24 @@ def handle(ev):
             log.info("shutdown keeps inflight %s", mid)
         LATE.note = ""
 
+def _usage_turn(chat_id, ctype, ok, topic, hits, elapsed_ms=None, partial=False):
+    try:
+        usage.note_turn(chat_id, "p2p" if ctype == "p2p" else "group", ok, elapsed_ms=elapsed_ms,
+                        topic=topic, redact_hits=hits, partial=partial)
+    except Exception:
+        log.warning("usage turn failed")
 def _handle_claimed(ev, mid, ctype, uid):
     global _active, _waiting, _peak, _passed, _held
+    usage.bind(ev.get("chat_id") or "", "p2p" if ctype == "p2p" else "group", usage.traffic_for(bool(ev.get("_replay"))))
     sess = session_key(ev); mtype = ev.get("message_type") or "text"
     ctx = {"user": uid, "chat_id": ev.get("chat_id"), "chat_type": ctype, "message_id": mid,
            "scope": confirm_scope(ev), "limited": p2p_limited(uid, ctype)}
     q = clean_q(ev.get("content") or "")
     ctx["question"] = q
+    q_log, q_hits = guard.redact_counted(q, REDACT_NAMES)
+    q_topic = usage.topic_of(q_log)
     if ctype != "p2p": _note_thread(ev, uid)
-    log.info("Q %s %s/%s sess=%s from %s: %s", mid, ctype, mtype, sess, uid, guard.redact(q, REDACT_NAMES)[:200])
+    log.info("Q %s %s/%s sess=%s from %s: %s", mid, ctype, mtype, sess, uid, q_log[:200])
     if _direct_command(q) and not command_ok(uid):
         reply(mid, (CFG.get("texts") or {}).get("wait") or "请稍等一下，我处理完上一条就回复你。"); return
     # 命令
@@ -1562,13 +1602,23 @@ def _handle_claimed(ev, mid, ctype, uid):
     if q in ("/new", "/reset", "新话题"): forget(sess); reply(mid, "好的，已清空本话题的上下文。"); return
     if q in ("/状态", "/status", "状态") and _status_cmd_on():
         reply(mid, status_text(sess)); return
+    if usage.enabled(CFG) and q == "/report":
+        if not usage.is_owner(CFG, uid):
+            reply(mid, "只有主人可以查看用量周报。"); return
+        if ctype != "p2p":
+            sent = usage.push_report(CFG, BASE, REDACT_NAMES, time.time(), _outbound_send, [uid])
+            reply(mid, "已私聊发送用量周报。群里不贴明细。" if sent else "私聊没发出去。群里不贴明细。")
+            return
+        md, _csv_text, err = usage.build(BASE, CFG, time.time(), "", REDACT_NAMES)
+        reply(mid, md if md and not err else "这周的用量还没法整理。"); return
     mr = GMEM.handle(q, ctx)  # 记忆命令：/记忆、记一下/记住/备忘、/忘记 N、/忘记全部、确认清空（不调 agent）
     if mr is not None: reply(mid, mr); return
     if q in ("/help", "帮助") or (len(q) <= 30 and HELP_RX.search(q)):  # 问能力/权限：直接列能力和边界，不调 agent、不翻资料
         reply(mid, CFG["texts"].get("help", CFG["texts"]["empty"])); return
     hit = guard.policy_hit(q, POLICY_IN)  # 仅当配置了 policy.redlines 才可能命中
     if hit and hit.get("action", "refuse") == "refuse":
-        reply(mid, hit.get("reply") or CFG["texts"].get("policy_refuse") or CFG["texts"].get("taboo") or "这个话题我不参与讨论。"); return
+        reply(mid, hit.get("reply") or CFG["texts"].get("policy_refuse") or CFG["texts"].get("taboo") or "这个话题我不参与讨论。")
+        _usage_turn(ev.get("chat_id"), ctype, False, q_topic, q_hits); return
     ok, why = rate_ok(uid)
     if not ok:
         if why == "hour": reply(mid, CFG["texts"]["busy"])
@@ -1602,12 +1652,16 @@ def _handle_claimed(ev, mid, ctype, uid):
         except Exception: log.warning("inflight note failed %s", mid)
         try: OBS.begin(mid)
         except Exception: pass
+        err_kind = ""
         try:
             if targets and FEAT.get("attachments"):
                 try: extra, cleanup = _load_context(targets, ctx, mid)
                 except ToolError as e:
                     log.info("attachment degraded: %s %s", e.user_msg, guard.redact(e.detail[:200], REDACT_NAMES))
                     extra = "（附件读取失败：%s。请如实告诉提问者。）" % e.user_msg
+                    if _looks_permission(e.detail, e.user_msg):
+                        try: usage.note_error("permission", ev.get("chat_id"), ctype)
+                        except Exception: log.warning("usage permission note failed")
             if cached:
                 extra = ("\n\n".join(cached) + ("\n\n" + extra if extra else "")).strip()
             def hook(stage, think=None, end=False, text=None):
@@ -1623,6 +1677,8 @@ def _handle_claimed(ev, mid, ctype, uid):
             a = answer(q_model, sess, ctx, extra, on_stage=hook)
         except Exception as e:
             log.error("handle error: %s: %s", type(e).__name__, guard.redact(str(e), REDACT_NAMES)[:300]); a = None
+            low = str(e).lower()
+            err_kind = "timeout" if ("timeout" in low or "timed out" in low or "stall" in low) else "model"
         finally:
             with _AL: _active -= 1
             if cleanup: cleanup()
@@ -1638,8 +1694,16 @@ def _handle_claimed(ev, mid, ctype, uid):
     log.info("metric kind=answer chat=%s limited=%d in_chars=%d out_chars=%d elapsed=%.1fs ok=%d partial=%d",
              "p2p" if ctype == "p2p" else "group", 1 if ctx.get("limited") else 0,
              len(q_model or ""), len(final or ""), time.time() - t0, 1 if a else 0, 1 if partial else 0)
-    try: OBS.finish(mid, bool(a), time.time() - t0)
+    try: OBS.finish(mid, bool(a), time.time() - t0, traffic=usage.current_traffic())
     except Exception: log.warning("observe answer failed %s", mid)
+    _usage_turn(ev.get("chat_id"), ctype, bool(a) and not partial, q_topic, q_hits,
+                elapsed_ms=int((time.time() - t0) * 1000), partial=partial)
+    if partial:
+        try: usage.note_error("timeout", ev.get("chat_id"), ctype)
+        except Exception: log.warning("usage error note failed")
+    elif not a:
+        try: usage.note_error(err_kind or "model", ev.get("chat_id"), ctype)
+        except Exception: log.warning("usage error note failed")
     write_journal("answer", chat="p2p" if ctype == "p2p" else "group", ok=bool(a), partial=partial,
                   limited=ctx.get("limited"), in_chars=len(q_model or ""), out_chars=len(final or ""),
                   elapsed_ms=int((time.time() - t0) * 1000), tools=ctx.get("_tools") or [])
@@ -1810,6 +1874,7 @@ _CONSUMERS = []
 _CONSUMERS_LOCK = threading.Lock()
 _SHUTDOWN_ONCE = threading.Lock()
 _LINK = feishu_link.LinkWatch(jump_sec=feishu_link.jump_setting(CFG))
+_LINK.on_change = usage.make_link_handler()
 def _track_consumer(proc):
     snap = proc_identity.snapshot(proc.pid) or {}
     with _CONSUMERS_LOCK: _CONSUMERS.append((proc, snap.get("created") or ""))
@@ -1919,6 +1984,10 @@ def maintenance_tick(now=None):
         digest.deliver(CFG, BASE, REDACT_NAMES, now, _digest_fetch, _send_chat, _served_ids(), log)
     except Exception:
         log.exception("digest tick failed")
+    try:
+        usage.deliver(CFG, BASE, REDACT_NAMES, now, _outbound_send, log)
+    except Exception:
+        log.exception("usage report tick failed")
 
 def self_check():
     ok = True
@@ -1956,6 +2025,13 @@ def self_check():
         print("HINT digest.enabled 已打开，但 chat_ids 为空。不会往任何群发早晨摘要。")
     if digest_cfg["enabled"] and not digest_cfg["time_ok"]:
         print("HINT digest.time 不是 HH:MM，早晨摘要不会发。")
+    report_cfg = usage.settings(CFG)
+    if report_cfg["enabled"] and not usage.owner_ids(CFG):
+        print("HINT report.enabled 已打开，但没有可用的主人编号。用量周报不会发。")
+    if report_cfg["enabled"] and not report_cfg["time_ok"]:
+        print("HINT report.time 不是 HH:MM，用量周报不会发。")
+    if report_cfg["enabled"] and not report_cfg["weekday_ok"]:
+        print("HINT report.weekday 认不出来，用量周报不会发。")
     sks = TOOLS.skills
     p("skills", not sks.invalid, sks.status())
     if sks.missing_only:
@@ -1975,6 +2051,13 @@ def self_check():
     return ok
 
 def main():
+    if REPORT:
+        week = _opt("--week") or ""
+        out = _opt("--out") or ""
+        if "--out" in ARGS and not out:
+            print("report: --out 只接受 .md 或 .csv")
+            sys.exit(2)
+        sys.exit(usage.run_cli(CFG, BASE, REDACT_NAMES, week, out))
     if "--alert-check" in ARGS:
         # 看门狗在重启前调用。不拿单实例锁，不启动长连接。没打开 alerts 时马上返回。
         try:

@@ -44,7 +44,7 @@ flowchart LR
 
 ## 功能
 
-- 只在被 @ 或被允许的私聊里回答。断线私聊和早晨摘要默认关，打开方式见 [docs/断线提醒与晨报.md](docs/断线提醒与晨报.md)。
+- 只在被 @ 或被允许的私聊里回答。断线私聊、早晨摘要和用量周报默认关。前两项见 [docs/断线提醒与晨报.md](docs/断线提醒与晨报.md)，周报见 [docs/用量周报.md](docs/用量周报.md)。
 - 群默认仍看 `chat_ids`。要改成拉进群再认，把 `chat_ids` 留空并打开 `chats.auto_join`。默认还要白名单成员在群里发「/认群」，避免被陌生人拉进乱群消耗额度。见 [agents/CONFIG.md](agents/CONFIG.md)。
 - 同一个话题接着聊；发「新话题」就清空这几轮上下文。
 - 长期记忆按群分开。白名单里的人才能记和删，删除是真删。
@@ -76,7 +76,7 @@ python agentbot.py agents/example.json --doctor
 
 The purpose, the write lock, and the “do not commit” rule are in the English paragraph at the top. The diagram in [架构](#架构) is the path from a Feishu message to a redacted reply. Omitting `channel` keeps that Feishu path. [docs/渠道.md](docs/渠道.md) is the adapter boundary; [docs/渠道-企业微信.md](docs/渠道-企业微信.md) is the WeCom design and is not enabled by default. [docs/arch-now.mmd](docs/arch-now.mmd) is the current path with the model choice. [docs/arch-full.mmd](docs/arch-full.mmd) is the longer design, including jobs that are not on by default.
 
-A 15-minute offline start is in [docs/快速开始.md](docs/快速开始.md). Troubleshooting is in [docs/排障.md](docs/排障.md). `--doctor` only prints a local diagnosis and does not send messages. Disconnect alerts and the morning digest are off unless `alerts.enabled` and `digest.enabled` are true. See [docs/断线提醒与晨报.md](docs/断线提醒与晨报.md).
+A 15-minute offline start is in [docs/快速开始.md](docs/快速开始.md). Troubleshooting is in [docs/排障.md](docs/排障.md). `--doctor` only prints a local diagnosis and does not send messages. Disconnect alerts and the morning digest are off unless `alerts.enabled` and `digest.enabled` are true. The weekly usage report is also off unless `report.enabled` is true, and it is a private message. See [docs/断线提醒与晨报.md](docs/断线提醒与晨报.md) and [docs/用量周报.md](docs/用量周报.md).
 
 Quick start on a machine that will really talk to Feishu:
 
@@ -119,6 +119,7 @@ A screenshot placeholder, with rules for hiding ids, is in [docs/demo/README.md]
 | `redact_file` | 客户名名单，默认 `redact.txt`，不要提交 |
 | `alerts` | 长连接或心跳不健康时私聊主人。不写或 `enabled` 为 `false` 时不发 |
 | `digest` | 到点往指定群发一条今日摘要。不写或 `enabled` 为 `false` 时不发。不会点名所有人 |
+| `report` | 每周私聊主人一份用量合计。不写或 `enabled` 为 `false` 时不发。没有问题原文和编号 |
 
 `REPLACE_` 开头的值必须换成你自己的，留着不能启动。
 
@@ -159,7 +160,9 @@ A screenshot placeholder, with rules for hiding ids, is in [docs/demo/README.md]
 | `outbound.py` | 飞书渠道主动发送时调用的 `im +messages-send`。断线私聊和早晨摘要经 `push_text` 走到这里 |
 | `health_alert.py` | 断线提醒。默认关 |
 | `digest.py` | 早晨摘要。默认关。每个群每天最多一条 |
-| `docs/断线提醒与晨报.md` | 这两项怎么开，以及飞书要哪些权限 |
+| `usage.py` | 用量周报。默认关。每周私聊一次，重启不重发 |
+| `docs/断线提醒与晨报.md` | 断线提醒和早晨摘要怎么开，以及飞书要哪些权限 |
+| `docs/用量周报.md` | 用量周报怎么开，统计什么，什么不会写进去 |
 | `setup_agent.py` | 干跑生成配置。不加 `--write` 不写文件 |
 | `scripts/` | Windows 上的启动、停止、看门狗、计划任务、`verify_windows.ps1` |
 | `tests/run_tests.py` | 离线测试。通过时最后一行打印条数 |

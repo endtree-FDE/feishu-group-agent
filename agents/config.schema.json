@@ -198,6 +198,19 @@
         "done_values": {"type": "array", "items": {"type": "string"}}
       }
     },
+    "report": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "每周私聊主人一份用量合计。不写或 enabled 为 false 时不发。",
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "owner_open_ids": {"type": "array", "items": {"type": "string"}},
+        "weekday": {"type": ["string", "integer"]},
+        "time": {"type": "string"},
+        "timezone": {"type": "string"},
+        "window_min": {"type": "integer", "minimum": 0}
+      }
+    },
     "features": {
       "type": "object",
       "additionalProperties": true,
