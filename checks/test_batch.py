@@ -113,6 +113,8 @@ _sha = _hs.git("rev-parse", "HEAD")[1].strip()
 _lines = _hs.grep_commit(_sha, "ou_" + "placeholder")
 check("历史扫描搜的是提交树，不是同名路径", bool(_lines) and any("placeholder" in x for x in _lines))
 check("占位 open_id 不算泄漏", _hs.fixture("open_id", "ou_" + "placeholder", "tests/test_observe.py"))
+check("打码占位不算密钥赋值", _hs.fixture("secret_assign", "api-key: " + ("*" * 3) + '",', "notes/redact.py"))
+check("不是星号的赋值仍要复查", not _hs.fixture("secret_assign", "api" + "_key=" + "notasterisk", "notes/redact.py"))
 check("当前历史没有需要复查的真编号", _hs.main() == 0)
 
 from providers.settings import http_spec, key_problems, provider_token, public_name
