@@ -16,6 +16,7 @@ import json, os, re, subprocess, sys, time, logging, collections, threading, sql
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import utf8io  # 管道上的标准流改为 UTF-8，避免中文 Windows 的代码页把日志解崩
 import acp_client, channels, digest, feishu_link, guard, health_alert, knowledge, lifecycle, memory, memory_growth, observe, proc_identity, providers, usage
+import feature_switch
 from channels.base import Cap, can_update, status_modes
 from channels.feishu import MEMBER_ADDED, MEMBER_DELETED
 from providers.base import PartialText
@@ -618,6 +619,9 @@ _QUIET_TYPES = {
 def ingest(obj):
     """一条 stdout JSON。分类在渠道里：消息交给 handle；进群/出群只记群，不回复。撤回不回复。"""
     if not isinstance(obj, dict): return
+    card_ev = feature_switch.card_event(obj)
+    if card_ev:
+        handle(card_ev); return
     kind, payload = CHANNEL.classify(obj)
     if kind == "recall":
         log.info("recall ignored"); return
@@ -1305,6 +1309,26 @@ def reply_key(mid, index, total):
     """一条回复沿用原来的 re_消息编号。拆开之后每段用 re_消息编号_序号，避免重试时重复发送。"""
     if total <= 1: return ("re_" + str(mid))[:50]
     return ("re_%s_%d" % (mid, index))[:50]
+def _finish_switch(mid, switched):
+    """先把这句话发出去，再按需要重启。演练不改文件，也不另起进程。"""
+    reply(mid, switched.get("text") or "")
+    card = switched.get("card")
+    if card and CHANNEL.supports(Cap.CARDS):
+        if DRY:
+            log.info("[dry-run] card %s: %s", mid, json.dumps(card, ensure_ascii=False)[:800])
+        else:
+            try:
+                CHANNEL.reply_message(mid, "interactive", card, ("sw_" + str(mid))[:50], False)
+            except Exception:
+                log.warning("switch card failed")
+    if switched.get("restart") and not DRY:
+        try:
+            feature_switch.launch_reloader(BASE, CFG_PATH)
+        except Exception:
+            log.warning("switch reload spawn failed")
+            reply(mid, feature_switch.abandon(BASE, CFG_PATH))
+            return
+        lifecycle.request_shutdown(STATE)
 def reply(mid, text):
     cleaned, hits = guard.redact_counted(text, REDACT_NAMES)
     if hits and usage.has_chat():
@@ -1553,6 +1577,7 @@ CONFIRM_RX = re.compile(r"^(确认|取消)\s*(\d{6})$")
 def _direct_command(q):
     q = q or ""
     if CONFIRM_RX.match(q): return True
+    if feature_switch.looks_like_command(q): return True
     if q in ("/new", "/reset", "新话题"): return True
     if q in ("/状态", "/status", "状态") and _status_cmd_on(): return True
     if knowledge.enabled(CFG) and knowledge.command_kind(q): return True
@@ -1638,12 +1663,23 @@ def _handle_claimed(ev, mid, ctype, uid):
         _note_thread(ev, uid)
         if memory_growth.enabled(CFG): memory_growth.note_activity(BASE, ev.get("chat_id"))
     log.info("Q %s %s/%s sess=%s from %s: %s", mid, ctype, mtype, sess, uid, q_log[:200])
+    if not DRY and ctype == "p2p":
+        try: feature_switch.maybe_welcome_user(CFG, BASE, uid, ctype, REDACT_NAMES, _outbound_send)
+        except Exception: log.warning("welcome failed")
     if _direct_command(q) and not command_ok(uid):
         reply(mid, (CFG.get("texts") or {}).get("wait") or "请稍等一下，我处理完上一条就回复你。"); return
     # 命令
     m = CONFIRM_RX.match(q)
     if m:
+        switched = feature_switch.try_confirm(
+            CFG, BASE, CFG_PATH, m.group(2), ctx, cancel=(m.group(1) == "取消"),
+            names=REDACT_NAMES, apply=not DRY)
+        if switched is not None:
+            _finish_switch(mid, switched); return
         reply(mid, TOOLS.confirm(m.group(2), ctx, cancel=(m.group(1) == "取消"))); return
+    switched = feature_switch.handle_text(CFG, BASE, q, ctx, REDACT_NAMES, cfg_path=CFG_PATH)
+    if switched is not None:
+        _finish_switch(mid, switched); return
     if q in ("/new", "/reset", "新话题"): forget(sess); reply(mid, "好的，已清空本话题的上下文。"); return
     if q in ("/状态", "/status", "状态") and _status_cmd_on():
         reply(mid, status_text(sess, ev.get("chat_id") or "")); return
@@ -2228,6 +2264,11 @@ def main():
     threading.Thread(target=heartbeat, daemon=True).start()
     startup_recover()
     if lifecycle.SHUTDOWN.is_set(): finish_shutdown()
+    try:
+        feature_switch.deliver_result(BASE, _outbound_send)
+        feature_switch.push_welcome(CFG, BASE, REDACT_NAMES, _outbound_send)
+    except Exception:
+        log.exception("feature switch startup failed")
     log.info("starting %s (features=%s)", CFG["name"], json.dumps(FEAT, ensure_ascii=False))
     if static_chat_ids() is not None: record_static_chats()
     if auto_join_active(): sync_joined_chats()
