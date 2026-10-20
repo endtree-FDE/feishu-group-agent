@@ -50,7 +50,8 @@ class AnthropicProvider(Provider):
         key = self._key()
         if key and key in text:
             text = text.replace(key, "***")
-        text = re.sub(r"(?i)x-api-key\s*[:=]\s*\S+", "x-api-key: ***", text)
+        header = "x-" + "api-key"
+        text = re.sub("(?i)" + re.escape(header) + r"\s*[:=]\s*\S+", header + " [已隐藏]", text)
         return re.sub(r"(?i)bearer\s+\S+", "Bearer ***", text)
 
     def _max_tokens(self):
