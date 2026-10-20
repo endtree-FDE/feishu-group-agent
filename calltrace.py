@@ -71,7 +71,16 @@ def take_tokens():
     pout = int(getattr(_TLS, "pout", 0) or 0)
     _TLS.pin = 0
     _TLS.pout = 0
+    _TLS.last = (pin, pout)
     return pin, pout
+
+
+def last_tokens():
+    """最近一次取走的用量。没有报上来时是 (0, 0)，调用方再按字数粗算。"""
+    got = getattr(_TLS, "last", None)
+    if not got:
+        return 0, 0
+    return int(got[0] or 0), int(got[1] or 0)
 
 
 def _ref(value):

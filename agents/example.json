@@ -155,7 +155,16 @@
     "acp_max_sessions": 8,
     "acp_idle_sec": 1800,
     "acp_allow_web": true,
-    "acp_web_max_per_turn": 15
+    "acp_web_max_per_turn": 15,
+    "crew": {
+      "enabled": false,
+      "total_rounds": 16,
+      "step_rounds": 6,
+      "total_tokens": 400000,
+      "step_tokens": 120000,
+      "total_sec": 900,
+      "step_sec": 240
+    }
   },
   "redact_file": "redact.txt",
   "help_pattern": "你(能|会|可以)(干|做|帮)(什么|啥)|你有(什么|哪些|啥)(权限|功能|能力)|^有(什么|哪些|啥)(权限|功能)[?？]?$|你是谁|怎么用你",

@@ -3,13 +3,14 @@
 # 确认方式见 confirm_mode。默认点按钮，没开通卡片回调时用确认码。确认后备份、写入、检查，再按 stop 然后 start 重启。
 import copy, datetime, hashlib, json, os, random, re, sqlite3, subprocess, sys, time
 import confirm_mode, digest, guard, knowledge, lifecycle, memory_growth, outbound, retrospect, skill_evolve, usage
+import crew
 
 _ID = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
 _ACTOR = re.compile(r"^[A-Za-z0-9_.:-]{1,80}$")
 _CODE = re.compile(r"\d{6}")
 _MENU = re.compile(r"^(?:/设置|/set|/settings|设置|功能开关|开关功能|看设置|打开设置)\s*$", re.I)
-_INDEX = re.compile(r"^第\s*([1-8])\s*项$")
-_DIGIT = re.compile(r"^([1-8])$")
+_INDEX = re.compile(r"^第\s*([1-9])\s*项$")
+_DIGIT = re.compile(r"^([1-9])$")
 _OFF = re.compile(r"不要开|别开|关掉|关闭|停用|关上")
 _ON = re.compile(r"打开|开启|启用|开一下|开开")
 _SENSITIVE = re.compile(
@@ -85,6 +86,14 @@ FEATURES = (
         "use": "根据用过的记录和复盘，提议技能的下一版。分数不下降并且你点头才替换。",
         "key": "skills.evolve.enabled",
     },
+    {
+        "id": "crew",
+        "n": 9,
+        "title": "主理人",
+        "aliases": ("主理人", "专员"),
+        "use": "复杂问题拆给查资料、读文档、起草。他们只能读，写入还是要你确认。",
+        "key": "agent.crew.enabled",
+    },
 )
 _BY_ID = {item["id"]: item for item in FEATURES}
 _BY_N = {item["n"]: item for item in FEATURES}
@@ -158,6 +167,8 @@ def is_on(cfg, feature_id):
         return retrospect.enabled(cfg)
     if feature_id == "skill_evolve":
         return skill_evolve.enabled(cfg)
+    if feature_id == "crew":
+        return crew.enabled(cfg)
     return False
 
 
@@ -200,6 +211,11 @@ def mutate(data, feature_id, turn_on):
         if on:
             block["enabled"] = True
         _ensure(block, "evolve")["enabled"] = on
+    elif feature_id == "crew":
+        block = _ensure(data, "agent")
+        _ensure(block, "crew")["enabled"] = on
+        if on:
+            _ensure(data, "features")["tools"] = True
     return data
 
 
@@ -282,6 +298,14 @@ def happens(cfg, base, feature_id, turn_on):
         if not ((cfg or {}).get("skills") or {}).get("enabled"):
             line += "技能会一起打开，不然没有步骤可改。"
         return line
+    if feature_id == "crew":
+        line = "打开之后：比较长或同时要做几件事的问题，会先查资料、读文档，再起草。短句还是原来的答法。专员不能写入，写入仍要你确认。"
+        opt = crew.settings(cfg)
+        line += "每一步大约 %d 轮、%d 分钟，整题大约 %d 轮、%d 分钟。" % (
+            opt["step_rounds"], max(1, opt["step_sec"] // 60), opt["total_rounds"], max(1, opt["total_sec"] // 60))
+        if not ((cfg or {}).get("features") or {}).get("tools"):
+            line += "工具会一起打开，否则专员读不了资料。"
+        return line
     return ""
 
 
@@ -300,6 +324,8 @@ def prepare(cfg, base, feature_id):
         return "不用先写稿。它只根据刚结束的这一轮写一句，有人点头才记住。"
     if feature_id == "skill_evolve":
         return "技能文件夹里要已经有步骤说明。没有失败记录或复盘时，发「改进技能」也不会改文件。"
+    if feature_id == "crew":
+        return "不用先准备。只有比较复杂的问题才会拆开。"
     if feature_id == "report":
         return "不用先准备资料。"
     if feature_id == "alerts":

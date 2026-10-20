@@ -538,6 +538,20 @@
           "minimum": 0,
           "description": "只读工具最多连续几轮。不写是 4。小于 1 时按 1。每一轮可以按顺序执行多条只读调用。"
         },
+        "crew": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "复杂问题交给主理人和只读专员。不写或 enabled 为 false 时回答路径不变。",
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "total_rounds": {"type": "integer", "minimum": 0},
+            "step_rounds": {"type": "integer", "minimum": 0},
+            "total_tokens": {"type": "integer", "minimum": 0},
+            "step_tokens": {"type": "integer", "minimum": 0},
+            "total_sec": {"type": "integer", "minimum": 0},
+            "step_sec": {"type": "integer", "minimum": 0}
+          }
+        },
         "tool_context_budget_chars": {
           "type": "integer",
           "minimum": 0,

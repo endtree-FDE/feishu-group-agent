@@ -15,7 +15,7 @@ import json, os, re, subprocess, sys, time, logging, collections, threading, sql
 
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import utf8io  # 管道上的标准流改为 UTF-8，避免中文 Windows 的代码页把日志解崩
-import acp_client, calltrace, channels, digest, feishu_link, guard, health_alert, knowledge, lifecycle, memory, memory_growth, observe, proc_identity, providers, retrospect, skill_evolve, usage
+import acp_client, calltrace, channels, crew, digest, feishu_link, guard, health_alert, knowledge, lifecycle, memory, memory_growth, observe, proc_identity, providers, retrospect, skill_evolve, usage
 import confirm_mode, feature_switch
 from channels.base import Cap, can_update, status_modes
 from channels.feishu import MEMBER_ADDED, MEMBER_DELETED
@@ -1220,6 +1220,16 @@ def answer(q, sess, ctx, extra="", on_stage=None):
             try: return "\n\n".join(parts)[:120000]
             except Exception: return ""
     try:
+        if crew.want(CFG, q, ctx):
+            asked = q if not extra else (q + "\n\n补充材料：\n" + extra[:2000])
+            def _crew_complete(prompt):
+                return _traced_complete(ctx, prompt, on_stage, sess)
+            def _crew_tool(name, args, tool_ctx):
+                return _run_tool(name, args, tool_ctx, on_stage)
+            try:
+                return crew.run(CFG, asked, ctx, _crew_complete, _crew_tool, on_stage, names=REDACT_NAMES)
+            except Exception:
+                log.warning("crew failed, fall back")
         out = _traced_complete(ctx, build_prompt(q, sess, ctx, blob(), rounds), on_stage, sess)
         for i in range(rounds):
             if isinstance(out, PartialText): return _partial_clean(out)
