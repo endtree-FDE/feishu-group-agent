@@ -2,14 +2,15 @@
 # 不改模型接口、密钥、私聊开放范围。那些仍要去改配置文件。
 # 确认方式见 confirm_mode。默认点按钮，没开通卡片回调时用确认码。确认后备份、写入、检查，再按 stop 然后 start 重启。
 import copy, datetime, hashlib, json, os, random, re, sqlite3, subprocess, sys, time
-import confirm_mode, digest, guard, knowledge, lifecycle, memory_growth, outbound, usage
+import confirm_mode, digest, guard, knowledge, lifecycle, memory_growth, outbound, retrospect, skill_evolve, usage
+import crew
 
 _ID = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
 _ACTOR = re.compile(r"^[A-Za-z0-9_.:-]{1,80}$")
 _CODE = re.compile(r"\d{6}")
 _MENU = re.compile(r"^(?:/设置|/set|/settings|设置|功能开关|开关功能|看设置|打开设置)\s*$", re.I)
-_INDEX = re.compile(r"^第\s*([1-6])\s*项$")
-_DIGIT = re.compile(r"^([1-6])$")
+_INDEX = re.compile(r"^第\s*([1-9])\s*项$")
+_DIGIT = re.compile(r"^([1-9])$")
 _OFF = re.compile(r"不要开|别开|关掉|关闭|停用|关上")
 _ON = re.compile(r"打开|开启|启用|开一下|开开")
 _SENSITIVE = re.compile(
@@ -68,6 +69,30 @@ FEATURES = (
         "aliases": ("技能",),
         "use": "遇到选题、写稿这类事，按现成的步骤来做。",
         "key": "skills.enabled",
+    },
+    {
+        "id": "retrospect",
+        "n": 7,
+        "title": "复盘写回",
+        "aliases": ("复盘写回", "复盘"),
+        "use": "一轮群里的事做完后，写一句短复盘。有人点头才记进这个群。",
+        "key": "memory.retrospect.enabled",
+    },
+    {
+        "id": "skill_evolve",
+        "n": 8,
+        "title": "技能改进",
+        "aliases": ("技能改进", "自动改进"),
+        "use": "根据用过的记录和复盘，提议技能的下一版。分数不下降并且你点头才替换。",
+        "key": "skills.evolve.enabled",
+    },
+    {
+        "id": "crew",
+        "n": 9,
+        "title": "主理人",
+        "aliases": ("主理人", "专员"),
+        "use": "复杂问题拆给查资料、读文档、起草。他们只能读，写入还是要你确认。",
+        "key": "agent.crew.enabled",
     },
 )
 _BY_ID = {item["id"]: item for item in FEATURES}
@@ -138,6 +163,12 @@ def is_on(cfg, feature_id):
     if feature_id == "skills":
         raw = (cfg or {}).get("skills")
         return isinstance(raw, dict) and bool(raw.get("enabled"))
+    if feature_id == "retrospect":
+        return retrospect.enabled(cfg)
+    if feature_id == "skill_evolve":
+        return skill_evolve.enabled(cfg)
+    if feature_id == "crew":
+        return crew.enabled(cfg)
     return False
 
 
@@ -170,6 +201,21 @@ def mutate(data, feature_id, turn_on):
         if on:
             mem["enabled"] = True
         _ensure(mem, "growth")["enabled"] = on
+    elif feature_id == "retrospect":
+        mem = _ensure(data, "memory")
+        if on:
+            mem["enabled"] = True
+        _ensure(mem, "retrospect")["enabled"] = on
+    elif feature_id == "skill_evolve":
+        block = _ensure(data, "skills")
+        if on:
+            block["enabled"] = True
+        _ensure(block, "evolve")["enabled"] = on
+    elif feature_id == "crew":
+        block = _ensure(data, "agent")
+        _ensure(block, "crew")["enabled"] = on
+        if on:
+            _ensure(data, "features")["tools"] = True
     return data
 
 
@@ -236,6 +282,30 @@ def happens(cfg, base, feature_id, turn_on):
         return line
     if feature_id == "skills":
         return "打开之后：不会主动发消息。有人问到相关的事，才按步骤回答。"
+    if feature_id == "retrospect":
+        spec = memory_growth.settings(cfg)
+        if spec.get("deliver") == "group":
+            line = "打开之后：群里一轮做完，会在这个群里发一句短复盘。点头才记进这个群，不点头不记。别的群看不到。私聊里的对话不写进群记忆。"
+        else:
+            line = "打开之后：群里一轮做完，会私聊审批人一句短复盘。点头才记进这个群，不点头不记，也不会把草稿发到群里。别的群看不到。私聊里的对话不写进群记忆。"
+        if not spec.get("approvers"):
+            line += "还没指定谁来点头的话，不会自动提议。"
+        if not ((cfg or {}).get("memory") or {}).get("enabled"):
+            line += "长期记忆会一起打开，不然它记不住。"
+        return line
+    if feature_id == "skill_evolve":
+        line = "打开之后：不会自己换成新版本。你私聊发「改进技能」，它先对照固定题目。分数没有更高就不换。分数更高，还要你在这个私聊里确认。也可以发「回滚技能」再加名字，确认后回到上一版。"
+        if not ((cfg or {}).get("skills") or {}).get("enabled"):
+            line += "技能会一起打开，不然没有步骤可改。"
+        return line
+    if feature_id == "crew":
+        line = "打开之后：比较长或同时要做几件事的问题，会先查资料、读文档，再起草。短句还是原来的答法。专员不能写入，写入仍要你确认。"
+        opt = crew.settings(cfg)
+        line += "每一步大约 %d 轮、%d 分钟，整题大约 %d 轮、%d 分钟。" % (
+            opt["step_rounds"], max(1, opt["step_sec"] // 60), opt["total_rounds"], max(1, opt["total_sec"] // 60))
+        if not ((cfg or {}).get("features") or {}).get("tools"):
+            line += "工具会一起打开，否则专员读不了资料。"
+        return line
     return ""
 
 
@@ -250,6 +320,12 @@ def prepare(cfg, base, feature_id):
         return "日历或任务表要先接上。没接上的那一项会说暂时没读到，不会编造。"
     if feature_id == "skills":
         return "技能文件夹里要已经有步骤说明。没有的话，打开了也不会多出新本事。"
+    if feature_id == "retrospect":
+        return "不用先写稿。它只根据刚结束的这一轮写一句，有人点头才记住。"
+    if feature_id == "skill_evolve":
+        return "技能文件夹里要已经有步骤说明。没有失败记录或复盘时，发「改进技能」也不会改文件。"
+    if feature_id == "crew":
+        return "不用先准备。只有比较复杂的问题才会拆开。"
     if feature_id == "report":
         return "不用先准备资料。"
     if feature_id == "alerts":
@@ -600,7 +676,7 @@ def _mode_text(mode, code, plan):
     return confirm_mode.button_text(summary, confirm_mode.impact("confirm_mode"), plan["mode"], code, plan["ttl"])
 
 
-def _offer(cfg, base, ctx, kind, feature_id, turn_on, summary, names, now, render, set_mode=""):
+def _offer(cfg, base, ctx, kind, feature_id, turn_on, summary, names, now, render, set_mode="", payload_extra=None):
     plan = confirm_mode.plan(cfg, base, high=True)
     token = plan["token"]
     ah = confirm_mode.action_hash(kind, [{"feature": feature_id, "on": bool(turn_on), "mode": set_mode}],
@@ -609,6 +685,10 @@ def _offer(cfg, base, ctx, kind, feature_id, turn_on, summary, names, now, rende
              "code_ok": False, "fallback": plan["fallback"], "expires": now + plan["ttl"]}
     if set_mode:
         extra["set_mode"] = set_mode
+    if isinstance(payload_extra, dict):
+        for key in ("skill", "sha256", "version", "op"):
+            if key in payload_extra:
+                extra[key] = payload_extra[key]
     try:
         code = _reserve(base, ctx, feature_id, turn_on, now, cfg, extra=extra)
     except RuntimeError:
@@ -898,6 +978,8 @@ def _accept_switch(cfg, base, cfg_path, code, rec, ctx, cancel, names, now, appl
         return _reply("确认没能记下，请稍后再试。")
     if rec.get("feature") == "confirm_mode":
         return _finish_mode(cfg, base, cfg_path, rec, ctx, cancel, names, apply, check)
+    if rec.get("feature") in ("skill_evolve", "skill_rollback"):
+        return skill_evolve.accept(cfg, base, rec, cancel, names, apply)
     item = feature(rec.get("feature"))
     if not item:
         return _reply("这项不能在对话里改。回复「设置」看能改的功能。")

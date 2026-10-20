@@ -238,6 +238,20 @@
       "properties": {
         "journal": {
           "type": "boolean"
+        },
+        "calls": {
+          "description": "不写或 enabled 不为 false 时，每轮回答在 logs/calls.jsonl 记一条已脱敏的调用链。false 表示不记。",
+          "oneOf": [
+            {"type": "boolean"},
+            {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "enabled": {"type": "boolean"},
+                "retain_days": {"type": "integer", "minimum": 1}
+              }
+            }
+          ]
         }
       }
     },
@@ -383,6 +397,14 @@
             "confirm_ttl_sec": {"type": "integer", "minimum": 0},
             "forget_ttl_sec": {"type": "integer", "minimum": 0}
           }
+        },
+        "retrospect": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "一轮做完后提议一句短复盘。不写或 enabled 为 false 时不提议，也不改事实。",
+          "properties": {
+            "enabled": {"type": "boolean"}
+          }
         }
       }
     },
@@ -423,6 +445,15 @@
         "preload_budget_chars": {
           "type": "integer",
           "minimum": 0
+        },
+        "evolve": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "根据调用和复盘提议技能下一版。不写或 enabled 为 false 时不提议，也不改 SKILL.md。",
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "cases": {"type": "array", "items": {"type": "string"}}
+          }
         }
       }
     },
@@ -506,6 +537,20 @@
           "type": "integer",
           "minimum": 0,
           "description": "只读工具最多连续几轮。不写是 4。小于 1 时按 1。每一轮可以按顺序执行多条只读调用。"
+        },
+        "crew": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "复杂问题交给主理人和只读专员。不写或 enabled 为 false 时回答路径不变。",
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "total_rounds": {"type": "integer", "minimum": 0},
+            "step_rounds": {"type": "integer", "minimum": 0},
+            "total_tokens": {"type": "integer", "minimum": 0},
+            "step_tokens": {"type": "integer", "minimum": 0},
+            "total_sec": {"type": "integer", "minimum": 0},
+            "step_sec": {"type": "integer", "minimum": 0}
+          }
         },
         "tool_context_budget_chars": {
           "type": "integer",

@@ -881,6 +881,11 @@ def render_markdown(report, moment_label, tz_name, names=()):
             lines.append("问题类别：" + shown)
         else:
             lines.append("问题类别：无")
+    try:
+        import calltrace
+        lines.extend(calltrace.summary_lines(report.get("calls")))
+    except Exception:
+        pass
     text = "\n".join(lines).strip() + "\n"
     return guard.redact(text, names)
 
@@ -933,6 +938,12 @@ def render_csv(report):
                 put(section, "health_" + name, pair["cur"], pair["prev"])
         for name, pair in _top_topics(section["topics"], limit=20):
             put(section, "topic_" + _TOPIC_ID.get(name, "other"), pair["cur"], pair["prev"])
+    calls = report.get("calls") if isinstance(report, dict) else None
+    if isinstance(calls, dict) and calls.get("n"):
+        writer.writerow(["total", "all", "calls", calls.get("n") or 0, "", ""])
+        writer.writerow(["total", "all", "calls_failed", calls.get("fail") or 0, "", ""])
+        writer.writerow(["total", "all", "calls_prompt_tokens", calls.get("tokens_in") or 0, "", ""])
+        writer.writerow(["total", "all", "calls_completion_tokens", calls.get("tokens_out") or 0, "", ""])
     return buf.getvalue()
 
 
@@ -997,6 +1008,11 @@ def build(base, cfg, now, week_text="", names=()):
     if err:
         return None, None, err
     report = collect(base, _stamp(start), _stamp(end))
+    try:
+        import calltrace
+        report["calls"] = calltrace.summarize(os.path.join(base, "logs", "calls.jsonl"), _stamp(start), _stamp(end))
+    except Exception:
+        report["calls"] = None
     spec = settings(cfg)
     md = render_markdown(report, _label(start, end), spec["timezone"], names)
     return md, render_csv(report), ""

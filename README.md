@@ -33,7 +33,7 @@ flowchart LR
 
 渠道这一层收事件、发消息、改卡片、读历史和成员。没写 `channel` 时就是飞书，行为与以前相同。别的渠道缺某项能力时，核心会跳过，不会假装做成了。说明在 [docs/渠道.md](docs/渠道.md)。企业微信接哪一种官方接口，见 [docs/渠道-企业微信.md](docs/渠道-企业微信.md)。
 
-`--doctor` 不在这条路上。它只在本机做诊断，不发消息。本机还有两份不含问题原文的日志：`logs/events.jsonl` 和 `logs/journal.jsonl`。
+`--doctor` 不在这条路上。它只在本机做诊断，不发消息。本机还有两份不含问题原文的日志：`logs/events.jsonl` 和 `logs/journal.jsonl`。`logs/calls.jsonl` 默认记下每轮调用链，写入前会脱敏，见 [docs/调用记录.md](docs/调用记录.md)。
 
 完整分层图和设计说明：
 
@@ -181,6 +181,9 @@ A screenshot placeholder, with rules for hiding ids, is in [docs/demo/README.md]
 | `guard.py` | 打码和话题红线 |
 | `memory.py` | 每个群一份长期记忆 |
 | `memory_growth.py` | 记忆成长。默认关。提议后要审批才写入。见 [docs/记忆成长.md](docs/记忆成长.md) |
+| `retrospect.py` | 复盘写回。默认关。点头才写入该群记忆。见 [docs/复盘写回.md](docs/复盘写回.md) |
+| `skill_evolve.py` | 技能自动改进。默认关。分数更高且确认后才替换。见 [docs/技能自动改进.md](docs/技能自动改进.md) |
+| `crew.py` | 主理人加专员。默认关。只读拆分，写入仍要确认。见 [docs/主理人与专员.md](docs/主理人与专员.md) |
 | `skills.py` | 技能目录、触发词预放和按需读取；默认关闭 |
 | `skills/` | 每个技能一个文件夹，里面一份 `SKILL.md` |
 | `kb_sync.py` | 知识库先待审、再替换 |
@@ -191,6 +194,7 @@ A screenshot placeholder, with rules for hiding ids, is in [docs/demo/README.md]
 | `redact.example.txt` | 空的客户名名单样子，复制成 `redact.txt` 再用 |
 | `doctor.py` | `--doctor`：只读诊断，不发消息 |
 | `observe.py` | 本机 `logs/events.jsonl` |
+| `calltrace.py` | 本机调用链 `logs/calls.jsonl`。默认开。见 [docs/调用记录.md](docs/调用记录.md) |
 | `lifecycle.py` | 单实例锁和优雅停机 |
 | `feishu_link.py` | 长连接，以及休眠后的重连 |
 | `outbound.py` | 飞书渠道主动发送时调用的 `im +messages-send`。断线私聊和早晨摘要经 `push_text` 走到这里 |
@@ -201,6 +205,10 @@ A screenshot placeholder, with rules for hiding ids, is in [docs/demo/README.md]
 | `scripts/reload.ps1` | 改完开关后平滑重启：先停，确认没有第二个接收进程，再启动 |
 | `docs/断线提醒与晨报.md` | 断线提醒和早晨摘要怎么开，以及飞书要哪些权限 |
 | `docs/用量周报.md` | 用量周报怎么开，统计什么，什么不会写进去 |
+| `docs/调用记录.md` | 每轮调用链写在本机，主人私聊可看，周报只加合计 |
+| `docs/复盘写回.md` | 一轮做完后提议一句短复盘，确认后才写入该群记忆 |
+| `docs/技能自动改进.md` | 提议技能下一版，回归分数更高且主人确认后才替换，可回滚 |
+| `docs/主理人与专员.md` | 复杂问题拆给只读专员，有总预算和每步预算 |
 | `docs/新手开关功能.md` | 主人在私聊里发「设置」，打开或关掉上面几项 |
 | `docs/确认方式.md` | 写入确认：默认点按钮，可改回确认码，不能关掉 |
 | `setup_wizard.py` | 一键安装向导。一次一问，密钥不进文件。见 [docs/一键安装.md](docs/一键安装.md) |
