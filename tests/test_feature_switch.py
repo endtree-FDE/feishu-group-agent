@@ -340,9 +340,16 @@ check("重启脚本先停再查再启动，且不另写一套结束进程",
       and "Start-Process" not in text and "taskkill" not in text.lower() and "&&" not in text and "??" not in text
       and "Stop-Process" not in text and "Restore-SwitchBackup" in text)
 argv = feature_switch.reloader_argv(FW, os.path.join(FW, "agents", "example.json"))
-check("非 Windows 的重启命令只叫本模块，不直接再开一个接收进程",
-      os.name != "nt" and "feature_switch.py" in " ".join(argv) and "--reload" in argv and "agentbot.py" not in " ".join(argv),
-      argv)
+joined = " ".join(argv)
+direct = "agentbot.py" in joined
+if os.name == "nt":
+    check("Windows 的重启命令只走原来的重启脚本，不直接再开一个接收进程",
+          argv[:1] == ["powershell.exe"] and "reload.ps1" in joined and not direct,
+          argv)
+else:
+    check("非 Windows 的重启命令只叫本模块，不直接再开一个接收进程",
+          "feature_switch.py" in joined and "--reload" in argv and not direct,
+          argv)
 
 # 演练整条私聊：群成员、旁人、主人、确认码。不改仓库里的示例配置。
 run = tempfile.mkdtemp(prefix="switch_bot_")
