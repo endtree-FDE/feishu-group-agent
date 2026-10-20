@@ -327,7 +327,12 @@ def score_skills(skills_dir, ids=(), tag="ci", timeout=600):
                 argv.extend(["--id", item])
         else:
             argv.extend(["--tag", tag or "ci"])
-        proc = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
+        env = os.environ.copy()
+        # 父进程可能是 PYTHONUTF8=0。子进程自己把管道改成 UTF-8，这里再声明一次，避免分数行乱码。
+        env["PYTHONIOENCODING"] = "utf-8"
+        proc = subprocess.run(
+            argv, capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=timeout, env=env)
         found = _PASSED.findall((proc.stdout or "") + "\n" + (proc.stderr or ""))
         if not found:
             return None
