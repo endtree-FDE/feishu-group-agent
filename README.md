@@ -74,7 +74,23 @@ flowchart LR
 
 ## 快速开始
 
-新人大约 15 分钟可以在自己电脑上把离线测试和配置检查跑起来，不必先有飞书应用。逐步说明在 [docs/快速开始.md](docs/快速开始.md)。遇到报错先看 [docs/排障.md](docs/排障.md)。
+第一次在 Windows 上给飞书装这个机器人，用安装向导。它会一题一题问，告诉你为什么要填、去飞书开放平台的哪一页复制。App Secret 只交给飞书命令行，不写进文件。
+
+在仓库文件夹里打开 PowerShell，执行：
+
+```text
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\setup.ps1
+```
+
+说明和常见问题在 [docs/一键安装.md](docs/一键安装.md)。装好以后，用主人的飞书打开和机器人的私聊，发送「设置」再开各项功能。
+
+只想先看它会问什么、不写文件：
+
+```text
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\setup.ps1 -DryRun
+```
+
+还没申请飞书应用、只想在自己电脑上跑通离线检查：看 [docs/快速开始.md](docs/快速开始.md)。遇到报错先看 [docs/排障.md](docs/排障.md)。
 
 ```text
 python tests/run_tests.py
@@ -83,7 +99,7 @@ python setup_agent.py --name demo --provider deepseek --dry-run
 python agentbot.py agents/example.json --doctor
 ```
 
-最后一条只做只读诊断，不发消息。没有安装 lark-cli 时，它会列出缺什么。真正连上飞书需要 Windows、Python 3.12 和你自己的应用，步骤在 [docs/新建智能体.md](docs/新建智能体.md)。已经有机器人、想换成这套（文档里的例子叫「小景」）看 [docs/升级已有智能体.md](docs/升级已有智能体.md)。
+最后一条只做只读诊断，不发消息。没有安装 lark-cli 时，它会列出缺什么。想对照每一项手写配置，看 [docs/新建智能体.md](docs/新建智能体.md)。已经有机器人、想换成这套（文档里的例子叫「小景」）看 [docs/升级已有智能体.md](docs/升级已有智能体.md)。
 
 看 PDF 附件时才需要另外安装 `pypdf`。Word、PPT、文本、代码、zip 和图片用标准库。Excel 在装了 `openpyxl` 时读取。没装这些包也不会影响启动。
 
@@ -91,7 +107,7 @@ python agentbot.py agents/example.json --doctor
 
 The purpose, the write lock, and the “do not commit” rule are in the English paragraph at the top. The diagram in [架构](#架构) is the path from a Feishu message to a redacted reply. Omitting `channel` keeps that Feishu path. [docs/渠道.md](docs/渠道.md) is the adapter boundary; [docs/渠道-企业微信.md](docs/渠道-企业微信.md) is the WeCom design and is not enabled by default. [docs/arch-now.mmd](docs/arch-now.mmd) is the current path with the model choice. [docs/arch-full.mmd](docs/arch-full.mmd) is the longer design, including jobs that are not on by default.
 
-A 15-minute offline start is in [docs/快速开始.md](docs/快速开始.md). Troubleshooting is in [docs/排障.md](docs/排障.md). `--doctor` only prints a local diagnosis and does not send messages. Disconnect alerts and the morning digest are off unless `alerts.enabled` and `digest.enabled` are true. The weekly usage report is also off unless `report.enabled` is true, and it is a private message. See [docs/断线提醒与晨报.md](docs/断线提醒与晨报.md) and [docs/用量周报.md](docs/用量周报.md).
+On Windows, first-time setup is `scripts\setup.ps1`. It asks one question at a time and does not write the App Secret into a file. See [docs/一键安装.md](docs/一键安装.md). A 15-minute offline start is in [docs/快速开始.md](docs/快速开始.md). Troubleshooting is in [docs/排障.md](docs/排障.md). `--doctor` only prints a local diagnosis and does not send messages. Disconnect alerts and the morning digest are off unless `alerts.enabled` and `digest.enabled` are true. The weekly usage report is also off unless `report.enabled` is true, and it is a private message. See [docs/断线提醒与晨报.md](docs/断线提醒与晨报.md) and [docs/用量周报.md](docs/用量周报.md).
 
 Quick start on a machine that will really talk to Feishu:
 
@@ -185,10 +201,13 @@ A screenshot placeholder, with rules for hiding ids, is in [docs/demo/README.md]
 | `docs/断线提醒与晨报.md` | 断线提醒和早晨摘要怎么开，以及飞书要哪些权限 |
 | `docs/用量周报.md` | 用量周报怎么开，统计什么，什么不会写进去 |
 | `docs/新手开关功能.md` | 主人在私聊里发「设置」，打开或关掉上面几项 |
+| `setup_wizard.py` | 一键安装向导。一次一问，密钥不进文件。见 [docs/一键安装.md](docs/一键安装.md) |
 | `setup_agent.py` | 干跑生成配置。不加 `--write` 不写文件 |
+| `scripts/setup.ps1` | Windows 上的安装入口，调用上面的向导 |
 | `scripts/` | Windows 上的启动、停止、看门狗、计划任务、`verify_windows.ps1` |
 | `tests/run_tests.py` | 离线测试。通过时最后一行打印条数 |
 | `evals/run.py` | 回答质量回归。假模型不连飞书；用法见 [docs/回归测试.md](docs/回归测试.md) |
+| `docs/一键安装.md` | 第一次在 Windows 上安装：一题一题问，密钥不进文件 |
 | `docs/快速开始.md` | 新人 15 分钟跑起来 |
 | `docs/排障.md` | 常见问题 |
 | `docs/release-0.7.0.md` | v0.7.0 发布说明（2026-10-20）。不写 `model` 仍是 Cursor；`search` 默认关；私聊可以开关已有功能 |
