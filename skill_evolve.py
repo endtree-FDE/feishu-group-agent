@@ -297,7 +297,7 @@ def _better(before, after):
         return False
     if left_n <= 0 or right_n <= 0:
         return False
-    return (right / float(right_n)) >= (left / float(left_n))
+    return (right / float(right_n)) > (left / float(left_n))
 
 
 def score_skills(skills_dir, ids=(), tag="ci", timeout=600):
@@ -416,7 +416,7 @@ def _offer_replace(cfg, base, ctx, names, now, info, new_text):
     def render(code, plan):
         return "\n".join([
             "技能「%s」可以换成第 %d 版。" % (info["name"], version),
-            "对照过回归测试，分数没有变低。还没替换文件。",
+            "对照过回归测试，分数更高。还没替换文件。",
             "请只回复这一句：" if plan["mode"] == "code" else "请确认。",
             "确认 %s" % code,
             "不想换了就回复：取消 %s" % code,
@@ -428,7 +428,7 @@ def _offer_replace(cfg, base, ctx, names, now, info, new_text):
 
 
 def review(cfg, base, ctx, names=(), runner=None, now=None):
-    """挑一个有信号的技能。分数变低或没跑完都不换。"""
+    """挑一个有信号的技能。分数没有更高，或没跑完，都不换。"""
     now = time.time() if now is None else float(now)
     if not enabled(cfg):
         return {"text": "技能自动改进现在关着。私聊发「设置」可以打开。", "card": None, "restart": False}
@@ -449,7 +449,7 @@ def review(cfg, base, ctx, names=(), runner=None, now=None):
         before = score(info["text"])
         after = score(new_text)
         if not _better(before, after):
-            return {"text": "技能「%s」对照过回归测试，分数变低或没跑完，没有替换。" % name,
+            return {"text": "技能「%s」对照过回归测试，分数没有更高或没跑完，没有替换。" % name,
                     "card": None, "restart": False}
         return _offer_replace(cfg, base, ctx, names, now, info, new_text)
     return {"text": "现在没有可改进的技能。", "card": None, "restart": False}

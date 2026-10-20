@@ -294,7 +294,7 @@ def happens(cfg, base, feature_id, turn_on):
             line += "长期记忆会一起打开，不然它记不住。"
         return line
     if feature_id == "skill_evolve":
-        line = "打开之后：不会自己换成新版本。你私聊发「改进技能」，它先对照固定题目。分数变低就不换。分数没变低，还要你在这个私聊里确认。也可以发「回滚技能」再加名字，确认后回到上一版。"
+        line = "打开之后：不会自己换成新版本。你私聊发「改进技能」，它先对照固定题目。分数没有更高就不换。分数更高，还要你在这个私聊里确认。也可以发「回滚技能」再加名字，确认后回到上一版。"
         if not ((cfg or {}).get("skills") or {}).get("enabled"):
             line += "技能会一起打开，不然没有步骤可改。"
         return line
