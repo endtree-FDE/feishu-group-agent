@@ -4,9 +4,13 @@
 
 程序不读取 `VERSION` 或本文件。删掉它们时，机器人的行为与现在相同。
 
-当前 `VERSION` 是 `0.5.0`，发布日期是 2026-10-19。发布说明见 [docs/release-0.5.0.md](docs/release-0.5.0.md)。从 0.4.1 升上来见 [docs/升级到0.5.0.md](docs/升级到0.5.0.md)。说明里不要写密钥、群号、open_id 或客户名。
+当前 `VERSION` 是 `0.6.0`，发布日期是 2026-10-20。发布说明见 [docs/release-0.6.0.md](docs/release-0.6.0.md)。从 0.5.0 升上来见 [docs/升级到0.6.0.md](docs/升级到0.6.0.md)。说明里不要写密钥、群号、open_id 或客户名。
 
 ## [Unreleased]
+
+## [0.6.0] - 2026-10-20
+
+下面是用户能看到的变化。没写进旧配置的键，仍用各项自己的默认值。发布说明见 [docs/release-0.6.0.md](docs/release-0.6.0.md)。这一版新加的开关默认都关着。
 
 ### 添加
 
@@ -18,7 +22,7 @@
 - 分群知识库检索，默认关。没写 `knowledge` 或 `enabled` 为 `false` 时，不收录、不检索，提示词、工具和 `/状态` 与现在一样。打开后，每个群或私聊一份本地 SQLite 索引：本地 `kb/`、可选的群文件，以及配置或群里出现的飞书云文档、知识库和多维表格。中文用字双字进 FTS5。配了 OpenAI 兼容的向量地址才做混合检索，否则只用关键词。模型用 `kb_search` 查，也可以打开 `auto_retrieve` 自动附上片段。回答按标题、章节或页码引用，飞书文档带链接。白名单成员发「/kb refresh」更新；「/kb」或「/kb status」查看。`refresh_min` 大于 0 时按间隔补一次，一个周期只更新一个会话。说明见 [docs/知识库.md](docs/知识库.md)。
 - 记忆成长 `memory.growth`，默认关。不写或 `enabled` 为 `false` 时，不调用模型，不发提案，也不改「记一下」、`/记忆`、`/忘记`。长期记忆和成长都打开后，才会在配置的时间（不写是 03:00）或一段对话闲下来时，对照本群近期消息提议新事实、更新或作废。提案默认私聊 `approver_open_ids`，也可以改成发在本群。每条用单独的 6 位码，审批人才能 `确认记忆`、`改记忆` 或 `驳回记忆`。别人、别的群、过期和用过的码都不会写入。事实会记下日期、会话、消息编号和把握。客户名、手机号、证件号、邮箱和密钥整条不提议。群与群仍然分开。`/搜记忆` 只在长期记忆开着时可用。成长打开后，`/忘记` 要本人再确认；关着时仍是立刻删除。见 [docs/记忆成长.md](docs/记忆成长.md)。
 
-旧配置不用改。说明见 [docs/用量周报.md](docs/用量周报.md)。
+旧配置不用改。说明见 [docs/用量周报.md](docs/用量周报.md)。从 0.5.0 升上来见 [docs/升级到0.6.0.md](docs/升级到0.6.0.md)。
 
 ### 安全
 
@@ -102,8 +106,8 @@
 
 ## English
 
-Unreleased: optional per-chat knowledge search. Omitted or `knowledge.enabled: false` keeps the previous prompt, tools, and commands. See `docs/知识库.md`.
+The version is the `VERSION` file (`0.6.0`), released on 2026-10-20. Do not put secrets or Feishu IDs in release notes. The program does not read this file. 0.6.0 adds answer-quality evals, an optional weekly usage report, optional per-chat knowledge search, and optional memory growth. All four stay off when omitted. Evals do not connect to Feishu. The report is a weekly owner DM with totals only. Knowledge search indexes one chat and cites sources. Memory growth writes nothing until an approver confirms. Upgrade and rollback steps are in `docs/升级到0.6.0.md`. Rolling back to v0.5.0 (`e842684`) drops these four. This note does not create the tag.
 
-The version is the `VERSION` file (`0.5.0`), released on 2026-10-19. Do not put secrets or Feishu IDs in release notes. The program does not read this file. Missing keys keep the previous behavior. 0.5.0 adds six creative-workflow skills, a channel adapter (Feishu is the first implementation; WeCom is an experimental skeleton and does not connect), optional disconnect alerts, and an optional morning digest. `skills.enabled`, `alerts.enabled`, and `digest.enabled` stay false when omitted. An empty `skills.only` still means every valid skill once skills are turned on. Writes still need the allow-list and a confirmation code. Alert DMs and digest posts go through the channel `push_text` method. On Feishu that is `im +messages-send` and does not start the event consumer. The digest posts at most once per local day per configured chat and never mentions everyone. Upgrade and rollback steps are in `docs/升级到0.5.0.md`. Rolling back to v0.4.1 (`deb498f`) also drops the channel adapter and the creative skills.
+The previous version is the `VERSION` file (`0.5.0`), released on 2026-10-19. Do not put secrets or Feishu IDs in release notes. The program does not read this file. Missing keys keep the previous behavior. 0.5.0 adds six creative-workflow skills, a channel adapter (Feishu is the first implementation; WeCom is an experimental skeleton and does not connect), optional disconnect alerts, and an optional morning digest. `skills.enabled`, `alerts.enabled`, and `digest.enabled` stay false when omitted. An empty `skills.only` still means every valid skill once skills are turned on. Writes still need the allow-list and a confirmation code. Alert DMs and digest posts go through the channel `push_text` method. On Feishu that is `im +messages-send` and does not start the event consumer. The digest posts at most once per local day per configured chat and never mentions everyone. Upgrade and rollback steps are in `docs/升级到0.5.0.md`. Rolling back to v0.4.1 (`deb498f`) also drops the channel adapter and the creative skills.
 
 0.4.1 remains the previous release. (#58) Confirmation codes are bound to the initiator, chat, and topic. Used or cancelled codes are stored in `used_writes` before they run and cannot be replayed after a restart. Untrusted text cannot become a tool call or a confirmation code. Redirect checks connect only to addresses that were already validated. One Feishu app has one receiver. Lock files become visible only after they are fully written. Confirm, status, help, and memory commands skip the per-user gap and use `rate_limit.max_commands_per_min` (default 40). (#59) `p2p.allow_group_members` defaults to false. When enabled, current members of served groups may use private chat, which needs `im:chat.members:read`. `open_to_all` still wins, and a failed or truncated member list fails closed. Those upgrade steps are in `docs/升级到0.4.1.md`. 0.4.0 still includes several read-only tool calls per round, configurable read caps, and the (#57) doctor and UTF-8 fixes.

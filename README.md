@@ -149,6 +149,7 @@ A screenshot placeholder, with rules for hiding ids, is in [docs/demo/README.md]
 | `tools.py` | 动飞书的手：只读，以及要确认码的写入 |
 | `guard.py` | 打码和话题红线 |
 | `memory.py` | 每个群一份长期记忆 |
+| `memory_growth.py` | 记忆成长。默认关。提议后要审批才写入。见 [docs/记忆成长.md](docs/记忆成长.md) |
 | `skills.py` | 技能目录、触发词预放和按需读取；默认关闭 |
 | `skills/` | 每个技能一个文件夹，里面一份 `SKILL.md` |
 | `kb_sync.py` | 知识库先待审、再替换 |
@@ -173,6 +174,8 @@ A screenshot placeholder, with rules for hiding ids, is in [docs/demo/README.md]
 | `evals/run.py` | 回答质量回归。假模型不连飞书；用法见 [docs/回归测试.md](docs/回归测试.md) |
 | `docs/快速开始.md` | 新人 15 分钟跑起来 |
 | `docs/排障.md` | 常见问题 |
+| `docs/release-0.6.0.md` | v0.6.0 发布说明（2026-10-20）。四项默认关 |
+| `docs/升级到0.6.0.md` | 从 0.5.0 升到 0.6.0：停进程和 `git reset --keep` 同一步；可选只开用量周报 |
 | `docs/release-0.5.0.md` | v0.5.0 发布说明（2026-10-19） |
 | `docs/升级到0.5.0.md` | 从 0.4.1 升到 0.5.0：默认不用改配置；可选打开技能、断线提醒、早晨摘要 |
 | `docs/release-0.4.1.md` | v0.4.1 发布说明（2026-10-19） |
