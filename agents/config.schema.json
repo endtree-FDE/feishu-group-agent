@@ -434,6 +434,38 @@
         }
       }
     },
+    "knowledge": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "分群知识库检索。不写或 enabled 为 false 时不收录、不检索，提示词和命令与以前一样。",
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "auto_retrieve": {"type": "boolean"},
+        "local": {"type": "boolean"},
+        "group_files": {"type": "boolean"},
+        "group_links": {"type": "boolean"},
+        "refresh_min": {"type": "integer", "minimum": 0},
+        "docs": {"type": "array", "items": {"type": "string"}},
+        "wiki": {"type": "array", "items": {"type": "string"}},
+        "bases": {"type": "array"},
+        "chunk_chars": {"type": "integer", "minimum": 0},
+        "chunk_overlap": {"type": "integer", "minimum": 0},
+        "top_k": {"type": "integer", "minimum": 0},
+        "max_chars": {"type": "integer", "minimum": 0},
+        "max_source_chars": {"type": "integer", "minimum": 0},
+        "embeddings": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "base_url": {"type": "string"},
+            "api_key_env": {"type": "string"},
+            "model": {"type": "string"},
+            "timeout_sec": {"type": "integer", "minimum": 0}
+          }
+        }
+      }
+    },
     "kb_sync": {
       "type": "object",
       "additionalProperties": true,

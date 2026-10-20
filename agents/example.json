@@ -254,6 +254,28 @@
   "policy": {
     "redlines": []
   },
+  "knowledge": {
+    "enabled": false,
+    "auto_retrieve": false,
+    "local": true,
+    "group_files": false,
+    "group_links": false,
+    "refresh_min": 0,
+    "docs": [],
+    "wiki": [],
+    "bases": [],
+    "chunk_chars": 480,
+    "chunk_overlap": 80,
+    "top_k": 5,
+    "max_chars": 4000,
+    "embeddings": {
+      "enabled": false,
+      "base_url": "",
+      "api_key_env": "",
+      "model": "",
+      "timeout_sec": 20
+    }
+  },
   "kb_sync": {
     "docs_tokens": []
   },

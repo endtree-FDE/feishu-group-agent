@@ -53,6 +53,7 @@ flowchart LR
 - 话题红线默认不设。要限制什么，写在自己的配置里。
 - 同一个应用只跑一个进程。看门狗发现进程不在或心跳超过 3 分钟会在本机重启。默认只写 `logs/watchdog.log`。打开 `alerts` 后，重启前可以私聊主人。
 - 知识库可以定时收进来，先放待审区，你确认后才换上。
+- 分群知识库检索默认关着。打开后，本群的资料能被搜到，回答会写上来源标题、章节或页码。见 [docs/知识库.md](docs/知识库.md)。
 - 技能默认关着。打开后，提示词里只放一行目录，命中触发词才放入步骤。创作流程（选题、口播、分镜、提示词、策划书、复盘）也在 `skills/` 里，默认不启用；要只用这几份时，在配置里点名。见 [docs/技能.md](docs/技能.md)。
 - 常驻模式默认关着。`agent.mode` 写成 `acp` 后，Cursor 只启动一次。见 [docs/常驻模式.md](docs/常驻模式.md)。
 - 模型可以换成你自己的账号：`model_provider` 写成 `openai_compat`，密钥放在环境变量。见 [docs/模型接口.md](docs/模型接口.md)。拿去参赛时的字段对照见 [docs/用本框架参赛.md](docs/用本框架参赛.md)。
@@ -92,6 +93,8 @@ python tests/run_tests.py
 ```
 
 The last line prints how many checks passed. Do not commit filled-in `agents/*.json`, `redact.txt`, `.env`, `memory/`, `logs/`, `state/`, `state.db`, or real files under `kb/`.
+
+Per-group search is off unless `knowledge.enabled` is true. Turning it on indexes that chat only, cites the title and section or page, and does not add Feishu scopes until you opt in. See [docs/知识库.md](docs/知识库.md).
 
 A screenshot placeholder, with rules for hiding ids, is in [docs/demo/README.md](docs/demo/README.md).
 
@@ -149,6 +152,7 @@ A screenshot placeholder, with rules for hiding ids, is in [docs/demo/README.md]
 | `skills.py` | 技能目录、触发词预放和按需读取；默认关闭 |
 | `skills/` | 每个技能一个文件夹，里面一份 `SKILL.md` |
 | `kb_sync.py` | 知识库先待审、再替换 |
+| `knowledge.py` | 分群知识库索引和检索。默认关。见 [docs/知识库.md](docs/知识库.md) |
 | `make_bundle.py` | 在资料电脑上把笔记打成压缩包 |
 | `agents/example.json` | 配置样子，里面都是占位符 |
 | `agents/CONFIG.md` | 每一项怎么填 |
