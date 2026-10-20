@@ -24,7 +24,9 @@ description: >-
 
 ## 从零新建
 
-按 `docs/新建智能体.md` 的编号做完再进入下一步。
+对方是第一次在 Windows 上装、不改配置文件的人：让对方自己运行 `scripts\setup.ps1`（说明在 `docs/一键安装.md`）。向导一次问一个问题。App Secret 只由对方向导交给 `lark-cli config init --name <profile> --app-secret-stdin`，你不要代贴，也不要写进文件。
+
+需要逐步核对时，再按 `docs/新建智能体.md` 的编号做完再进入下一步。
 
 1. 对方在开放平台创建企业自建应用，把 App ID 给你。Secret 不给你。
 2. 用文档里的一键链接申请权限（把 `clientID` 换成 App ID）。事件订阅用长连接，事件名 `im.message.receive_v1`。然后由对方发布版本并设置可用范围。
