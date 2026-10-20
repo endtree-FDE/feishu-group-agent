@@ -31,6 +31,12 @@ def equal(_text):
     return (1, 1)
 
 
+def higher(text):
+    if "自动补记" in (text or ""):
+        return (2, 2)
+    return (1, 2)
+
+
 def worse(text):
     if "自动补记" in (text or ""):
         return (0, 1)
@@ -97,7 +103,14 @@ try:
     check("分数变低时不替换",
           blocked and "没有替换" in blocked["text"] and after_block == SKILL, blocked["text"] if blocked else "")
 
-    offered = skill_evolve.review(cfg, base, owner(base), [NAME], runner=equal)
+    same = skill_evolve.review(cfg, base, owner(base), [NAME], runner=equal)
+    check("分数一样高时不替换",
+          same and "没有替换" in same["text"] and "确认" not in same["text"]
+          and open(path, encoding="utf-8").read() == SKILL
+          and not os.path.isfile(skill_evolve._candidate_path(base, "post-mortem")),
+          same["text"] if same else "")
+
+    offered = skill_evolve.review(cfg, base, owner(base), [NAME], runner=higher)
     offer_text = offered["text"] if offered else ""
     code = code_of(offer_text)
     pending = open(path, encoding="utf-8").read()
@@ -105,7 +118,7 @@ try:
     cand = skill_evolve._candidate_path(base, "post-mortem")
     if os.path.isfile(cand):
         candidate = open(cand, encoding="utf-8").read()
-    check("分数不降只发出确认，文件还是原样",
+    check("分数更高才发出确认，文件还是原样",
           code and "第 2 版" in offer_text and pending == SKILL
           and "自动补记" in candidate and "version: 2" in candidate
           and NAME not in candidate and "某客户" in candidate and "app_secret=abc" not in candidate,
@@ -194,8 +207,9 @@ try:
                           capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=120)
     out = (proc.stdout or "") + (proc.stderr or "")
     kept = open(live, encoding="utf-8").read()
-    check("私聊发改进技能会对照回归并请求确认，演练前不改文件",
-          proc.returncode == 0 and "确认" in out and "第 2 版" in out and kept == SKILL and NAME not in out,
+    check("私聊发改进技能时分数没有更高就不替换，演练不改文件",
+          proc.returncode == 0 and "没有替换" in out and "确认" not in out and "第 2 版" not in out
+          and kept == SKILL and NAME not in out,
           out[-1200:])
 finally:
     shutil.rmtree(run, ignore_errors=True)
