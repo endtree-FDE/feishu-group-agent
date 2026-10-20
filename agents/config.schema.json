@@ -397,6 +397,14 @@
             "confirm_ttl_sec": {"type": "integer", "minimum": 0},
             "forget_ttl_sec": {"type": "integer", "minimum": 0}
           }
+        },
+        "retrospect": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "一轮做完后提议一句短复盘。不写或 enabled 为 false 时不提议，也不改事实。",
+          "properties": {
+            "enabled": {"type": "boolean"}
+          }
         }
       }
     },

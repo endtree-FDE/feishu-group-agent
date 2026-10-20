@@ -15,7 +15,7 @@ import json, os, re, subprocess, sys, time, logging, collections, threading, sql
 
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import utf8io  # 管道上的标准流改为 UTF-8，避免中文 Windows 的代码页把日志解崩
-import acp_client, calltrace, channels, digest, feishu_link, guard, health_alert, knowledge, lifecycle, memory, memory_growth, observe, proc_identity, providers, usage
+import acp_client, calltrace, channels, digest, feishu_link, guard, health_alert, knowledge, lifecycle, memory, memory_growth, observe, proc_identity, providers, retrospect, usage
 import confirm_mode, feature_switch
 from channels.base import Cap, can_update, status_modes
 from channels.feishu import MEMBER_ADDED, MEMBER_DELETED
@@ -1934,10 +1934,14 @@ def _handle_claimed(ev, mid, ctype, uid):
              len(q_model or ""), len(final or ""), time.time() - t0, 1 if a else 0, 1 if partial else 0)
     try: OBS.finish(mid, bool(a), time.time() - t0, traffic=usage.current_traffic())
     except Exception: log.warning("observe answer failed %s", mid)
+    traced_row = None
     try:
-        CALLS.finish(mid, bool(a), time.time() - t0, final if isinstance(final, str) else "",
-                     traffic=usage.current_traffic())
+        traced_row = CALLS.finish(mid, bool(a), time.time() - t0, final if isinstance(final, str) else "",
+                                   traffic=usage.current_traffic())
     except Exception: log.warning("call trace finish failed %s", mid)
+    try:
+        retrospect.consider(CFG, BASE, ev.get("chat_id") or "", ctype, traced_row, REDACT_NAMES, _outbound_send, log)
+    except Exception: log.warning("retrospect failed %s", mid)
     _usage_turn(ev.get("chat_id"), ctype, bool(a) and not partial, q_topic, q_hits,
                 elapsed_ms=int((time.time() - t0) * 1000), partial=partial)
     if partial:

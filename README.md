@@ -181,6 +181,7 @@ A screenshot placeholder, with rules for hiding ids, is in [docs/demo/README.md]
 | `guard.py` | 打码和话题红线 |
 | `memory.py` | 每个群一份长期记忆 |
 | `memory_growth.py` | 记忆成长。默认关。提议后要审批才写入。见 [docs/记忆成长.md](docs/记忆成长.md) |
+| `retrospect.py` | 复盘写回。默认关。点头才写入该群记忆。见 [docs/复盘写回.md](docs/复盘写回.md) |
 | `skills.py` | 技能目录、触发词预放和按需读取；默认关闭 |
 | `skills/` | 每个技能一个文件夹，里面一份 `SKILL.md` |
 | `kb_sync.py` | 知识库先待审、再替换 |
@@ -203,6 +204,7 @@ A screenshot placeholder, with rules for hiding ids, is in [docs/demo/README.md]
 | `docs/断线提醒与晨报.md` | 断线提醒和早晨摘要怎么开，以及飞书要哪些权限 |
 | `docs/用量周报.md` | 用量周报怎么开，统计什么，什么不会写进去 |
 | `docs/调用记录.md` | 每轮调用链写在本机，主人私聊可看，周报只加合计 |
+| `docs/复盘写回.md` | 一轮做完后提议一句短复盘，确认后才写入该群记忆 |
 | `docs/新手开关功能.md` | 主人在私聊里发「设置」，打开或关掉上面几项 |
 | `docs/确认方式.md` | 写入确认：默认点按钮，可改回确认码，不能关掉 |
 | `setup_wizard.py` | 一键安装向导。一次一问，密钥不进文件。见 [docs/一键安装.md](docs/一键安装.md) |

@@ -123,8 +123,8 @@ class Book:
         self._open = {}
 
     def begin(self, mid, text, chat="group", parent="", traffic="", now=None):
-        if not enabled(self.cfg):
-            return
+        # 账本关着也先放在内存。这一轮结束时如果不记，就不落盘。
+        # 复盘要读刚结束的步骤，不能因为没写文件就丢了这一轮。
         now = time.time() if now is None else float(now)
         hits = [0]
         received = clean_text(text, self.names, hits)
@@ -196,8 +196,8 @@ class Book:
         now = time.time() if now is None else float(now)
         with self._lock:
             rec = self._open.pop(str(mid or ""), None)
-        if not rec or not enabled(self.cfg):
-            return
+        if not rec:
+            return None
         hits = [rec.get("hits") or 0]
         outcome = clean_text(result, self.names, hits)
         pin = sum(_count(step.get("tokens_in")) for step in rec["steps"])
@@ -220,7 +220,9 @@ class Book:
         }
         if hits[0] > 0:
             row["redact_hits"] = hits[0]
-        self._append(row, now)
+        if enabled(self.cfg):
+            self._append(row, now)
+        return row
 
     def _append(self, row, now):
         days = settings(self.cfg)["retain_days"]

@@ -2,14 +2,14 @@
 # 不改模型接口、密钥、私聊开放范围。那些仍要去改配置文件。
 # 确认方式见 confirm_mode。默认点按钮，没开通卡片回调时用确认码。确认后备份、写入、检查，再按 stop 然后 start 重启。
 import copy, datetime, hashlib, json, os, random, re, sqlite3, subprocess, sys, time
-import confirm_mode, digest, guard, knowledge, lifecycle, memory_growth, outbound, usage
+import confirm_mode, digest, guard, knowledge, lifecycle, memory_growth, outbound, retrospect, usage
 
 _ID = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
 _ACTOR = re.compile(r"^[A-Za-z0-9_.:-]{1,80}$")
 _CODE = re.compile(r"\d{6}")
 _MENU = re.compile(r"^(?:/设置|/set|/settings|设置|功能开关|开关功能|看设置|打开设置)\s*$", re.I)
-_INDEX = re.compile(r"^第\s*([1-6])\s*项$")
-_DIGIT = re.compile(r"^([1-6])$")
+_INDEX = re.compile(r"^第\s*([1-7])\s*项$")
+_DIGIT = re.compile(r"^([1-7])$")
 _OFF = re.compile(r"不要开|别开|关掉|关闭|停用|关上")
 _ON = re.compile(r"打开|开启|启用|开一下|开开")
 _SENSITIVE = re.compile(
@@ -68,6 +68,14 @@ FEATURES = (
         "aliases": ("技能",),
         "use": "遇到选题、写稿这类事，按现成的步骤来做。",
         "key": "skills.enabled",
+    },
+    {
+        "id": "retrospect",
+        "n": 7,
+        "title": "复盘写回",
+        "aliases": ("复盘写回", "复盘"),
+        "use": "一轮群里的事做完后，写一句短复盘。有人点头才记进这个群。",
+        "key": "memory.retrospect.enabled",
     },
 )
 _BY_ID = {item["id"]: item for item in FEATURES}
@@ -138,6 +146,8 @@ def is_on(cfg, feature_id):
     if feature_id == "skills":
         raw = (cfg or {}).get("skills")
         return isinstance(raw, dict) and bool(raw.get("enabled"))
+    if feature_id == "retrospect":
+        return retrospect.enabled(cfg)
     return False
 
 
@@ -170,6 +180,11 @@ def mutate(data, feature_id, turn_on):
         if on:
             mem["enabled"] = True
         _ensure(mem, "growth")["enabled"] = on
+    elif feature_id == "retrospect":
+        mem = _ensure(data, "memory")
+        if on:
+            mem["enabled"] = True
+        _ensure(mem, "retrospect")["enabled"] = on
     return data
 
 
@@ -236,6 +251,17 @@ def happens(cfg, base, feature_id, turn_on):
         return line
     if feature_id == "skills":
         return "打开之后：不会主动发消息。有人问到相关的事，才按步骤回答。"
+    if feature_id == "retrospect":
+        spec = memory_growth.settings(cfg)
+        if spec.get("deliver") == "group":
+            line = "打开之后：群里一轮做完，会在这个群里发一句短复盘。点头才记进这个群，不点头不记。别的群看不到。私聊里的对话不写进群记忆。"
+        else:
+            line = "打开之后：群里一轮做完，会私聊审批人一句短复盘。点头才记进这个群，不点头不记，也不会把草稿发到群里。别的群看不到。私聊里的对话不写进群记忆。"
+        if not spec.get("approvers"):
+            line += "还没指定谁来点头的话，不会自动提议。"
+        if not ((cfg or {}).get("memory") or {}).get("enabled"):
+            line += "长期记忆会一起打开，不然它记不住。"
+        return line
     return ""
 
 
@@ -250,6 +276,8 @@ def prepare(cfg, base, feature_id):
         return "日历或任务表要先接上。没接上的那一项会说暂时没读到，不会编造。"
     if feature_id == "skills":
         return "技能文件夹里要已经有步骤说明。没有的话，打开了也不会多出新本事。"
+    if feature_id == "retrospect":
+        return "不用先写稿。它只根据刚结束的这一轮写一句，有人点头才记住。"
     if feature_id == "report":
         return "不用先准备资料。"
     if feature_id == "alerts":

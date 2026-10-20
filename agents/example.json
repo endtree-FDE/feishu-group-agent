@@ -117,6 +117,9 @@
       "dedupe_ratio": 0.9,
       "confirm_ttl_sec": 86400,
       "forget_ttl_sec": 300
+    },
+    "retrospect": {
+      "enabled": false
     }
   },
   "skills": {

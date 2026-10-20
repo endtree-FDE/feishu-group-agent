@@ -138,7 +138,9 @@
 - `per_user`：按人记一份档案。**先保持 `false`。** 个人记忆默认不开启。
 - `growth`：从近期对话里提议新的长期记忆。**默认关。** 不写或 `enabled` 为 `false` 时，不调用模型，不发提案，`/忘记` 仍是立刻删除。打开之后的审批、命令和配置键见 [docs/记忆成长.md](../docs/记忆成长.md)。
 
-`agents/example.json` 里 `memory.growth.enabled` 仍是 `false`。旧配置没有这一段时，行为和以前一样。
+- `retrospect`：一轮群聊做完后，写一句「做了什么、哪里出错、下次怎么做」，走记忆成长的审批。**默认关。** 不写或 `enabled` 为 `false` 时不提议。长期记忆也要开着；从私聊「设置」打开时会一起打开。审批人仍用 `memory.growth.approver_open_ids`。没人点头不写入。说明见 [docs/复盘写回.md](../docs/复盘写回.md)。
+
+`agents/example.json` 里 `memory.growth.enabled` 和 `memory.retrospect.enabled` 仍是 `false`。旧配置没有这两段时，行为和以前一样。
 
 ## 技能 skills
 
