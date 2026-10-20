@@ -8,6 +8,15 @@
 
 ## [Unreleased]
 
+### 添加
+
+- 可替换的模型提供方。不写 `model` 时仍是 Cursor（`cursor-agent`，配置里 `agent.mode` 为 `acp` 时仍是常驻进程），行为与现在相同。`model.provider` 可写成 `openai_compatible`（OpenAI Chat Completions 兼容，含 DeepSeek、通义、Kimi、OpenRouter、本机 Ollama）或 `anthropic`（Claude Messages API）。地址、模型名、温度、超时和最大 token 写在 `model` 里。密钥只写环境变量名（`model.api_key_env`），不能写进配置。说明和四份示例见 [docs/换模型.md](docs/换模型.md)。
+- 这两个新接口走原来的工具循环：读群历史和知识库、记忆提议、写入确认码。没有自带联网。可选 `search`（Tavily 或 SearXNG）默认关，打开后用 `web_search`。流式进度仍在；有思考才放收起的思考摘要，没有就跳过。多轮上下文仍按话题拼进提示词。接口若返回 token 数，会计入用量周报的「模型用量」，没有则不写这一行。
+
+### 安全
+
+- 密钥不进日志。`python checks/check_config.py`、`--check` 和 `--doctor` 在密钥变量没设置时失败，并说明在当前窗口怎么设。只读回答和白名单写入确认码不变。
+
 ## [0.6.0] - 2026-10-20
 
 下面是用户能看到的变化。没写进旧配置的键，仍用各项自己的默认值。发布说明见 [docs/release-0.6.0.md](docs/release-0.6.0.md)。这一版新加的开关默认都关着。

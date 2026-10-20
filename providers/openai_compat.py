@@ -4,7 +4,8 @@ import json, os, queue, re, socket, threading, time, urllib.error, urllib.reques
 
 import acp_client
 from providers.base import PartialText, Provider, emit
-from providers.presets import preset_id, resolve_agent
+from providers.presets import preset_id
+from providers.settings import how_to_set, http_spec, key_required, note_usage
 
 _RETRY_HTTP = {408, 409, 429, 500, 502, 503, 504}
 
@@ -37,8 +38,8 @@ class OpenAICompatProvider(Provider):
             self.log.info("model preset %s", pid)
 
     def _agent(self):
-        # 预设只补空着的地址、模型名和变量名。调用方配置原样留着，这里不读密钥。
-        return resolve_agent(self.cfg)
+        # 预设只补空着的地址、模型名和变量名。model.* 盖过预设。这里不读密钥。
+        return http_spec(self.cfg)
 
     def _model(self):
         return (self._agent().get("model") or "").strip()
@@ -92,6 +93,8 @@ class OpenAICompatProvider(Provider):
             return False
         if isinstance(obj, dict) and obj.get("error"):
             raise HttpFail(obj.get("status") or 400)
+        if isinstance(obj, dict) and isinstance(obj.get("usage"), dict):
+            state["usage"] = obj.get("usage")
         choices = obj.get("choices") if isinstance(obj, dict) else None
         if not choices or not isinstance(choices[0], dict):
             return False
@@ -123,13 +126,9 @@ class OpenAICompatProvider(Provider):
 
     def _stream_once(self, prompt, on_stage):
         max_rt, stall, max_chars = self._limits()
-        body = {
-            "model": self._model(),
-            "messages": [{"role": "user", "content": prompt}],
-            "stream": True,
-        }
+        body = self._body([{"role": "user", "content": prompt}])
         req = self._request(body)
-        connect_timeout = min(30.0, max(5.0, stall))
+        connect_timeout = self._connect_timeout(stall)
         try:
             resp = urllib.request.urlopen(req, timeout=connect_timeout)
         except urllib.error.HTTPError as e:
@@ -200,6 +199,7 @@ class OpenAICompatProvider(Provider):
             except Exception:
                 pass
         part = state["text"].strip()
+        note_usage(state.get("usage"))
         if why:
             self.log.error("openai_compat stopped: %s events=%d partial_chars=%d", why, events, len(part))
             return PartialText(part[:max_chars])
@@ -234,7 +234,7 @@ class OpenAICompatProvider(Provider):
         if not self._base() or not self._model():
             self.log.error("openai_compat missing base_url or model")
             return None
-        if not self._env_name() or not self._key():
+        if key_required(self.cfg) and (not self._env_name() or not self._key()):
             self.log.error("openai_compat missing env %s", self._env_name() or "(api_key_env)")
             return None
         retries = int(self._agent().get("network_retries", 2) or 0)
@@ -256,6 +256,22 @@ class OpenAICompatProvider(Provider):
                 self.log.error("openai_compat http=%s model=%s", e.code, self._model())
                 return None
         return None
+
+    def _body(self, messages):
+        spec = self._agent()
+        body = {"model": self._model(), "messages": messages, "stream": True,
+                "stream_options": {"include_usage": True}}
+        if spec.get("temperature") is not None:
+            body["temperature"] = spec["temperature"]
+        if spec.get("max_tokens"):
+            body["max_tokens"] = spec["max_tokens"]
+        return body
+
+    def _connect_timeout(self, stall):
+        raw = self._agent().get("timeout_sec")
+        if raw:
+            return float(raw)
+        return min(30.0, max(5.0, stall))
 
     def _probe(self, max_tokens):
         body = {"model": self._model(), "messages": [{"role": "user", "content": "ping"}], "stream": True}
@@ -282,15 +298,18 @@ class OpenAICompatProvider(Provider):
                 pass
 
     def check_items(self):
+        label = self.name or "openai_compat"
         env_name = self._env_name()
         if not self._base():
-            return [("openai_compat", False, "未配置 agent.base_url")]
+            return [(label, False, "未配置 agent.base_url")]
         if not self._model():
-            return [("openai_compat", False, "未配置 agent.model")]
-        if not env_name:
-            return [("openai_compat", False, "未配置 agent.api_key_env（只写变量名，不写密钥）")]
-        if not self._key():
-            return [("openai_compat", False, "环境变量 %s 未设置" % env_name)]
+            return [(label, False, "未配置 agent.model")]
+        if key_required(self.cfg):
+            if not env_name:
+                return [(label, False, "未配置 agent.api_key_env（只写变量名，不写密钥）")]
+            if not self._key():
+                return [(label, False, "环境变量 %s 未设置。%s" % (env_name, how_to_set(env_name)))]
+        ready = "环境变量 %s 已设置" % env_name if env_name else "本机地址不要求密钥"
         try:
             try:
                 self._probe(1)
@@ -299,7 +318,7 @@ class OpenAICompatProvider(Provider):
                     raise
                 self._probe(None)
         except HttpFail as e:
-            return [("openai_compat", False, "环境变量 %s 已设置；短请求 HTTP %s" % (env_name, e.code))]
+            return [(label, False, "%s；短请求 HTTP %s" % (ready, e.code))]
         except Exception as e:
-            return [("openai_compat", False, "环境变量 %s 已设置；短请求失败 %s" % (env_name, self._redact(e)[:200]))]
-        return [("openai_compat", True, "环境变量 %s 已设置；短请求通过 model=%s" % (env_name, self._model()))]
+            return [(label, False, "%s；短请求失败 %s" % (ready, self._redact(e)[:200]))]
+        return [(label, True, "%s；短请求通过 model=%s" % (ready, self._model()))]

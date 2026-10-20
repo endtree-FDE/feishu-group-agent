@@ -57,6 +57,7 @@ flowchart LR
 - 技能默认关着。打开后，提示词里只放一行目录，命中触发词才放入步骤。创作流程（选题、口播、分镜、提示词、策划书、复盘）也在 `skills/` 里，默认不启用；要只用这几份时，在配置里点名。见 [docs/技能.md](docs/技能.md)。
 - 常驻模式默认关着。`agent.mode` 写成 `acp` 后，Cursor 只启动一次。见 [docs/常驻模式.md](docs/常驻模式.md)。
 - 模型可以换成你自己的账号：`model_provider` 写成 `openai_compat`，密钥放在环境变量。见 [docs/模型接口.md](docs/模型接口.md)。拿去参赛时的字段对照见 [docs/用本框架参赛.md](docs/用本框架参赛.md)。
+- 也可以写 `model.provider` 换成 OpenAI 兼容接口或 Claude；不写时仍是 Cursor，行为与以前一样。见 [docs/换模型.md](docs/换模型.md)。
 
 ## 快速开始
 

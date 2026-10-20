@@ -42,7 +42,7 @@ SCOPE_HINT = {
     "calendar_update": "calendar:calendar.event:update", "calendar_delete": "calendar:calendar.event:delete",
     "base_create": "base:record:create", "merge_forward": "im:message:readonly",
 }
-READ_TOOLS = {"history", "docs_read", "docs_search", "calendar_read", "base_read", "message_attachment", "kb_read", "kb_search"}
+READ_TOOLS = {"history", "docs_read", "docs_search", "calendar_read", "base_read", "message_attachment", "kb_read", "kb_search", "web_search"}
 _KB_EXT = {".md", ".txt", ".markdown"}
 WRITE_TOOLS = {"docs_create", "docs_append", "calendar_create", "calendar_create_batch", "calendar_update", "calendar_delete", "base_create"}
 _CAL_FOLLOW = {"calendar_create_batch", "calendar_update", "calendar_delete"}
@@ -191,6 +191,10 @@ class Tools:
         if name == "kb_search":
             import knowledge
             return knowledge.enabled(self.cfg)
+        # 网页搜索默认关。只有 search.enabled 才出现，避免改掉原来的提示词。
+        if name == "web_search":
+            import search_backend
+            return search_backend.enabled(self.cfg)
         # 旧配置没有 kb_read 时默认可以读知识库。写成 enabled false 才关掉。
         if name == "kb_read" and name not in self.t: return True
         spec = self.t.get(name)
@@ -324,6 +328,14 @@ class Tools:
         """只读技能正文。名字必须在启动时扫到的目录里，不拼接用户给的路径。"""
         try: return self.skills.read((a or {}).get("name"))
         except skills.SkillError as e: raise ToolError(str(e))
+
+    def _web_search(self, a, ctx):
+        """没有自带联网的模型用这个查公开网页。默认关。密钥不进日志。"""
+        import search_backend
+        try:
+            return search_backend.run(self.cfg, a or {}, self.names)
+        except search_backend.SearchError as e:
+            raise ToolError(e.user_msg)
 
     def _kb_search(self, a, ctx):
         """只查当前会话自己的索引。参数里的群号一律忽略。"""

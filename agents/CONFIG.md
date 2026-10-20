@@ -8,7 +8,7 @@
 2. 「小助手」「小李」只是例子，改成你的机器人名字和同事的称呼。
 3. **不要**在这个文件里写应用密钥（App Secret）。密钥只在你自己电脑上、运行初始化命令时输入一次，见 `docs/新建智能体.md`。
 
-默认走这台电脑上的 Cursor：模型名字写在 `agent.model`，默认是 `grok-4.7-high-fast`，额度算已经执行过 `cursor-agent login` 的那个账号。要换成自己的模型账号，把 `model_provider` 写成 `openai_compat`，密钥放在环境变量里。配置里不写账号，也不要写别人的账号。见 [docs/模型接口.md](../docs/模型接口.md)。
+默认走这台电脑上的 Cursor：模型名字写在 `agent.model`，默认是 `grok-4.7-high-fast`，额度算已经执行过 `cursor-agent login` 的那个账号。要换成自己的模型账号，把 `model_provider` 写成 `openai_compat`，或改用 `model.provider`（`openai_compatible` 或 `anthropic`）。密钥放在环境变量里。配置里不写账号，也不要写别人的账号。见 [docs/换模型.md](../docs/换模型.md) 和 [docs/模型接口.md](../docs/模型接口.md)。
 
 下面按文件里的顺序说明每一项。
 
