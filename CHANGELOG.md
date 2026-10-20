@@ -4,9 +4,13 @@
 
 程序不读取 `VERSION` 或本文件。删掉它们时，机器人的行为与现在相同。
 
-当前 `VERSION` 是 `0.6.0`，发布日期是 2026-10-20。发布说明见 [docs/release-0.6.0.md](docs/release-0.6.0.md)。从 0.5.0 升上来见 [docs/升级到0.6.0.md](docs/升级到0.6.0.md)。说明里不要写密钥、群号、open_id 或客户名。
+当前 `VERSION` 是 `0.7.0`，发布日期是 2026-10-20。发布说明见 [docs/release-0.7.0.md](docs/release-0.7.0.md)。从 0.6.0 升上来见 [docs/升级到0.7.0.md](docs/升级到0.7.0.md)。说明里不要写密钥、群号、open_id 或客户名。
 
 ## [Unreleased]
+
+## [0.7.0] - 2026-10-20
+
+下面是用户能看到的变化。没写进旧配置的键，仍用各项自己的默认值。这一版新加的键默认关着，或不写就保持 0.6.0 的行为。发布说明见 [docs/release-0.7.0.md](docs/release-0.7.0.md)。
 
 ### 添加
 
@@ -21,6 +25,8 @@
 
 - 密钥不进日志。`python checks/check_config.py`、`--check` 和 `--doctor` 在密钥变量没设置时失败，并说明在当前窗口怎么设。只读回答和白名单写入确认码不变。
 - 私聊开关只改用量周报、知识检索、记忆成长、早间待办、断线提醒、技能。不能改模型配置、密钥和谁可以私聊。
+
+旧配置不用改。从 0.6.0 升上来见 [docs/升级到0.7.0.md](docs/升级到0.7.0.md)。
 
 ## [0.6.0] - 2026-10-20
 
@@ -120,7 +126,9 @@
 
 ## English
 
-The version is the `VERSION` file (`0.6.0`), released on 2026-10-20. Do not put secrets or Feishu IDs in release notes. The program does not read this file. 0.6.0 adds answer-quality evals, an optional weekly usage report, optional per-chat knowledge search, and optional memory growth. All four stay off when omitted. Evals do not connect to Feishu. The report is a weekly owner DM with totals only. Knowledge search indexes one chat and cites sources. Memory growth writes nothing until an approver confirms. Upgrade and rollback steps are in `docs/升级到0.6.0.md`. Rolling back to v0.5.0 (`e842684`) drops these four. This note does not create the tag.
+The version is the `VERSION` file (`0.7.0`), released on 2026-10-20. Do not put secrets or Feishu IDs in release notes. The program does not read this file. Omitting `model` keeps the Cursor path from 0.6.0. `search` stays off when omitted. Owners can toggle the existing usage report, knowledge search, memory growth, morning digest, disconnect alerts, and skills in a private chat. That switch cannot change model settings, secrets, or who may use private chat. Upgrade and rollback steps are in `docs/升级到0.7.0.md`. Rolling back to v0.6.0 (`4da9e42`) drops the model providers and the private-chat switch. This note does not create the tag.
+
+The previous version is the `VERSION` file (`0.6.0`), released on 2026-10-20. Do not put secrets or Feishu IDs in release notes. The program does not read this file. 0.6.0 adds answer-quality evals, an optional weekly usage report, optional per-chat knowledge search, and optional memory growth. All four stay off when omitted. Evals do not connect to Feishu. The report is a weekly owner DM with totals only. Knowledge search indexes one chat and cites sources. Memory growth writes nothing until an approver confirms. Upgrade and rollback steps are in `docs/升级到0.6.0.md`. Rolling back to v0.5.0 (`e842684`) drops these four. This note does not create the tag.
 
 The previous version is the `VERSION` file (`0.5.0`), released on 2026-10-19. Do not put secrets or Feishu IDs in release notes. The program does not read this file. Missing keys keep the previous behavior. 0.5.0 adds six creative-workflow skills, a channel adapter (Feishu is the first implementation; WeCom is an experimental skeleton and does not connect), optional disconnect alerts, and an optional morning digest. `skills.enabled`, `alerts.enabled`, and `digest.enabled` stay false when omitted. An empty `skills.only` still means every valid skill once skills are turned on. Writes still need the allow-list and a confirmation code. Alert DMs and digest posts go through the channel `push_text` method. On Feishu that is `im +messages-send` and does not start the event consumer. The digest posts at most once per local day per configured chat and never mentions everyone. Upgrade and rollback steps are in `docs/升级到0.5.0.md`. Rolling back to v0.4.1 (`deb498f`) also drops the channel adapter and the creative skills.
 
