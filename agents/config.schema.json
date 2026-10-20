@@ -445,6 +445,15 @@
         "preload_budget_chars": {
           "type": "integer",
           "minimum": 0
+        },
+        "evolve": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "根据调用和复盘提议技能下一版。不写或 enabled 为 false 时不提议，也不改 SKILL.md。",
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "cases": {"type": "array", "items": {"type": "string"}}
+          }
         }
       }
     },

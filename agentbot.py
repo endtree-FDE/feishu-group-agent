@@ -15,7 +15,7 @@ import json, os, re, subprocess, sys, time, logging, collections, threading, sql
 
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import utf8io  # 管道上的标准流改为 UTF-8，避免中文 Windows 的代码页把日志解崩
-import acp_client, calltrace, channels, digest, feishu_link, guard, health_alert, knowledge, lifecycle, memory, memory_growth, observe, proc_identity, providers, retrospect, usage
+import acp_client, calltrace, channels, digest, feishu_link, guard, health_alert, knowledge, lifecycle, memory, memory_growth, observe, proc_identity, providers, retrospect, skill_evolve, usage
 import confirm_mode, feature_switch
 from channels.base import Cap, can_update, status_modes
 from channels.feishu import MEMBER_ADDED, MEMBER_DELETED
@@ -1460,6 +1460,9 @@ def _finish_switch(mid, switched):
                 CHANNEL.reply_message(mid, "interactive", card, ("sw_" + str(mid))[:50], False)
             except Exception:
                 log.warning("switch card failed")
+    if switched.get("reload_skills"):
+        try: TOOLS.skills._scan()
+        except Exception: log.warning("skill reload failed")
     if switched.get("restart") and not DRY:
         try:
             feature_switch.launch_reloader(BASE, CFG_PATH)
@@ -1724,6 +1727,7 @@ def _direct_command(q):
     if GMEM.is_command(q): return True
     if memory_growth.is_command(CFG, q): return True
     if calltrace.looks_like(q): return True
+    if skill_evolve.looks_like(q): return True
     if q in ("/help", "帮助") or (len(q) <= 30 and HELP_RX.search(q)): return True
     if usage.enabled(CFG) and q == "/report": return True
     return False
@@ -1822,6 +1826,9 @@ def _handle_claimed(ev, mid, ctype, uid):
     switched = feature_switch.handle_text(CFG, BASE, q, ctx, REDACT_NAMES, cfg_path=CFG_PATH)
     if switched is not None:
         _finish_switch(mid, switched); return
+    evolved = skill_evolve.handle_text(CFG, BASE, q, ctx, REDACT_NAMES, owner=feature_switch.is_manager(CFG, uid))
+    if evolved is not None:
+        _finish_switch(mid, evolved); return
     if q in ("/new", "/reset", "新话题"): forget(sess); reply(mid, "好的，已清空本话题的上下文。"); return
     if q in ("/状态", "/status", "状态") and _status_cmd_on():
         reply(mid, status_text(sess, ev.get("chat_id") or "")); return
@@ -1939,9 +1946,13 @@ def _handle_claimed(ev, mid, ctype, uid):
         traced_row = CALLS.finish(mid, bool(a), time.time() - t0, final if isinstance(final, str) else "",
                                    traffic=usage.current_traffic())
     except Exception: log.warning("call trace finish failed %s", mid)
+    issued = []
     try:
-        retrospect.consider(CFG, BASE, ev.get("chat_id") or "", ctype, traced_row, REDACT_NAMES, _outbound_send, log)
+        issued = retrospect.consider(CFG, BASE, ev.get("chat_id") or "", ctype, traced_row, REDACT_NAMES, _outbound_send, log) or []
     except Exception: log.warning("retrospect failed %s", mid)
+    try:
+        skill_evolve.observe(CFG, BASE, traced_row, REDACT_NAMES, [item.get("content") or "" for item in issued if isinstance(item, dict)])
+    except Exception: log.warning("skill evolve note failed %s", mid)
     _usage_turn(ev.get("chat_id"), ctype, bool(a) and not partial, q_topic, q_hits,
                 elapsed_ms=int((time.time() - t0) * 1000), partial=partial)
     if partial:

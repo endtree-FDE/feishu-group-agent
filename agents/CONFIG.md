@@ -159,7 +159,9 @@
 
 预放的正文放在这一题会变的部分，紧挨在问题前面。技能目录和群档案仍在前面，不跟着这一题变。常驻模式下冻住的也只是群档案。一题最多预放 1 个；命中多个时取得分最高的，得分是命中关键词的字数相加。怎么写 `triggers` 见 [docs/技能.md](../docs/技能.md)。
 
-升级旧机器人时先保持 `enabled` 为 `false`。`agents/example.json` 里这项仍是 `false`，`only` 仍是 `[]`。不改这两项时，行为和以前一样：技能关着，提示词里没有目录。
+- `evolve`：根据失败的调用和复盘，提议技能的下一版。**默认关。** 不写或 `enabled` 为 `false` 时不记信号，也不改 `SKILL.md`。打开后要主人私聊发「改进技能」。程序会跑 `evals/run.py`（假模型，默认带 `ci` 标记的整套题）。分数变低不替换。分数没有变低，还要用原来的确认方式点头。`cases` 不写就跑整套；写成用例编号就只跑那几条。回滚发「回滚技能 名字」，确认后回到上一版。不执行技能里的脚本。说明见 [docs/技能自动改进.md](../docs/技能自动改进.md)。
+
+升级旧机器人时先保持 `enabled` 为 `false`。`agents/example.json` 里这项和 `evolve.enabled` 仍是 `false`，`only` 仍是 `[]`。不改这些项时，行为和以前一样：技能关着，提示词里没有目录，也不会改技能文件。
 
 自带的技能：`progress-table`（查进度表，只读多维表格）、`meeting-minutes`（整理会议纪要，只组织文字）。另外六份是创作流程，同样要自己打开：`topic-ideation`（选题打分）、`short-video-script`（口播稿）、`storyboard`（分镜表）、`aigc-prompt-pack`（不绑定工具的提示词）、`creative-brief`（项目策划书）、`post-mortem`（复盘）。步骤和每份技能的短对话见 [docs/技能.md](../docs/技能.md)。
 

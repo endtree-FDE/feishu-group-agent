@@ -128,7 +128,10 @@
     "only": [],
     "index_budget_chars": 800,
     "preload": true,
-    "preload_budget_chars": 3000
+    "preload_budget_chars": 3000,
+    "evolve": {
+      "enabled": false
+    }
   },
   "p2p": {
     "allow_open_ids": [],
