@@ -357,6 +357,7 @@ python checks/check_config.py agents/example.json
 | `ttl_sec` | 按钮有效秒数。不写是 `600`（10 分钟）。 |
 | `code_ttl_sec` | 确认码有效秒数。不写时用上面的 `write.confirm_ttl_sec`。 |
 | `code_digits` | 确认码位数，4 到 8。不写是 `6`。 |
+| `card_callback` | `auto`（不写也是这个）、`on`、`off`。`auto` 会在启动前看飞书有没有开通卡片回调；没开通就不起这个接收进程，确认改用确认码，并且只私聊提醒主人一次。`on` 总是去启动，没订阅则退出后不再重启。`off` 不启动，确认用确认码。旧配置不用加这项。 |
 
 ## 进度卡片 progress
 

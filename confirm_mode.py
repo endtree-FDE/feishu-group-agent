@@ -97,6 +97,31 @@ def wants_cards(cfg):
     return wants_button(configured_mode(cfg)) or wants_button(high_risk_mode(cfg))
 
 
+def card_callback_setting(cfg):
+    """confirm.card_callback。不写是 auto。on 总是去启动，off 不启动，写错也按 auto。"""
+    text = str(_block(cfg).get("card_callback", "auto") or "auto").strip().lower()
+    if text in ("on", "true", "1", "yes"):
+        return "on"
+    if text in ("off", "false", "0", "no", "none"):
+        return "off"
+    return "auto"
+
+
+def wants_card_process(cfg):
+    """off 时即使选了点按钮也不启动卡片接收进程。auto 和 on 在配置层面仍算要启动，启动前再探测。"""
+    if card_callback_setting(cfg) == "off":
+        return False
+    return wants_cards(cfg)
+
+
+def drop_unsubscribed_card(keys, setting, probe):
+    """auto 且探测明确没订阅时，这次不要把卡片事件放进要启动的列表。on 不去掉。"""
+    keys = list(keys or [])
+    if setting == "off" or (setting == "auto" and probe is False):
+        return [key for key in keys if key != CARD_EVENT]
+    return keys
+
+
 def confirm_pattern(cfg):
     n = code_digits(cfg)
     return re.compile(r"^(确认|取消)\s*(\d{%d})$" % n)
@@ -107,8 +132,8 @@ def code_fullmatch(cfg, code):
     return bool(re.fullmatch(r"\d{%d}" % n, str(code or "")))
 
 
-def cards_ready(base=None, env=None):
-    """测试可用 AGENTBOT_CARD_CALLBACK=1/0 强制。否则看本机有没有连上卡片回调。"""
+def card_note_state(base=None, env=None):
+    """True 连上过，False 明确没有，None 还没有记录。测试可用 AGENTBOT_CARD_CALLBACK=1/0 强制。"""
     env = os.environ if env is None else env
     flag = str(env.get("AGENTBOT_CARD_CALLBACK") or "")
     if flag == "1":
@@ -116,14 +141,24 @@ def cards_ready(base=None, env=None):
     if flag == "0":
         return False
     if not base:
-        return False
+        return None
     path = os.path.join(base, "state", "card_callback.json")
     try:
         with open(path, encoding="utf-8") as handle:
             data = json.load(handle)
     except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict) or "ok" not in data:
+        return None
+    return bool(data.get("ok"))
+
+
+def cards_ready(base=None, env=None, cfg=None):
+    """只有明确连上过才算能点按钮。没有记录和明确没开通都先用确认码。
+    confirm.card_callback 为 off 时一律不能点按钮。"""
+    if card_callback_setting(cfg) == "off":
         return False
-    return bool(isinstance(data, dict) and data.get("ok"))
+    return card_note_state(base, env) is True
 
 
 def note_cards(base, ok, reason=""):
@@ -157,6 +192,86 @@ def denied_line(line):
     return bool(_DENY.search(text))
 
 
+_UNSUB = re.compile(r"failed_precondition|not subscribed|requires callbacks|未订阅|未开通", re.I)
+
+
+def unsubscribed_exit(rc, text):
+    """卡片接收进程因为后台没订阅而退出。日志里有 failed_precondition / not subscribed，或者退出码是 2。
+    断线、超时不算。消息长连接退出码是 2 时不要拿这个函数去停它。"""
+    if _UNSUB.search(text or ""):
+        return True
+    try:
+        return int(rc) == 2
+    except (TypeError, ValueError):
+        return False
+
+
+def interpret_probe(rc, text, still_running):
+    """探测结果。False 明确没订阅。True 还在跑或已经连上。None 看不出来，调用方仍可去启动。"""
+    if unsubscribed_exit(rc, text):
+        return False
+    if still_running or ready_line(text):
+        return True
+    return None
+
+
+def card_notice_text():
+    """私聊主人的那一句。不带编号，也不带日志原文。"""
+    return (
+        "写入确认先改用确认码。"
+        "这个应用还没开通卡片回调，所以不会反复重连卡片事件。"
+        "收消息的长连接不受影响，也不会因此发断线提醒。\n"
+        + CARD_STEPS
+    )
+
+
+def _notice_path(base):
+    return os.path.join(base, "state", "card_notice.json")
+
+
+def notice_sent(base):
+    if not base:
+        return False
+    try:
+        with open(_notice_path(base), encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return False
+    return bool(isinstance(data, dict) and data.get("sent"))
+
+
+def mark_notice(base):
+    if not base:
+        return
+    folder = os.path.join(base, "state")
+    try:
+        os.makedirs(folder, exist_ok=True)
+        tmp = os.path.join(folder, "card_notice.json.tmp")
+        with open(tmp, "w", encoding="utf-8") as handle:
+            json.dump({"sent": True, "ts": time.time()}, handle)
+        os.replace(tmp, _notice_path(base))
+    except OSError:
+        pass
+
+
+def deliver_card_notice(base, owners, send):
+    """send(owner) 返回 ok / unknown / fail。已经提醒过就不再发。发出去或结果看不懂才记一笔，避免再发一条。
+    没有主人时不记，下次配了主人还可以发。返回这次实际发出的人数。"""
+    if not base or notice_sent(base):
+        return []
+    sent = []
+    for owner in owners or []:
+        try:
+            result = send(owner)
+        except Exception:
+            result = "fail"
+        if result in ("ok", "unknown", True):
+            sent.append(owner)
+    if sent:
+        mark_notice(base)
+    return sent
+
+
 def effective_mode(cfg, high, cards_ok):
     mode = high_risk_mode(cfg) if high else configured_mode(cfg)
     if cards_ok or not wants_button(mode):
@@ -178,7 +293,7 @@ def ttl_for(cfg, mode, fallback):
 
 
 def plan(cfg, base, high=False, env=None):
-    cards = cards_ready(base, env)
+    cards = cards_ready(base, env, cfg)
     mode = effective_mode(cfg, high, cards)
     fallback = fell_back(cfg, high, cards)
     # 确认码模式也留记号。这样误点旧卡片时能对上这次操作并拒绝，而不是执行。
@@ -390,7 +505,7 @@ def plain_mode(mode):
 
 def mode_help(cfg, base, env=None):
     chosen = configured_mode(cfg)
-    cards = cards_ready(base, env)
+    cards = cards_ready(base, env, cfg)
     live = effective_mode(cfg, False, cards)
     lines = [
         "确认不能关掉。可以换下面四种里的一种。",
@@ -447,7 +562,7 @@ def refusing_off(text):
 
 
 def menu_line(cfg, base, env=None):
-    live = effective_mode(cfg, False, cards_ready(base, env))
+    live = effective_mode(cfg, False, cards_ready(base, env, cfg))
     return "确认方式现在是%s。回复「确认方式」可以更换。确认不能关掉。" % plain_mode(live)
 
 

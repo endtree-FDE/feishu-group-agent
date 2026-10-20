@@ -4,9 +4,26 @@
 
 程序不读取 `VERSION` 或本文件。删掉它们时，机器人的行为与现在相同。
 
-当前 `VERSION` 是 `0.8.0`，发布日期是 2026-10-20。发布说明见 [docs/release-0.8.0.md](docs/release-0.8.0.md)。从 0.7.0 升上来见 [docs/升级到0.8.0.md](docs/升级到0.8.0.md)。说明里不要写密钥、群号、open_id 或客户名。
+当前 `VERSION` 是 `0.8.1`，发布日期是 2026-10-20。发布说明见 [docs/release-0.8.1.md](docs/release-0.8.1.md)。从 0.8.0 换上来的步骤也写在那份说明里。说明里不要写密钥、群号、open_id 或客户名。
 
 ## [Unreleased]
+
+## [0.8.1] - 2026-10-20
+
+下面是用户能看到的变化。没写进旧配置的键，仍用各项自己的默认值。发布说明见 [docs/release-0.8.1.md](docs/release-0.8.1.md)。
+
+### 修复
+
+- 飞书后台没开通卡片回调时，`card.action.trigger` 接收进程会以 `failed_precondition`（退出码 2）马上退出。0.8.0 大约每 60 秒重启一次，并且任何接收进程退出都会把共用的连接状态记成断线。收消息的长连接还在，断线提醒却反复发给主人。
+- 连接状态按接收进程分开记。只有 `im.message.receive_v1` 断了才算机器人断线。卡片进程异常只记一条警告，不发断线提醒。
+- 启动前先探测卡片回调。已经能确认没订阅（`failed_precondition`、`not subscribed` 或退出码 2）时，这次运行不再启动、也不再重启卡片进程。确认自动改回确认码，并只私聊提醒主人一次，说明怎么开通。
+- `--doctor` 会说明：没开通卡片回调不算断线，接收进程数量也不把 `card.action.trigger` 算进去。
+
+### 添加
+
+- `confirm.card_callback`：`auto`（默认）、`on`、`off`。`on` 仍会去启动，没订阅则退出后不再重启。`off` 不启动卡片进程，确认用确认码。
+
+旧配置不用改。没写这项时按 `auto`。本说明不打 tag。
 
 ## [0.8.0] - 2026-10-20
 
@@ -147,7 +164,9 @@
 
 ## English
 
-The version is the `VERSION` file (`0.8.0`), released on 2026-10-20. Do not put secrets or Feishu IDs in release notes. The program does not read this file. This release adds a one-question-at-a-time install wizard and makes write confirmation a card button by default. `confirm.mode` can be `button`, `code`, `button_or_code`, or `button_and_code`. Confirmation cannot be turned off. If the app has not subscribed to `card.action.trigger` on the long connection, new writes fall back to the confirmation code and `--doctor` warns with the enable steps. Old config files do not need new keys. Upgrade steps are in `docs/升级到0.8.0.md`. Rolling back to `26f37c5` keeps the wizard and drops the card buttons; that commit still says `VERSION` `0.7.0`. This note does not create the tag.
+The version is the `VERSION` file (`0.8.1`), released on 2026-10-20. Do not put secrets or Feishu IDs in release notes. The program does not read this file. If `card.action.trigger` is not subscribed, that consumer is not restarted, confirmation falls back to the code, and the owner is notified once. Only the message consumer marks the bot offline. `--doctor` does not count the card consumer until callbacks are connected. `confirm.card_callback` defaults to `auto`. Old config files do not need new keys. Rollback target is `8604f62` (`0.8.0`). This note does not create the tag.
+
+The previous version is the `VERSION` file (`0.8.0`), released on 2026-10-20. Do not put secrets or Feishu IDs in release notes. The program does not read this file. This release adds a one-question-at-a-time install wizard and makes write confirmation a card button by default. `confirm.mode` can be `button`, `code`, `button_or_code`, or `button_and_code`. Confirmation cannot be turned off. If the app has not subscribed to `card.action.trigger` on the long connection, new writes fall back to the confirmation code and `--doctor` warns with the enable steps. Old config files do not need new keys. Upgrade steps are in `docs/升级到0.8.0.md`. Rolling back to `26f37c5` keeps the wizard and drops the card buttons; that commit still says `VERSION` `0.7.0`. This note does not create the tag.
 
 The previous version is the `VERSION` file (`0.7.0`), released on 2026-10-20. Do not put secrets or Feishu IDs in release notes. The program does not read this file. Omitting `model` keeps the Cursor path from 0.6.0. `search` stays off when omitted. Owners can toggle the existing usage report, knowledge search, memory growth, morning digest, disconnect alerts, and skills in a private chat. That switch cannot change model settings, secrets, or who may use private chat. Upgrade and rollback steps are in `docs/升级到0.7.0.md`. Rolling back to v0.6.0 (`4da9e42`) drops the model providers and the private-chat switch. This note does not create the tag.
 
