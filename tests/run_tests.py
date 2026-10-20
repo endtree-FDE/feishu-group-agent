@@ -1445,8 +1445,9 @@ print('KEYS ' + json.dumps(agentbot.consumer_keys()))
 print('CMD ' + json.dumps(agentbot.consume_argv('im.message.receive_v1')))
 """], cwd=FW, capture_output=True, text=True, encoding="utf-8", errors="replace", env=dict(os.environ, CFG=CP), timeout=30)
 _ko = (_keys.stdout or "") + (_keys.stderr or "")
-check("默认仍只订阅消息事件；进群事件命令本身带 --as bot",
-      '["im.message.receive_v1"]' in _ko and "im.chat.member.bot.added_v1" not in _ko.split("CMD")[0]
+check("默认订阅消息和卡片回调；没开自动认群时不订进群事件",
+      "im.message.receive_v1" in _ko and "card.action.trigger" in _ko.split("CMD")[0]
+      and "im.chat.member.bot.added_v1" not in _ko.split("CMD")[0]
       and '"event"' in _ko and '"consume"' in _ko and '"--as"' in _ko and '"bot"' in _ko, _ko)
 
 # ---------- 对抗性安全（假模型 / 假 ACP，不连真飞书） ----------
@@ -2141,7 +2142,14 @@ o = run([_pw3], name="pw_old")
 _old_code = (_re.search(r"确认 (\d{6})", o) or [None, None])[1]
 if _old_code:
     _pdb = sqlite3.connect(os.path.join(T, "state", "state.db"))
-    _pdb.execute("update pending_writes set ts=? where code=?", (time.time() - 100000, _old_code)); _pdb.commit(); _pdb.close()
+    _row = _pdb.execute("select payload from pending_writes where code=?", (_old_code,)).fetchone()
+    _payload = json.loads(_row[0]) if _row and _row[0] else {}
+    if not isinstance(_payload, dict): _payload = {}
+    _old_ts = time.time() - 100000
+    _payload["ts"] = _old_ts
+    _payload["expires"] = _old_ts
+    _pdb.execute("update pending_writes set ts=?, payload=? where code=?", (_old_ts, json.dumps(_payload, ensure_ascii=False), _old_code))
+    _pdb.commit(); _pdb.close()
 o2 = run([ev("pw4", "确认 " + (_old_code or "000000"), sender_id="user_admin")], name="pw_exp")
 check("过期的确认码在新进程里无效", _old_code and "无效或已过期" in o2 and "docs +create" not in o2.split("reply pw4")[-1], o2)
 
@@ -2699,6 +2707,9 @@ results.append(("用量周报", _rp.returncode == 0))
 print("\n-- feature switch --", flush=True)
 _sw = subprocess.run([sys.executable, os.path.join(FW, "tests", "test_feature_switch.py")], cwd=FW)
 results.append(("私聊开关功能", _sw.returncode == 0))
+print("\n-- confirm --", flush=True)
+_cf = subprocess.run([sys.executable, os.path.join(FW, "tests", "test_confirm.py")], cwd=FW)
+results.append(("写入确认方式", _cf.returncode == 0))
 print("\n-- setup wizard --", flush=True)
 _wz = subprocess.run([sys.executable, os.path.join(FW, "tests", "test_setup_wizard.py")], cwd=FW)
 results.append(("一键安装向导", _wz.returncode == 0))

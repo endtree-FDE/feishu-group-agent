@@ -346,6 +346,18 @@ python checks/check_config.py agents/example.json
 
 这些编号都不是密钥，但它们指向你的真实文档和表。不要把填好的配置发到公开的地方。
 
+## 确认 confirm
+
+怎么点头。不写这一段时，默认点卡片上的按钮。飞书还没开通卡片回调时，自动改回确认码，旧配置不用改。确认不能关掉。细节见 [docs/确认方式.md](../docs/确认方式.md)。
+
+| 键 | 填什么 |
+|---|---|
+| `mode` | `button`（点按钮，默认）、`code`（6 位确认码）、`button_or_code`（两种都行）、`button_and_code`（两样都要）。写成关掉也会按 `button`。 |
+| `high_risk_mode` | 批量建日程、改功能开关、重启这一类用哪种。不写时和 `mode` 相同。 |
+| `ttl_sec` | 按钮有效秒数。不写是 `600`（10 分钟）。 |
+| `code_ttl_sec` | 确认码有效秒数。不写时用上面的 `write.confirm_ttl_sec`。 |
+| `code_digits` | 确认码位数，4 到 8。不写是 `6`。 |
+
 ## 进度卡片 progress
 
 `enabled` 默认 `false`：不发表情、不发「处理中」卡片，直接等答案。升级时先保持关闭，只读跑稳了再改成 `true`。

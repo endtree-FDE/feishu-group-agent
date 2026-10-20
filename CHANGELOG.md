@@ -4,9 +4,13 @@
 
 程序不读取 `VERSION` 或本文件。删掉它们时，机器人的行为与现在相同。
 
-当前 `VERSION` 是 `0.7.0`，发布日期是 2026-10-20。发布说明见 [docs/release-0.7.0.md](docs/release-0.7.0.md)。从 0.6.0 升上来见 [docs/升级到0.7.0.md](docs/升级到0.7.0.md)。说明里不要写密钥、群号、open_id 或客户名。
+当前 `VERSION` 是 `0.8.0`，发布日期是 2026-10-20。发布说明见 [docs/release-0.8.0.md](docs/release-0.8.0.md)。从 0.7.0 升上来见 [docs/升级到0.8.0.md](docs/升级到0.8.0.md)。说明里不要写密钥、群号、open_id 或客户名。
 
 ## [Unreleased]
+
+## [0.8.0] - 2026-10-20
+
+下面是用户能看到的变化。没写进旧配置的键，仍用各项自己的默认值。发布说明见 [docs/release-0.8.0.md](docs/release-0.8.0.md)。
 
 ### 添加
 
@@ -16,6 +20,14 @@
 - 可以列出机器人所在的群和成员来选择；查不到就手填。人设有通用、黑客松小组、工作室、课题组。用量周报、知识检索、记忆成长、早间待办、断线提醒、技能默认关闭，装好后在私聊里发「设置」再开。
 - 已有配置先备份再改，不删除原文件和备份。中途关掉可以接着填，草稿不存密钥。`--dry-run` 不写文件；`--answers` 给非交互检查用。
 - 写完会跑配置检查和 `--doctor`，每条失败和提醒都用白话说明怎么处理。可选创建登录计划任务和看门狗。同一个应用已经有接收进程时拒绝再启动。启动后由机器人私聊主人做自我介绍。
+- 写入确认默认改成飞书卡片上的「确认」「取消」。卡片用大白话写要做什么、改哪里、影响谁。只有发起人本人点了才算，服务端核对人、会话、动作有没有被改过，以及有没有过期。点完卡片变成已确认或已取消，再回报结果。飞书没开通卡片回调时，自动改回确认码。`--doctor` 会给出警告和开通步骤。要在飞书后台用长连接添加 `card.action.trigger`。说明见 [docs/确认方式.md](docs/确认方式.md)。
+- 可以配置 `confirm.mode`：`button`（默认）、`code`、`button_or_code`、`button_and_code`。批量写入、改功能开关、重启可以用 `confirm.high_risk_mode` 单独指定。确认码位数和有效期也可以改。主人在私聊里回复「确认方式」就能换，但不能关掉确认。
+
+### 安全
+
+- 确认仍然不能跳过。别人点按钮、过期、重放、改掉卡片上的动作，都不会执行。写入日志不留确认码、按钮记号和人的编号。
+
+旧配置不用改。没写 `confirm` 时按点按钮；权限不够时自动退回确认码。从 0.7.0 升上来见 [docs/升级到0.8.0.md](docs/升级到0.8.0.md)。
 
 ## [0.7.0] - 2026-10-20
 
@@ -135,7 +147,9 @@
 
 ## English
 
-The version is the `VERSION` file (`0.7.0`), released on 2026-10-20. Do not put secrets or Feishu IDs in release notes. The program does not read this file. Omitting `model` keeps the Cursor path from 0.6.0. `search` stays off when omitted. Owners can toggle the existing usage report, knowledge search, memory growth, morning digest, disconnect alerts, and skills in a private chat. That switch cannot change model settings, secrets, or who may use private chat. Upgrade and rollback steps are in `docs/升级到0.7.0.md`. Rolling back to v0.6.0 (`4da9e42`) drops the model providers and the private-chat switch. This note does not create the tag.
+The version is the `VERSION` file (`0.8.0`), released on 2026-10-20. Do not put secrets or Feishu IDs in release notes. The program does not read this file. This release adds a one-question-at-a-time install wizard and makes write confirmation a card button by default. `confirm.mode` can be `button`, `code`, `button_or_code`, or `button_and_code`. Confirmation cannot be turned off. If the app has not subscribed to `card.action.trigger` on the long connection, new writes fall back to the confirmation code and `--doctor` warns with the enable steps. Old config files do not need new keys. Upgrade steps are in `docs/升级到0.8.0.md`. Rolling back to `26f37c5` keeps the wizard and drops the card buttons; that commit still says `VERSION` `0.7.0`. This note does not create the tag.
+
+The previous version is the `VERSION` file (`0.7.0`), released on 2026-10-20. Do not put secrets or Feishu IDs in release notes. The program does not read this file. Omitting `model` keeps the Cursor path from 0.6.0. `search` stays off when omitted. Owners can toggle the existing usage report, knowledge search, memory growth, morning digest, disconnect alerts, and skills in a private chat. That switch cannot change model settings, secrets, or who may use private chat. Upgrade and rollback steps are in `docs/升级到0.7.0.md`. Rolling back to v0.6.0 (`4da9e42`) drops the model providers and the private-chat switch. This note does not create the tag.
 
 The previous version is the `VERSION` file (`0.6.0`), released on 2026-10-20. Do not put secrets or Feishu IDs in release notes. The program does not read this file. 0.6.0 adds answer-quality evals, an optional weekly usage report, optional per-chat knowledge search, and optional memory growth. All four stay off when omitted. Evals do not connect to Feishu. The report is a weekly owner DM with totals only. Knowledge search indexes one chat and cites sources. Memory growth writes nothing until an approver confirms. Upgrade and rollback steps are in `docs/升级到0.6.0.md`. Rolling back to v0.5.0 (`e842684`) drops these four. This note does not create the tag.
 

@@ -16,7 +16,7 @@ import json, os, re, subprocess, sys, time, logging, collections, threading, sql
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import utf8io  # 管道上的标准流改为 UTF-8，避免中文 Windows 的代码页把日志解崩
 import acp_client, channels, digest, feishu_link, guard, health_alert, knowledge, lifecycle, memory, memory_growth, observe, proc_identity, providers, usage
-import feature_switch
+import confirm_mode, feature_switch
 from channels.base import Cap, can_update, status_modes
 from channels.feishu import MEMBER_ADDED, MEMBER_DELETED
 from providers.base import PartialText
@@ -606,6 +606,8 @@ def consumer_keys():
     # 进群、出群的事件名只在飞书适配器里定义一份。要不要订阅仍由核心的认群开关决定。
     keys = ["im.message.receive_v1"]
     if auto_join_active(): keys += [MEMBER_ADDED, MEMBER_DELETED]
+    if confirm_mode.wants_cards(CFG) and confirm_mode.CARD_EVENT not in keys:
+        keys.append(confirm_mode.CARD_EVENT)
     return keys
 def consume_argv(event_key):
     return CHANNEL.consume_argv(event_key)
@@ -619,6 +621,9 @@ _QUIET_TYPES = {
 def ingest(obj):
     """一条 stdout JSON。分类在渠道里：消息交给 handle；进群/出群只记群，不回复。撤回不回复。"""
     if not isinstance(obj, dict): return
+    click = confirm_mode.parse_click(obj)
+    if click:
+        _handle_confirm_click(click); return
     card_ev = feature_switch.card_event(obj)
     if card_ev:
         handle(card_ev); return
@@ -1028,17 +1033,21 @@ def _run_tool(name, args, ctx, on_stage):
         if on_stage: on_stage("正在准备记忆确认…")
         try:
             text = TOOLS.propose_memory(args, ctx)
+            _keep_confirm_card(ctx)
             _note_tool(ctx, name, True, "", "", started)
             return text, True
         except ToolError as e:
+            TOOLS.take_confirm_card()
             _note_tool(ctx, name, False, e.detail, e.user_msg, started)
             return guard.redact(e.user_msg, REDACT_NAMES), True
     if name in WRITE_TOOLS:
         try:
             text = TOOLS.propose_write(name, args, ctx)
+            _keep_confirm_card(ctx)
             _note_tool(ctx, name, True, "", "", started)
             return text, True
         except ToolError as e:
+            TOOLS.take_confirm_card()
             _note_tool(ctx, name, False, e.detail, e.user_msg, started)
             return guard.redact(e.user_msg, REDACT_NAMES), True
     try: res = TOOLS.run_read(name, args, ctx)
@@ -1309,11 +1318,110 @@ def reply_key(mid, index, total):
     """一条回复沿用原来的 re_消息编号。拆开之后每段用 re_消息编号_序号，避免重试时重复发送。"""
     if total <= 1: return ("re_" + str(mid))[:50]
     return ("re_%s_%d" % (mid, index))[:50]
+def _redact_card(card):
+    def walk(node):
+        if isinstance(node, str):
+            return guard.redact(node, REDACT_NAMES)
+        if isinstance(node, list):
+            return [walk(item) for item in node]
+        if isinstance(node, dict):
+            return {key: walk(val) for key, val in node.items()}
+        return node
+    return walk(card)
+def _sent_mid(j):
+    if not isinstance(j, dict):
+        return ""
+    data = j.get("data") if isinstance(j.get("data"), dict) else {}
+    for src in (data, j):
+        for key in ("message_id", "open_message_id", "id"):
+            val = src.get(key)
+            if isinstance(val, str) and val:
+                return val
+    return ""
+def _keep_confirm_card(ctx):
+    card = TOOLS.take_confirm_card()
+    if card and isinstance(ctx, dict):
+        ctx["_confirm_card"] = card
+def _send_confirm_card(mid, ctx):
+    """写入提案若带按钮，先把卡片发出去。发不出去就改回确认码。"""
+    if not isinstance(ctx, dict):
+        return
+    payload = ctx.pop("_confirm_card", None)
+    if not isinstance(payload, dict) or not isinstance(payload.get("card"), dict):
+        return
+    card = _redact_card(payload.get("card"))
+    token = str(payload.get("token") or "")
+    def fallback():
+        shown = TOOLS.reveal_code(token)
+        if shown:
+            reply(mid, shown)
+    if not CHANNEL.supports(Cap.CARDS):
+        fallback(); return
+    if DRY:
+        log.info("[dry-run] confirm-card %s: %s", mid, json.dumps(card, ensure_ascii=False)[:800]); return
+    try:
+        j, err = CHANNEL.reply_message(mid, "interactive", card, ("cf_" + token)[:50], bool(CFG.get("reply_in_thread", True)))
+    except Exception as exc:
+        j, err = None, str(exc)
+    if j:
+        sent = _sent_mid(j)
+        if sent:
+            TOOLS.bind_card_message(token, sent)
+        return
+    log.warning("confirm card send failed")
+    fallback()
+def _handle_confirm_click(click):
+    """卡片上的确认或取消。只认发起人，点完更新卡片，再回报结果。"""
+    uid = str(click.get("user") or "")
+    chat = str(click.get("chat_id") or "")
+    mid = str(click.get("message_id") or "")
+    if not uid or not chat:
+        log.info("confirm click missing actor"); return
+    ctx = {"user": uid, "chat_id": chat, "message_id": mid or "card",
+           "scope": str(click.get("scope") or ""), "chat_type": ""}
+    try:
+        switched = feature_switch.try_click(
+            CFG, BASE, CFG_PATH, click.get("token") or "", click.get("op") or "",
+            click.get("hash") or "", ctx, names=REDACT_NAMES, apply=not DRY, message_id=mid)
+    except Exception:
+        log.warning("confirm click switch failed"); switched = None
+    if switched is None:
+        result = TOOLS.confirm_click(click.get("token") or "", click.get("op") or "",
+                                      click.get("hash") or "", ctx, message_id=mid)
+    else:
+        result = switched
+    if not isinstance(result, dict):
+        return
+    card = result.get("card")
+    if result.get("patch") and card and mid and CHANNEL.supports(Cap.CARD_UPDATE):
+        card = _redact_card(card)
+        if DRY:
+            log.info("[dry-run] patch-card %s: %s", mid, json.dumps(card, ensure_ascii=False)[:800])
+        else:
+            try:
+                CHANNEL.patch_card(mid, card)
+            except Exception:
+                log.warning("confirm card patch failed")
+    text = result.get("text") or ""
+    if text and mid:
+        reply(mid, text)
+    elif text:
+        log.info("confirm click %s", guard.redact(text, REDACT_NAMES)[:200])
+    if result.get("restart") and not DRY:
+        try:
+            feature_switch.launch_reloader(BASE, CFG_PATH)
+        except Exception:
+            log.warning("switch reload spawn failed")
+            if mid:
+                reply(mid, feature_switch.abandon(BASE, CFG_PATH))
+            return
+        lifecycle.request_shutdown(STATE)
 def _finish_switch(mid, switched):
     """先把这句话发出去，再按需要重启。演练不改文件，也不另起进程。"""
     reply(mid, switched.get("text") or "")
     card = switched.get("card")
     if card and CHANNEL.supports(Cap.CARDS):
+        card = _redact_card(card)
         if DRY:
             log.info("[dry-run] card %s: %s", mid, json.dumps(card, ensure_ascii=False)[:800])
         else:
@@ -1573,10 +1681,11 @@ def probe_progress():
     res["card"] = bool(j), "cardkit:card:write（卡片 JSON 校验）", err
     return res
 
-CONFIRM_RX = re.compile(r"^(确认|取消)\s*(\d{6})$")
+def _confirm_match(q):
+    return confirm_mode.confirm_pattern(CFG).match(q or "")
 def _direct_command(q):
     q = q or ""
-    if CONFIRM_RX.match(q): return True
+    if _confirm_match(q): return True
     if feature_switch.looks_like_command(q): return True
     if q in ("/new", "/reset", "新话题"): return True
     if q in ("/状态", "/status", "状态") and _status_cmd_on(): return True
@@ -1669,7 +1778,7 @@ def _handle_claimed(ev, mid, ctype, uid):
     if _direct_command(q) and not command_ok(uid):
         reply(mid, (CFG.get("texts") or {}).get("wait") or "请稍等一下，我处理完上一条就回复你。"); return
     # 命令
-    m = CONFIRM_RX.match(q)
+    m = _confirm_match(q)
     if m:
         switched = feature_switch.try_confirm(
             CFG, BASE, CFG_PATH, m.group(2), ctx, cancel=(m.group(1) == "取消"),
@@ -1796,6 +1905,8 @@ def _handle_claimed(ev, mid, ctype, uid):
     write_journal("answer", chat="p2p" if ctype == "p2p" else "group", ok=bool(a), partial=partial,
                   limited=ctx.get("limited"), in_chars=len(q_model or ""), out_chars=len(final or ""),
                   elapsed_ms=int((time.time() - t0) * 1000), tools=ctx.get("_tools") or [])
+    try: _send_confirm_card(mid, ctx)
+    except Exception: log.warning("confirm card failed")
     try: replaced = prog.finish(final)
     except Exception as e: log.warning("progress finish error (ignored): %s", e); replaced = False
     if replaced: log.info("reply %s ok=True via status edit", mid); return
@@ -2301,16 +2412,25 @@ def _consume_forever(event_key):
             open(os.path.join(STATE, "consumer.pid"), "w", encoding="utf-8").write(str(p.pid))
         log.info("consumer %s pid %s", event_key, p.pid)
         down = threading.Event()
+        def _note_card_line(line, key=event_key):
+            if key != confirm_mode.CARD_EVENT:
+                return
+            if confirm_mode.ready_line(line):
+                confirm_mode.note_cards(BASE, True, "connected")
+            elif confirm_mode.denied_line(line):
+                confirm_mode.note_cards(BASE, False, line)
         def _err(proc=p, key=event_key, flag=down):
             for line in proc.stderr:
                 log.info("[consume:%s] %s", key, line.rstrip())
+                _note_card_line(line, key)
                 if _LINK.note(key, line) == "down": flag.set()
         threading.Thread(target=_err, daemon=True).start()
         threading.Thread(target=_poke_consumer, args=(p, created, seen, down), daemon=True).start()
         for line in p.stdout:
             if lifecycle.SHUTDOWN.is_set() or _LINK.generation != seen or down.is_set(): break
             line = line.strip()
-            if not line.startswith("{"): continue
+            if not line.startswith("{"):
+                _note_card_line(line, event_key); continue
             try: obj = json.loads(line)
             except Exception: continue
             threading.Thread(target=ingest, args=(obj,), daemon=True).start()

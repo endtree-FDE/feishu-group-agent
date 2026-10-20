@@ -1,8 +1,8 @@
 # 主人在私聊里开关功能。只改白名单里的几项布尔开关。
 # 不改模型接口、密钥、私聊开放范围。那些仍要去改配置文件。
-# 确认码沿用 6 位、绑定发起人和会话、一次有效。确认后备份、写入、检查，再按 stop 然后 start 重启。
+# 确认方式见 confirm_mode。默认点按钮，没开通卡片回调时用确认码。确认后备份、写入、检查，再按 stop 然后 start 重启。
 import copy, datetime, hashlib, json, os, random, re, sqlite3, subprocess, sys, time
-import digest, guard, knowledge, lifecycle, memory_growth, outbound, usage
+import confirm_mode, digest, guard, knowledge, lifecycle, memory_growth, outbound, usage
 
 _ID = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
 _ACTOR = re.compile(r"^[A-Za-z0-9_.:-]{1,80}$")
@@ -291,6 +291,7 @@ def menu_text(cfg, base):
         "准备：" + prepare(cfg, base, item["id"]),
         "",
         "想改它就回复 %d。想看全部，看上面那张卡片。" % item["n"],
+        confirm_mode.menu_line(cfg, base),
         "看配置名字请回复「详细」。",
     ]
     return "\n".join(lines)
@@ -316,6 +317,7 @@ def card(cfg, base, cfg_path):
             "type": "primary" if item["n"] == focus_feature(cfg)["n"] else "default",
             "behaviors": [{"type": "callback", "value": {"switch": item["id"], "op": "flip"}}],
         })
+    elements.append({"tag": "div", "text": {"tag": "plain_text", "content": confirm_mode.menu_line(cfg, base)}})
     elements.append({
         "tag": "collapsible_panel",
         "expanded": False,
@@ -349,6 +351,8 @@ def looks_like_command(text):
     if not q:
         return False
     if _MENU.match(q) or _INDEX.match(q) or _DIGIT.match(q):
+        return True
+    if confirm_mode.refusing_off(q) or confirm_mode.asking_mode(q):
         return True
     if q in ("详细", "详情"):
         return True
@@ -441,8 +445,11 @@ def _menu_matches(menu, ctx):
             and str(menu.get("scope") or "") == str(ctx.get("scope") or ""))
 
 
-def _reply(text, card_body=None, restart=False):
-    return {"text": text, "card": card_body, "restart": bool(restart)}
+def _reply(text, card_body=None, restart=False, patch=False):
+    out = {"text": text, "card": card_body, "restart": bool(restart)}
+    if patch:
+        out["patch"] = True
+    return out
 
 
 def _refuse_place(ctx, cfg):
@@ -478,6 +485,24 @@ def handle_text(cfg, base, text, ctx, names=(), now=None, cfg_path=""):
             return blocked
         _audit(base, "refuse_sensitive", user=ctx.get("user"), names=names)
         return _reply(_sensitive_text())
+    if confirm_mode.refusing_off(q) and not _MENU.match(q):
+        blocked = _refuse_place(ctx, cfg)
+        if blocked:
+            _audit(base, "refuse", user=ctx.get("user"), chat=ctx.get("chat_type"), names=names)
+            return blocked
+        _audit(base, "refuse_off", user=ctx.get("user"), names=names)
+        return _reply("确认不能关掉。可以换成点按钮、确认码，或两种一起用。回复「确认方式」看现在的做法。")
+    if confirm_mode.asking_mode(q):
+        blocked = _refuse_place(ctx, cfg)
+        if blocked:
+            _audit(base, "refuse", user=ctx.get("user"), chat=ctx.get("chat_type"), names=names)
+            return blocked
+        picked = confirm_mode.mode_choice(q)
+        if not picked:
+            return _reply(confirm_mode.mode_help(cfg, base))
+        if picked == confirm_mode.configured_mode(cfg):
+            return _reply("确认方式现在已经是%s。\n回复「设置」可以看功能开关。" % confirm_mode.plain_mode(picked))
+        return _propose_mode(cfg, base, ctx, picked, names, now)
     if _MENU.match(q) or _howto(q):
         blocked = _refuse_place(ctx, cfg)
         if blocked:
@@ -524,26 +549,76 @@ def handle_text(cfg, base, text, ctx, names=(), now=None, cfg_path=""):
 
 
 def _propose(cfg, base, ctx, item, turn_on, names, now):
-    try:
-        code = _reserve(base, ctx, item["id"], turn_on, now, cfg)
-    except RuntimeError:
-        return _reply("暂时发不出确认码，请再试一次。")
+    summary = "%s「%s」" % ("打开" if turn_on else "关掉", item["title"])
+    return _offer(cfg, base, ctx, "feature_switch", item["id"], bool(turn_on), summary, names, now,
+                  lambda code, plan: _switch_text(cfg, base, item, turn_on, code, plan))
+
+
+def _propose_mode(cfg, base, ctx, mode, names, now):
+    summary = "把确认方式改成%s" % confirm_mode.plain_mode(mode)
+    return _offer(cfg, base, ctx, "confirm_mode", "confirm_mode", False, summary, names, now,
+                  lambda code, plan: _mode_text(mode, code, plan), set_mode=mode)
+
+
+def _switch_text(cfg, base, item, turn_on, code, plan):
     verb = "打开" if turn_on else "关掉"
-    text = "\n".join([
+    if plan["mode"] == "code":
+        return "\n".join([
+            "你想%s「%s」。" % (verb, item["title"]),
+            "",
+            "现在是%s。" % _state_on(is_on(cfg, item["id"])),
+            happens(cfg, base, item["id"], turn_on),
+            "准备：" + prepare(cfg, base, item["id"]),
+            "",
+            "请只回复这一句：",
+            "确认 %s" % code,
+            "",
+            "不想改了就回复：取消 %s" % code,
+            "这串数字大约 %d 分钟内有效，而且只有你在这个私聊里能用。" % max(1, plan["ttl"] // 60),
+        ])
+    body = "\n".join([
         "你想%s「%s」。" % (verb, item["title"]),
-        "",
         "现在是%s。" % _state_on(is_on(cfg, item["id"])),
         happens(cfg, base, item["id"], turn_on),
         "准备：" + prepare(cfg, base, item["id"]),
-        "",
-        "请只回复这一句：",
-        "确认 %s" % code,
-        "",
-        "不想改了就回复：取消 %s" % code,
-        "这串数字大约 %d 分钟内有效，而且只有你在这个私聊里能用。" % max(1, _ttl(cfg) // 60),
     ])
-    _audit(base, "propose", user=ctx.get("user"), feature=item["id"], on=turn_on, names=names)
-    return _reply(text)
+    return confirm_mode.button_text(body, confirm_mode.impact("feature_switch"), plan["mode"], code, plan["ttl"])
+
+
+def _mode_text(mode, code, plan):
+    summary = "把以后的确认方式改成%s" % confirm_mode.plain_mode(mode)
+    if plan["mode"] == "code":
+        return "\n".join([
+            summary + "。",
+            "确认不能关掉。",
+            "",
+            "请只回复这一句：",
+            "确认 %s" % code,
+            "",
+            "不想改了就回复：取消 %s" % code,
+        ])
+    return confirm_mode.button_text(summary, confirm_mode.impact("confirm_mode"), plan["mode"], code, plan["ttl"])
+
+
+def _offer(cfg, base, ctx, kind, feature_id, turn_on, summary, names, now, render, set_mode=""):
+    plan = confirm_mode.plan(cfg, base, high=True)
+    token = plan["token"]
+    ah = confirm_mode.action_hash(kind, [{"feature": feature_id, "on": bool(turn_on), "mode": set_mode}],
+                                  ctx.get("user"), ctx.get("chat_id"), str(ctx.get("scope") or ""))
+    extra = {"mode": plan["mode"], "token": token, "action_hash": ah, "button_ok": False,
+             "code_ok": False, "fallback": plan["fallback"], "expires": now + plan["ttl"]}
+    if set_mode:
+        extra["set_mode"] = set_mode
+    try:
+        code = _reserve(base, ctx, feature_id, turn_on, now, cfg, extra=extra)
+    except RuntimeError:
+        return _reply("暂时发不出确认码，请再试一次。")
+    text = guard.redact(render(code, plan), names)
+    card_body = None
+    if plan["mode"] != "code" and token:
+        card_body = confirm_mode.build_card(text, token, ah)
+    _audit(base, "propose", user=ctx.get("user"), feature=feature_id, on=turn_on if kind == "feature_switch" else None, names=names)
+    return _reply(text, card_body)
 
 
 def _db(base):
@@ -551,6 +626,7 @@ def _db(base):
     conn = sqlite3.connect(os.path.join(base, "state", "switches.db"), check_same_thread=False)
     conn.execute("create table if not exists pending_switches(code text primary key, ts real, payload text)")
     conn.execute("create table if not exists used_switches(code text primary key, ts real)")
+    conn.execute("create table if not exists used_switch_tokens(token text primary key, ts real)")
     return conn
 
 
@@ -581,12 +657,14 @@ def _foreign_code(base, code):
         return False
 
 
-def _reserve(base, ctx, feature_id, turn_on, now, cfg):
+def _reserve(base, ctx, feature_id, turn_on, now, cfg, extra=None):
     conn = _db(base)
+    digits = confirm_mode.code_digits(cfg)
+    span = 10 ** digits
     try:
-        conn.execute("delete from pending_switches where ts < ?", (now - _ttl(cfg),))
+        conn.execute("delete from pending_switches where ts < ?", (now - _pending_ttl(cfg, extra),))
         for _ in range(8):
-            code = "%06d" % random.SystemRandom().randint(0, 999999)
+            code = "%0*d" % (digits, random.SystemRandom().randint(0, span - 1))
             used = conn.execute("select 1 from used_switches where code=?", (code,)).fetchone()
             if used or _foreign_code(base, code):
                 continue
@@ -598,6 +676,8 @@ def _reserve(base, ctx, feature_id, turn_on, now, cfg):
                 "on": bool(turn_on),
                 "ts": now,
             }
+            if extra:
+                payload.update(extra)
             try:
                 conn.execute("insert into pending_switches(code, ts, payload) values(?,?,?)",
                              (code, now, json.dumps(payload, ensure_ascii=False)))
@@ -610,6 +690,15 @@ def _reserve(base, ctx, feature_id, turn_on, now, cfg):
     raise RuntimeError("no code")
 
 
+def _pending_ttl(cfg, extra):
+    if isinstance(extra, dict) and extra.get("expires"):
+        try:
+            return max(30, int(float(extra["expires"]) - time.time()) + 5)
+        except (TypeError, ValueError):
+            pass
+    return _ttl(cfg)
+
+
 def _take_pending(base, code, now, cfg):
     conn = _db(base)
     try:
@@ -618,23 +707,57 @@ def _take_pending(base, code, now, cfg):
         if used or not row:
             return None, "missing"
         ts, payload = row
-        if now - float(ts or 0) > _ttl(cfg):
-            conn.execute("delete from pending_switches where code=?", (code,))
-            conn.commit()
-            return None, "expired"
         try:
             rec = json.loads(payload)
         except ValueError:
             return None, "missing"
-        return rec if isinstance(rec, dict) else None, ""
+        if not isinstance(rec, dict):
+            return None, "missing"
+        exp = rec.get("expires")
+        try:
+            too_old = now > float(exp) if exp else (now - float(ts or 0) > _ttl(cfg))
+        except (TypeError, ValueError):
+            too_old = True
+        if too_old:
+            conn.execute("delete from pending_switches where code=?", (code,))
+            conn.commit()
+            return None, "expired"
+        return rec, ""
     finally:
         conn.close()
 
 
-def _mark_used(base, code, now):
+def _store_pending(base, code, rec):
+    conn = _db(base)
+    try:
+        conn.execute("update pending_switches set payload=? where code=?",
+                     (json.dumps(rec, ensure_ascii=False), code))
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def _token_used(base, token):
+    token = str(token or "")
+    if not token:
+        return False
+    conn = _db(base)
+    try:
+        row = conn.execute("select 1 from used_switch_tokens where token=?", (token,)).fetchone()
+        return bool(row)
+    except sqlite3.Error:
+        return False
+    finally:
+        conn.close()
+
+
+def _mark_used(base, code, now, token=""):
     conn = _db(base)
     try:
         conn.execute("insert or ignore into used_switches(code, ts) values(?,?)", (code, now))
+        if token:
+            conn.execute("insert or ignore into used_switch_tokens(token, ts) values(?,?)", (token, now))
         conn.execute("delete from pending_switches where code=?", (code,))
         conn.commit()
         row = conn.execute("select 1 from used_switches where code=?", (code,)).fetchone()
@@ -643,17 +766,21 @@ def _mark_used(base, code, now):
         conn.close()
 
 
-def _same_actor(rec, ctx):
-    return (rec.get("user") == who(ctx.get("user"))
-            and rec.get("chat_id") == who(ctx.get("chat_id"))
-            and str(rec.get("scope") or "") == str(ctx.get("scope") or ""))
+def _same_actor(rec, ctx, from_card=False):
+    if rec.get("user") != who(ctx.get("user")) or rec.get("chat_id") != who(ctx.get("chat_id")):
+        return False
+    want = str(rec.get("scope") or "")
+    got = str(ctx.get("scope") or "")
+    if from_card and not got:
+        return True
+    return got == want
 
 
 def try_confirm(cfg, base, cfg_path, code, ctx, cancel=False, names=(), now=None, apply=True, check=None):
     """码不是我们发的则返回 None，交给原来的写入确认。"""
     now = time.time() if now is None else float(now)
     code = str(code or "")
-    if not re.fullmatch(r"\d{6}", code):
+    if not confirm_mode.code_fullmatch(cfg, code):
         return None
     ctx = ctx or {}
     if not _ctx_ok(ctx):
@@ -673,8 +800,104 @@ def try_confirm(cfg, base, cfg_path, code, ctx, cancel=False, names=(), now=None
     if not is_manager(cfg, ctx.get("user")) or ctx.get("chat_type") != "p2p":
         _audit(base, "deny", user=ctx.get("user"), feature=rec.get("feature"), names=names)
         return _reply(NOT_OWNER if ctx.get("chat_type") == "p2p" else GROUP_REDIRECT)
-    if not _mark_used(base, code, now):
+    mode = rec.get("mode") or "code"
+    if mode == "button" and not cancel:
+        return _reply("这次请点卡片上的「确认」。回复数字不算。")
+    if mode == "button" and cancel:
+        return _reply("这次请点卡片上的「取消」。")
+    if mode == "button_and_code" and not cancel and not rec.get("button_ok"):
+        rec["code_ok"] = True
+        if not _store_pending(base, code, rec):
+            return _reply("确认没能记下，请稍后再试。")
+        return _reply("确认码已记下。请再点卡片上的「确认」。")
+    return _accept_switch(cfg, base, cfg_path, code, rec, ctx, cancel, names, now, apply, check)
+
+
+def _find_switch_token(base, token, now, cfg):
+    if _token_used(base, token):
+        return "", None, "used"
+    conn = _db(base)
+    try:
+        rows = conn.execute("select code, ts, payload from pending_switches").fetchall()
+    finally:
+        conn.close()
+    for code, ts, payload in rows:
+        try:
+            rec = json.loads(payload)
+        except ValueError:
+            continue
+        if not isinstance(rec, dict) or rec.get("token") != token:
+            continue
+        exp = rec.get("expires")
+        try:
+            too_old = now > float(exp) if exp else (now - float(ts or 0) > _ttl(cfg))
+        except (TypeError, ValueError):
+            too_old = True
+        if too_old:
+            _drop_switch(base, code)
+            return code, rec, "expired"
+        return code, rec, ""
+    return "", None, "missing"
+
+
+def _drop_switch(base, code):
+    conn = _db(base)
+    try:
+        conn.execute("delete from pending_switches where code=?", (code,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def try_click(cfg, base, cfg_path, token, op, given_hash, ctx, names=(), now=None, apply=True, check=None, message_id=""):
+    """不是开关确认按钮时返回 None。"""
+    now = time.time() if now is None else float(now)
+    token = str(token or "")
+    if not token:
+        return None
+    ctx = ctx or {}
+    code, rec, why = _find_switch_token(base, token, now, cfg)
+    if why == "missing" and rec is None:
+        return None
+    if why == "used":
+        return _reply("已经处理过，不能再点一次。", confirm_mode.done_card("已处理", "这次已经点过了。"), patch=True)
+    if why == "expired":
+        _audit(base, "expired", user=ctx.get("user"), names=names)
+        return _reply("这次确认已经过期。回复「设置」再来一次。", confirm_mode.done_card("已过期", "时间过了，没有改。"), patch=True)
+    if not _ctx_ok(dict(ctx, message_id=ctx.get("message_id") or message_id or "card")):
+        return _reply("不能确认：缺少发送人或会话。")
+    if not _same_actor(rec, ctx, True):
+        _audit(base, "deny", user=ctx.get("user"), feature=rec.get("feature"), names=names)
+        return _reply("只有你本人在原来的私聊里才能确认。")
+    if str(given_hash or "") != str(rec.get("action_hash") or ""):
+        _audit(base, "deny", user=ctx.get("user"), feature=rec.get("feature"), names=names, reason="tamper")
+        return _reply("卡片内容和要改的事对不上，没有改。")
+    if not is_manager(cfg, ctx.get("user")):
+        _audit(base, "deny", user=ctx.get("user"), feature=rec.get("feature"), names=names)
+        return _reply(NOT_OWNER)
+    cancel = op == "no"
+    mode = rec.get("mode") or "code"
+    if mode == "code":
+        return _reply("这次请回复确认码，点按钮不算。")
+    if mode == "button_and_code" and not cancel and not rec.get("code_ok"):
+        rec["button_ok"] = True
+        if not _store_pending(base, code, rec):
+            return _reply("确认没能记下，请稍后再试。")
+        return _reply("按钮已记下。请再回复确认码。",
+                      confirm_mode.done_card("还差确认码", "按钮已记下。请在这个私聊里回复确认码。"), patch=True)
+    ctx = dict(ctx, chat_type="p2p", message_id=ctx.get("message_id") or message_id or "card")
+    result = _accept_switch(cfg, base, cfg_path, code, rec, ctx, cancel, names, now, apply, check)
+    title = "已取消" if cancel else ("已确认" if result.get("restart") or "演练" in (result.get("text") or "") else "没做成")
+    result["card"] = confirm_mode.done_card(title, result.get("text") or title)
+    result["patch"] = True
+    return result
+
+
+def _accept_switch(cfg, base, cfg_path, code, rec, ctx, cancel, names, now, apply, check):
+    if not _mark_used(base, code, now, rec.get("token") or ""):
         return _reply("确认没能记下，请稍后再试。")
+    if rec.get("feature") == "confirm_mode":
+        return _finish_mode(cfg, base, cfg_path, rec, ctx, cancel, names, apply, check)
     item = feature(rec.get("feature"))
     if not item:
         return _reply("这项不能在对话里改。回复「设置」看能改的功能。")
@@ -693,6 +916,70 @@ def try_confirm(cfg, base, cfg_path, code, ctx, cancel=False, names=(), now=None
     _write_result(base, ctx.get("user"), later)
     _audit(base, "applied", user=ctx.get("user"), feature=item["id"], on=bool(rec.get("on")), names=names)
     return _reply(RESTARTING, restart=True)
+
+
+def _finish_mode(cfg, base, cfg_path, rec, ctx, cancel, names, apply, check):
+    mode = rec.get("set_mode") or ""
+    if mode not in confirm_mode.MODES:
+        return _reply("这种方式不能用。确认不能关掉。")
+    if cancel:
+        _audit(base, "cancel", user=ctx.get("user"), feature="confirm_mode", names=names)
+        return _reply("已取消。确认方式没有改。")
+    if not apply:
+        _audit(base, "drill", user=ctx.get("user"), feature="confirm_mode", names=names)
+        return _reply(DRILL)
+    result = commit_confirm_mode(cfg_path, base, mode, names=names, check=check, user=ctx.get("user"))
+    if not result.get("ok"):
+        return _reply(result.get("text") or _fail_text("check"))
+    item = {"id": "confirm_mode", "title": "确认方式"}
+    _write_job(base, cfg_path, result.get("backup") or "", ctx, item, False)
+    _write_result(base, ctx.get("user"), "确认方式已经改成%s。我重新启动好了。" % confirm_mode.plain_mode(mode))
+    _audit(base, "applied", user=ctx.get("user"), feature="confirm_mode", names=names)
+    return _reply("好，按你确认的改确认方式。我现在重新启动，好了再私聊你一声。", restart=True)
+
+
+def commit_confirm_mode(cfg_path, base, mode, names=(), check=None, user=""):
+    if mode not in confirm_mode.MODES:
+        return {"ok": False, "text": "确认不能关掉。"}
+    if not _safe_cfg(base, cfg_path):
+        _audit(base, "refuse_path", user=user, feature="confirm_mode", names=names, ok=False)
+        return {"ok": False, "text": _fail_text("read")}
+    try:
+        backup = backup_config(cfg_path, base)
+    except OSError:
+        _audit(base, "backup_failed", user=user, feature="confirm_mode", names=names, ok=False)
+        return {"ok": False, "text": _fail_text("backup")}
+    try:
+        original = open(cfg_path, "rb").read()
+        data = json.loads(original.decode("utf-8-sig"))
+    except (OSError, ValueError):
+        _audit(base, "read_failed", user=user, feature="confirm_mode", names=names, ok=False)
+        return {"ok": False, "text": _fail_text("read")}
+    if not isinstance(data, dict):
+        return {"ok": False, "text": _fail_text("read")}
+    new = confirm_mode.write_mode(data, mode)
+    tmp = cfg_path + ".writing"
+    try:
+        with open(tmp, "w", encoding="utf-8") as handle:
+            json.dump(new, handle, ensure_ascii=False, indent=2)
+            handle.write("\n")
+        os.replace(tmp, cfg_path)
+    except OSError:
+        _restore_quiet(cfg_path, backup)
+        return {"ok": False, "text": _fail_text("read")}
+    checker = check or _default_check
+    try:
+        errors, _hints = checker(cfg_path)
+    except Exception as exc:
+        _restore_quiet(cfg_path, backup)
+        _audit(base, "check_failed", user=user, feature="confirm_mode", names=names, ok=False, reason=type(exc).__name__)
+        return {"ok": False, "text": _fail_text("check")}
+    if errors:
+        _restore_quiet(cfg_path, backup)
+        _audit(base, "rollback", user=user, feature="confirm_mode", names=names, ok=False, reason="check")
+        return {"ok": False, "text": humanize_check(errors)}
+    _audit(base, "write", user=user, feature="confirm_mode", names=names)
+    return {"ok": True, "backup": backup, "text": ""}
 
 
 def _backup_dir(base):

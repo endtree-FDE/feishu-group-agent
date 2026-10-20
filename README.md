@@ -2,7 +2,7 @@
 
 这是一个跑在你自己电脑上的飞书群机器人模板。有人在群里 @ 它，或者私聊它，它就用你这台电脑上的 Cursor（或你自己的 OpenAI 兼容模型账号）来回答。
 
-它能看本群最近的聊天，读分享给它的文档、日历和多维表格，也能看图片和文件。要新建文档、建日程或往表格加记录时，必须由指定的人在限定时间内回复一个 6 位确认码，它才会动手。
+它能看本群最近的聊天，读分享给它的文档、日历和多维表格，也能看图片和文件。要新建文档、建日程或往表格加记录时，必须由发起人本人确认，它才会动手。默认在卡片上点「确认」或「取消」。飞书还没开通卡片回调时，自动改回 6 位确认码。确认不能关掉。见 [docs/确认方式.md](docs/确认方式.md)。
 
 每个群可以记自己的事：说「记一下」就记下，说「/记忆」就查看，说「/忘记」就删掉。
 
@@ -10,11 +10,11 @@
 
 ## English
 
-A template for a Feishu (Lark) group bot that runs on your own computer. It answers @mentions in `chat_ids`, or—only if that list is empty and `chats.auto_join` is on—in groups that pass the admit gate (default: an allow-listed member sends `/认群`). It also answers allow-listed private chats, using Cursor or any OpenAI-compatible model whose API key stays in an environment variable. It can read recent chat, docs, calendars, and Bitable, and it writes only after a one-time confirmation code. Creative-workflow skills (topic scoring, spoken script, storyboard, a tool-neutral prompt pack, a brief, and a retro) live under `skills/` and stay off until `skills.enabled` is true. Configuration in this repository uses placeholders. Do not commit App Secrets, filled agent configs, customer-name lists, memory, logs, or real knowledge-base files. Apache-2.0.
+A template for a Feishu (Lark) group bot that runs on your own computer. It answers @mentions in `chat_ids`, or—only if that list is empty and `chats.auto_join` is on—in groups that pass the admit gate (default: an allow-listed member sends `/认群`). It also answers allow-listed private chats, using Cursor or any OpenAI-compatible model whose API key stays in an environment variable. It can read recent chat, docs, calendars, and Bitable, and it writes only after the initiator confirms. The default is a one-time card button. A one-time code is used when card callbacks are not available. Confirmation cannot be turned off. Creative-workflow skills (topic scoring, spoken script, storyboard, a tool-neutral prompt pack, a brief, and a retro) live under `skills/` and stay off until `skills.enabled` is true. Configuration in this repository uses placeholders. Do not commit App Secrets, filled agent configs, customer-name lists, memory, logs, or real knowledge-base files. Apache-2.0.
 
 ## 架构
 
-一条消息从飞书进来，先过门卫，再拼上下文，然后交给模型。模型若要读飞书，走只读工具；若要改飞书，先发确认码。回答出去之前再打一次码。
+一条消息从飞书进来，先过门卫，再拼上下文，然后交给模型。模型若要读飞书，走只读工具；若要改飞书，先请发起人确认。回答出去之前再打一次码。
 
 ```mermaid
 flowchart LR
@@ -23,7 +23,7 @@ flowchart LR
   guard --> pack["拼装：人设、群记忆、技能目录、知识库"]
   pack --> model["Cursor 或 OpenAI 兼容模型"]
   model --> tools["只读工具，可连续多轮"]
-  model --> confirm["写入提案 + 6 位确认码"]
+  model --> confirm["写入提案 + 确认（默认点按钮）"]
   tools --> model
   confirm --> feishu
   model --> out["出口脱敏后回复"]
@@ -61,7 +61,7 @@ flowchart LR
 
 ## 功能开关表
 
-主人在和机器人的私聊里发「设置」，按提示打开或关掉。群里不能改。步骤见 [docs/新手开关功能.md](docs/新手开关功能.md)。
+主人在和机器人的私聊里发「设置」，按提示打开或关掉。群里不能改。确认方式也在这个私聊里改，回复「确认方式」，但不能关掉确认。步骤见 [docs/新手开关功能.md](docs/新手开关功能.md) 和 [docs/确认方式.md](docs/确认方式.md)。
 
 | 功能 | 有什么用 | 怎么开 |
 |---|---|---|
@@ -160,7 +160,7 @@ A screenshot placeholder, with rules for hiding ids, is in [docs/demo/README.md]
 
 ## 安全说明
 
-写操作要同时满足三道锁：人在白名单里、资源在白名单里、动作属于允许的几类（新建文档、文末追加、建日程、改日程、删日程、加一条表格记录）。发起人还要在原来的会话里回复确认码。不删消息、文档和表格记录。删日程不通知参会人。没有覆盖全文、没有改权限。
+写操作要同时满足三道锁：人在白名单里、资源在白名单里、动作属于允许的几类（新建文档、文末追加、建日程、改日程、删日程、加一条表格记录）。发起人还要在原来的会话里确认。默认点卡片上的按钮；没开通卡片回调时改回确认码。确认不能关掉。不删消息、文档和表格记录。删日程不通知参会人。没有覆盖全文、没有改权限。
 
 密钥放在你自己的电脑上：飞书 App Secret 只在 `lark-cli config init --name <profile> --app-secret-stdin` 时输入。`<profile>` 必须和配置里的 `profile` 相同。不写 `--name` 会使用默认 profile，覆盖这台电脑上其他机器人已经登录的 profile。模型密钥只进环境变量。
 
@@ -176,7 +176,8 @@ A screenshot placeholder, with rules for hiding ids, is in [docs/demo/README.md]
 | `channels/` | 渠道接口。默认飞书；`memory` 只给测试；企业微信是实验骨架，默认不连接 |
 | `providers/` | 模型接口。默认 `cursor`；`openai_compat` 接你自己的账号；`fake` 只给测试用 |
 | `acp_client.py` | 可选的常驻进程。默认不用 |
-| `tools.py` | 动飞书的手：只读，以及要确认码的写入 |
+| `tools.py` | 动飞书的手：只读，以及要确认的写入 |
+| `confirm_mode.py` | 确认方式。默认点按钮，不能关掉。见 [docs/确认方式.md](docs/确认方式.md) |
 | `guard.py` | 打码和话题红线 |
 | `memory.py` | 每个群一份长期记忆 |
 | `memory_growth.py` | 记忆成长。默认关。提议后要审批才写入。见 [docs/记忆成长.md](docs/记忆成长.md) |
@@ -201,6 +202,7 @@ A screenshot placeholder, with rules for hiding ids, is in [docs/demo/README.md]
 | `docs/断线提醒与晨报.md` | 断线提醒和早晨摘要怎么开，以及飞书要哪些权限 |
 | `docs/用量周报.md` | 用量周报怎么开，统计什么，什么不会写进去 |
 | `docs/新手开关功能.md` | 主人在私聊里发「设置」，打开或关掉上面几项 |
+| `docs/确认方式.md` | 写入确认：默认点按钮，可改回确认码，不能关掉 |
 | `setup_wizard.py` | 一键安装向导。一次一问，密钥不进文件。见 [docs/一键安装.md](docs/一键安装.md) |
 | `setup_agent.py` | 干跑生成配置。不加 `--write` 不写文件 |
 | `scripts/setup.ps1` | Windows 上的安装入口，调用上面的向导 |
@@ -210,6 +212,8 @@ A screenshot placeholder, with rules for hiding ids, is in [docs/demo/README.md]
 | `docs/一键安装.md` | 第一次在 Windows 上安装：一题一题问，密钥不进文件 |
 | `docs/快速开始.md` | 新人 15 分钟跑起来 |
 | `docs/排障.md` | 常见问题 |
+| `docs/release-0.8.0.md` | v0.8.0 发布说明（2026-10-20）。一键安装向导；写入默认点卡片，没开回调时退回确认码 |
+| `docs/升级到0.8.0.md` | 从 0.7.0 升到 0.8.0：旧配置不用改；要在飞书后台加 `card.action.trigger` |
 | `docs/release-0.7.0.md` | v0.7.0 发布说明（2026-10-20）。不写 `model` 仍是 Cursor；`search` 默认关；私聊可以开关已有功能 |
 | `docs/升级到0.7.0.md` | 从 0.6.0 升到 0.7.0：旧配置不用改；停进程和 `git reset --keep` 同一步 |
 | `docs/release-0.6.0.md` | v0.6.0 发布说明（2026-10-20）。四项默认关 |
