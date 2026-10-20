@@ -120,9 +120,42 @@ class GroupMemory:
         if i > self.budget // 2: cut = cut[:i]
         return cut.rstrip() + note
 
+    def _growth_on(self):
+        """记忆成长默认关。关着时过期日不改变注入，和以前一样。"""
+        mem = self.cfg.get("memory") if isinstance(self.cfg.get("memory"), dict) else {}
+        growth = mem.get("growth") if isinstance(mem, dict) else None
+        return bool(self.enabled and isinstance(growth, dict) and growth.get("enabled"))
+
+    def _past_expiry(self, fact, today=None):
+        if not self._growth_on(): return False
+        exp = str((fact or {}).get("expires") or "")[:10]
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", exp): return False
+        today = today or datetime.date.today().isoformat()
+        return exp < today
+
+    def _live_md(self, chat_id):
+        """成长打开且已有账本时，用还没过期的事实现算档案。没有账本就返回 None，继续读 GROUP.md。"""
+        d = self.gdir(chat_id)
+        if not d: return None
+        if not os.path.isfile(os.path.join(d, "facts.jsonl")): return None
+        facts = [x for x in self.facts(chat_id) if x.get("status", "active") == "active" and not self._past_expiry(x)]
+        gp = os.path.join(d, "GROUP.md"); bp = os.path.join(d, "GROUP.base.md")
+        header, body = "# 群档案", ""
+        src = bp if os.path.isfile(bp) else gp
+        if os.path.isfile(src):
+            lines = open(src, encoding="utf-8-sig").read().splitlines()
+            if lines and lines[0].startswith("#"): header = lines[0].strip()
+            if src == bp: body = "\n".join(lines[1:] if lines and lines[0].startswith("#") else lines)
+        if not body.strip() and not facts: return ""
+        return render_group_md(header, facts, body)
+
     def profile(self, chat_id, chat_type="group"):
         """给 prompt 用的群档案；关闭、私聊、没有档案时返回空字符串"""
         if not self.enabled or chat_type == "p2p": return ""
+        if self._growth_on():
+            live = self._live_md(chat_id)
+            if live is not None:
+                return self._fit(guard.neutralize(guard.redact(live.strip(), self.names)))
         return self._fit(self._read(chat_id))
 
     def prompt_block(self, chat_id, chat_type="group"):
@@ -177,7 +210,7 @@ class GroupMemory:
         shown = self.profile(chat_id, chat_type)
         ranked = []
         for x in self.facts(chat_id):
-            if x.get("status", "active") != "active": continue
+            if x.get("status", "active") != "active" or self._past_expiry(x): continue
             raw = (x.get("short") or x.get("content") or "").strip()
             if not raw: continue
             text = guard.neutralize(guard.redact(raw, self.names))
@@ -207,7 +240,7 @@ class GroupMemory:
         if not self.enabled: return "这个机器人还没开启长期记忆。"
         if chat_type == "p2p": return "私聊里没有群档案。请在群里 @我 发「/记忆」查看本群档案。"
         fs = self.facts(chat_id)
-        act = [x for x in fs if x.get("status", "active") == "active"]
+        act = [x for x in fs if x.get("status", "active") == "active" and not self._past_expiry(x)]
         if not act:
             t = self._read(chat_id)  # 只有人工 GROUP.md、没有账本的旧格式
             return ("本群档案（只读，人工整理；标“待确认”的还没核实）：\n" + t) if t else "本群还没有记忆。白名单成员可以发「记一下：内容」添加。"
@@ -218,7 +251,10 @@ class GroupMemory:
             lines.append("【%s】" % TYPE_ZH[t])
             for x in xs:
                 c = x.get("short") or x["content"]
-                lines.append("#%d %s%s" % (num(x["id"]), c, "（待确认）" if x.get("uncertain") and "待确认" not in c else ""))
+                extra = "（待确认）" if x.get("uncertain") and "待确认" not in c else ""
+                conf = x.get("confidence")
+                conf_bit = ("（把握 %.2f）" % float(conf)) if isinstance(conf, (int, float)) and not isinstance(conf, bool) else ""
+                lines.append("#%d %s%s%s" % (num(x["id"]), c, extra, conf_bit))
         old = sum(1 for x in fs if x.get("status") == "superseded")
         if old: lines.append("另有 %d 条已被新条目取代（保留历史，不再使用）。" % old)
         lines.append("白名单成员可以发「记一下：主题：内容」新增（同一主题会取代旧的），发「/忘记 编号」删除。")
@@ -346,3 +382,104 @@ class GroupMemory:
         if os.path.isfile(bp): os.remove(bp)
         self._write_all(chat, []); self._audit(chat, user, "forget_all", ids)
         return "已清空本群记忆（%d 条）。" % len(ids)
+
+    def search(self, chat_id, chat_type, query):
+        """只读。只搜这个群的有效事实，输出前脱敏。私聊不读群账本。"""
+        if not self.enabled: return "这个机器人还没开启长期记忆。"
+        if chat_type == "p2p": return "私聊里没有群档案。请在群里 @我 发「/搜记忆 关键词」。"
+        if not self.gdir(chat_id): return "这个会话不支持记忆。"
+        q = (query or "").strip()
+        if not q: return "要搜什么？请发「/搜记忆 关键词」。"
+        ranked = []
+        for x in self.facts(chat_id):
+            if x.get("status", "active") != "active" or self._past_expiry(x): continue
+            raw = (x.get("short") or x.get("content") or "").strip()
+            if not raw: continue
+            text = guard.neutralize(guard.redact(raw, self.names))
+            score = self._recall_score(q, x, text)
+            if q.lower() in text.lower(): score = max(score, 80)
+            if score <= 0: continue
+            ranked.append((score, x, text))
+        if not ranked: return "本群记忆里没有和「%s」有关的条目。" % guard.redact(q[:40], self.names)
+        ranked.sort(key=lambda it: -it[0])
+        lines = ["本群记忆里相关的条目："]
+        for _, x, text in ranked[:8]:
+            lines.append("#%d %s" % (num(x.get("id")), text.replace("\n", " ")))
+        return guard.neutralize(guard.redact("\n".join(lines), self.names))
+
+    def apply_growth(self, chat, user, spec):
+        """审批通过之后才写入。调用方已经核对过审批人和确认码。"""
+        if not self.enabled: return "这个机器人还没开启长期记忆。"
+        if not self.gdir(chat): return "这个会话不支持记忆。"
+        user = str(user or "")
+        if not user or user == "?" or not _ACTOR_RX.match(user): return "不能修改记忆：缺少发送人。"
+        spec = spec if isinstance(spec, dict) else {}
+        with self._lock:
+            op = str(spec.get("op") or "")
+            if op == "forget":
+                try: n = int(spec.get("n"))
+                except (TypeError, ValueError): return "没有找到要删除的条目。"
+                return self._forget(chat, user, n)
+            if op == "retire": return self._expire(chat, user, str(spec.get("id") or ""))
+            if op in ("add", "update"): return self._grow(chat, user, spec)
+            return "这条提案无法执行。"
+
+    def _expire(self, chat, user, fid):
+        facts = self.facts(chat)
+        hit = [x for x in facts if x.get("id") == fid]
+        if not hit: return "没有找到这条记忆，没有改动。"
+        if hit[0].get("status", "active") != "active": return "这条已经不在使用，没有改动。"
+        hit[0]["status"] = "expired"
+        hit[0]["expired_at"] = datetime.date.today().isoformat()
+        self._write_all(chat, facts)
+        self._audit(chat, user, "growth_retire", [fid])
+        return "已停用 #%d，以后回答不再使用。" % num(fid)
+
+    def _grow(self, chat, user, spec):
+        text = str(spec.get("content") or "").strip()
+        if len(text) < 2: return "要记的内容太短，没有写入。"
+        if len(text) > self.max_fact: return "太长了，没有写入。"
+        if guard.policy_hit(text, self.mem_rules): return "这条内容按本机器人的规则不记录。"
+        if guard.embeds_secret(text, self.names): return "这条里有不能记的信息，没有写入。"
+        clean = guard.neutralize(guard.redact(text, self.names))
+        if "<<TOOL>>" in clean or guard.embeds_secret(clean, self.names): return "这条里有不能记的信息，没有写入。"
+        facts = self.facts(chat)
+        same = [x for x in facts if x.get("status", "active") == "active" and (x.get("content") or "").strip() == clean]
+        if spec.get("op") == "add" and same: return "这条和已有的 #%d 相同，没有另记。" % num(same[0].get("id"))
+        subj = spec.get("subject") or subject_of(clean)
+        if isinstance(subj, str): subj = subj.strip()[:20] or None
+        else: subj = None
+        target = str(spec.get("id") or "") if spec.get("op") == "update" else ""
+        old = [x for x in facts if target and x.get("id") == target and x.get("status", "active") == "active"]
+        if spec.get("op") == "update" and not old: return "没有找到要更新的条目，没有写入。"
+        if spec.get("op") == "add" and subj:
+            old = [x for x in facts if x.get("status", "active") == "active" and (x.get("subject") or "").strip().lower() == subj.lower() and (x.get("content") or "").strip() != clean]
+        fid = self._next_id(chat, facts); today = datetime.date.today().isoformat()
+        for x in old:
+            x["status"] = "superseded"; x["superseded_by"] = fid
+        conf = spec.get("confidence")
+        try: conf = round(float(conf), 2)
+        except (TypeError, ValueError): conf = None
+        if conf is not None and not (0 <= conf <= 1): conf = None
+        src = spec.get("source") if isinstance(spec.get("source"), dict) else {}
+        msgs = [str(m) for m in (src.get("msgs") or []) if re.match(r"^om_[A-Za-z0-9]{4,80}$", str(m))][:8]
+        day = str(src.get("day") or today)[:10]
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", day): day = today
+        source = {"msg": msgs[0] if msgs else None, "msgs": msgs, "chat": chat,
+                  "thread": str(src.get("thread") or "")[:80], "by": user, "by_name": self.writers.get(user),
+                  "at": datetime.datetime.now().isoformat(timespec="seconds"), "day": day}
+        kind = spec.get("type") if spec.get("type") in TYPE_ZH else None
+        rec = {"id": fid, "scope": "group:" + chat, "type": (old[-1].get("type") if old else None) or kind or classify(clean),
+               "subject": subj, "content": clean, "short": clean, "source": source, "how": "growth",
+               "status": "active", "uncertain": False, "valid_from": today,
+               "expires": _iso_day(spec.get("expires")), "review_after": _iso_day(spec.get("review_after")),
+               "confidence": conf, "supersedes": [x["id"] for x in old] or None, "last_seen": today}
+        facts.append(rec); self._write_all(chat, facts)
+        self._audit(chat, user, "growth_update" if old else "growth_add", [fid], {"supersedes": rec["supersedes"]})
+        msg = "已记 #%d（%s）。" % (num(fid), TYPE_ZH[rec["type"]])
+        if old: msg += "取代了 " + "、".join("#%d" % num(x["id"]) for x in old) + "。"
+        return msg
+
+def _iso_day(value):
+    text = str(value or "")[:10]
+    return text if re.match(r"^\d{4}-\d{2}-\d{2}$", text) else None

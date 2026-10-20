@@ -91,7 +91,29 @@
     "context_budget_chars": 8000,
     "trim_note": true,
     "ttl_hours": 24,
-    "per_user": false
+    "per_user": false,
+    "growth": {
+      "enabled": false,
+      "approver_open_ids": [],
+      "deliver": "p2p",
+      "time": "03:00",
+      "timezone": "Asia/Shanghai",
+      "window_min": 30,
+      "on_schedule": true,
+      "on_idle": true,
+      "idle_min": 45,
+      "lookback_hours": 36,
+      "max_messages": 40,
+      "max_proposals": 8,
+      "review_days": 90,
+      "status_days": 3,
+      "deadline_grace_days": 7,
+      "offer_gap_days": 7,
+      "min_confidence": 0.55,
+      "dedupe_ratio": 0.9,
+      "confirm_ttl_sec": 86400,
+      "forget_ttl_sec": 300
+    }
   },
   "skills": {
     "enabled": false,

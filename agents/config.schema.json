@@ -283,6 +283,33 @@
         "trim_note": {
           "type": "boolean",
           "description": "不写或 true：超字数预算丢掉旧对话时，在提示词里注明省略了几条。false 则静默丢掉。"
+        },
+        "growth": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "从近期对话提议长期记忆。不写或 enabled 为 false 时不调用模型，也不改账本。",
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "approver_open_ids": {"type": "array", "items": {"type": "string"}},
+            "deliver": {"type": "string"},
+            "time": {"type": "string"},
+            "timezone": {"type": "string"},
+            "window_min": {"type": "integer", "minimum": 0},
+            "on_schedule": {"type": "boolean"},
+            "on_idle": {"type": "boolean"},
+            "idle_min": {"type": "integer", "minimum": 0},
+            "lookback_hours": {"type": "integer", "minimum": 0},
+            "max_messages": {"type": "integer", "minimum": 0},
+            "max_proposals": {"type": "integer", "minimum": 0},
+            "review_days": {"type": "integer", "minimum": 0},
+            "status_days": {"type": "integer", "minimum": 0},
+            "deadline_grace_days": {"type": "integer", "minimum": 0},
+            "offer_gap_days": {"type": "integer", "minimum": 0},
+            "min_confidence": {"type": "number", "minimum": 0},
+            "dedupe_ratio": {"type": "number", "minimum": 0},
+            "confirm_ttl_sec": {"type": "integer", "minimum": 0},
+            "forget_ttl_sec": {"type": "integer", "minimum": 0}
+          }
         }
       }
     },
