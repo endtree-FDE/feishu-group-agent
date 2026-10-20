@@ -220,6 +220,7 @@ A screenshot placeholder, with rules for hiding ids, is in [docs/demo/README.md]
 | `docs/一键安装.md` | 第一次在 Windows 上安装：一题一题问，密钥不进文件 |
 | `docs/快速开始.md` | 新人 15 分钟跑起来 |
 | `docs/排障.md` | 常见问题 |
+| `docs/release-0.8.1.md` | v0.8.1 发布说明（2026-10-20）。卡片回调没开通时不再误报断线，也不反复重启 |
 | `docs/release-0.8.0.md` | v0.8.0 发布说明（2026-10-20）。一键安装向导；写入默认点卡片，没开回调时退回确认码 |
 | `docs/升级到0.8.0.md` | 从 0.7.0 升到 0.8.0：旧配置不用改；要在飞书后台加 `card.action.trigger` |
 | `docs/release-0.7.0.md` | v0.7.0 发布说明（2026-10-20）。不写 `model` 仍是 Cursor；`search` 默认关；私聊可以开关已有功能 |

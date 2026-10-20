@@ -198,9 +198,17 @@ def test_push_text():
         import shutil
         shutil.rmtree(folder, ignore_errors=True)
 
-    empty = os.path.join(tempfile.gettempdir(), "agentbot_push_empty.jsonl")
-    open(empty, "w", encoding="utf-8").write("")
-    src = r'''
+    folder = tempfile.mkdtemp(prefix="agentbot_push_")
+    try:
+        sample = json.load(open(os.path.join(FW, "agents", "example.json"), encoding="utf-8-sig"))
+        sample["base_dir"] = folder
+        cfg_path = os.path.join(folder, "bot.json")
+        json.dump(sample, open(cfg_path, "w", encoding="utf-8"), ensure_ascii=False)
+        empty = os.path.join(folder, "empty.jsonl")
+        open(empty, "w", encoding="utf-8").write("")
+        real_log = os.path.join(FW, "logs", "bot.log")
+        before_log = os.path.getsize(real_log) if os.path.isfile(real_log) else None
+        src = r'''
 import sys
 sys.argv = ["agentbot.py", sys.argv[1], "--dry-run", sys.argv[2]]
 import agentbot
@@ -220,20 +228,34 @@ def boom(kind, target, text, key):
 agentbot.CHANNEL.push_text = boom
 print("EXC", agentbot._outbound_send("user", "ou_owner_placeholder", "hello", "kabc"))
 '''
-    r = subprocess.run([sys.executable, "-c", src, os.path.join(FW, "agents", "example.json"), empty],
-                       cwd=FW, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
-    out = (r.stdout or "") + (r.stderr or "")
-    check("核心的主动发送只调用渠道 push_text",
-          r.returncode == 0 and "SEND ok" in out
-          and "('user', 'ou_owner_placeholder', 'hello', 'kabc')" in out
-          and "BAD fail" in out and "EXC fail" in out and "event consume" not in out, out)
+        r = subprocess.run([sys.executable, "-c", src, cfg_path, empty],
+                           cwd=FW, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
+        out = (r.stdout or "") + (r.stderr or "")
+        after_log = os.path.getsize(real_log) if os.path.isfile(real_log) else None
+        temp_log = os.path.join(folder, "logs", "bot.log")
+        temp_body = open(temp_log, encoding="utf-8", errors="replace").read() if os.path.isfile(temp_log) else ""
+        check("核心的主动发送只调用渠道 push_text",
+              r.returncode == 0 and "SEND ok" in out
+              and "('user', 'ou_owner_placeholder', 'hello', 'kabc')" in out
+              and "BAD fail" in out and "EXC fail" in out and "event consume" not in out, out)
+        check("假的 RuntimeError 写进临时日志，不写仓库 logs/bot.log",
+              before_log == after_log and "RuntimeError: down" in temp_body and "boom" in temp_body, temp_body[-400:])
+    finally:
+        import shutil
+        shutil.rmtree(folder, ignore_errors=True)
 
 
 def test_wired_default():
     """默认配置进主程序后，渠道是飞书，工具层挂的是同一个对象。"""
-    empty = os.path.join(tempfile.gettempdir(), "agentbot_ch_empty.jsonl")
-    open(empty, "w", encoding="utf-8").write("")
-    src = r'''
+    folder = tempfile.mkdtemp(prefix="agentbot_chwire_")
+    try:
+        sample = json.load(open(os.path.join(FW, "agents", "example.json"), encoding="utf-8-sig"))
+        sample["base_dir"] = folder
+        cfg_path = os.path.join(folder, "bot.json")
+        json.dump(sample, open(cfg_path, "w", encoding="utf-8"), ensure_ascii=False)
+        empty = os.path.join(folder, "empty.jsonl")
+        open(empty, "w", encoding="utf-8").write("")
+        src = r'''
 import sys
 sys.argv = ["agentbot.py", sys.argv[1], "--dry-run", sys.argv[2]]
 import agentbot
@@ -247,12 +269,15 @@ print("KEY", "channel" in agentbot.CFG)
 print("ONE", int(agentbot.MEMBER_ADDED is MEMBER_ADDED and agentbot.MEMBER_DELETED is MEMBER_DELETED))
 print("GONE", int(any(hasattr(agentbot, n) for n in ("_is_recall", "_member_type", "_member_body", "_event_id", "_RECALL_TYPES", "_MEMBER_ADDED", "_MEMBER_DELETED"))))
 '''
-    r = subprocess.run([sys.executable, "-c", src, os.path.join(FW, "agents", "example.json"), empty],
-                       cwd=FW, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
-    out = (r.stdout or "") + (r.stderr or "")
-    check("旧示例配置加载后仍是飞书，且没有 channel 键",
-          r.returncode == 0 and "NAME feishu" in out and "CARD 1" in out and "CAL 1" in out and "SAME 1" in out and "KEY False" in out
-          and "ONE 1" in out and "GONE 0" in out, out)
+        r = subprocess.run([sys.executable, "-c", src, cfg_path, empty],
+                           cwd=FW, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
+        out = (r.stdout or "") + (r.stderr or "")
+        check("旧示例配置加载后仍是飞书，且没有 channel 键",
+              r.returncode == 0 and "NAME feishu" in out and "CARD 1" in out and "CAL 1" in out and "SAME 1" in out and "KEY False" in out
+              and "ONE 1" in out and "GONE 0" in out, out)
+    finally:
+        import shutil
+        shutil.rmtree(folder, ignore_errors=True)
 
 
 def test_eval_fixture():
