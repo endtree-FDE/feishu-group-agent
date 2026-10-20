@@ -578,6 +578,38 @@
         }
       }
     },
+    "confirm": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "写入和开关的确认方式。不写时默认点按钮。飞书没开通卡片回调时自动改用确认码。不能写成关掉。",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["button", "code", "button_or_code", "button_and_code"]
+        },
+        "high_risk_mode": {
+          "type": "string",
+          "enum": ["button", "code", "button_or_code", "button_and_code"],
+          "description": "批量写入、改功能开关、重启这一类。不写时和 mode 相同。"
+        },
+        "ttl_sec": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "按钮有效秒数。不写是 600。"
+        },
+        "code_ttl_sec": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "确认码有效秒数。不写时沿用 write.confirm_ttl_sec。"
+        },
+        "code_digits": {
+          "type": "integer",
+          "minimum": 4,
+          "maximum": 8,
+          "description": "确认码位数。不写是 6。"
+        }
+      }
+    },
     "write": {
       "type": "object",
       "additionalProperties": true

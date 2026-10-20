@@ -2,7 +2,7 @@
 
 这是一个跑在你自己电脑上的飞书群机器人模板。有人在群里 @ 它，或者私聊它，它就用你这台电脑上的 Cursor（或你自己的 OpenAI 兼容模型账号）来回答。
 
-它能看本群最近的聊天，读分享给它的文档、日历和多维表格，也能看图片和文件。要新建文档、建日程或往表格加记录时，必须由指定的人在限定时间内回复一个 6 位确认码，它才会动手。
+它能看本群最近的聊天，读分享给它的文档、日历和多维表格，也能看图片和文件。要新建文档、建日程或往表格加记录时，必须由发起人本人确认，它才会动手。默认在卡片上点「确认」或「取消」。飞书还没开通卡片回调时，自动改回 6 位确认码。确认不能关掉。见 [docs/确认方式.md](docs/确认方式.md)。
 
 每个群可以记自己的事：说「记一下」就记下，说「/记忆」就查看，说「/忘记」就删掉。
 
@@ -10,11 +10,11 @@
 
 ## English
 
-A template for a Feishu (Lark) group bot that runs on your own computer. It answers @mentions in `chat_ids`, or—only if that list is empty and `chats.auto_join` is on—in groups that pass the admit gate (default: an allow-listed member sends `/认群`). It also answers allow-listed private chats, using Cursor or any OpenAI-compatible model whose API key stays in an environment variable. It can read recent chat, docs, calendars, and Bitable, and it writes only after a one-time confirmation code. Creative-workflow skills (topic scoring, spoken script, storyboard, a tool-neutral prompt pack, a brief, and a retro) live under `skills/` and stay off until `skills.enabled` is true. Configuration in this repository uses placeholders. Do not commit App Secrets, filled agent configs, customer-name lists, memory, logs, or real knowledge-base files. Apache-2.0.
+A template for a Feishu (Lark) group bot that runs on your own computer. It answers @mentions in `chat_ids`, or—only if that list is empty and `chats.auto_join` is on—in groups that pass the admit gate (default: an allow-listed member sends `/认群`). It also answers allow-listed private chats, using Cursor or any OpenAI-compatible model whose API key stays in an environment variable. It can read recent chat, docs, calendars, and Bitable, and it writes only after the initiator confirms. The default is a one-time card button. A one-time code is used when card callbacks are not available. Confirmation cannot be turned off. Creative-workflow skills (topic scoring, spoken script, storyboard, a tool-neutral prompt pack, a brief, and a retro) live under `skills/` and stay off until `skills.enabled` is true. Configuration in this repository uses placeholders. Do not commit App Secrets, filled agent configs, customer-name lists, memory, logs, or real knowledge-base files. Apache-2.0.
 
 ## 架构
 
-一条消息从飞书进来，先过门卫，再拼上下文，然后交给模型。模型若要读飞书，走只读工具；若要改飞书，先发确认码。回答出去之前再打一次码。
+一条消息从飞书进来，先过门卫，再拼上下文，然后交给模型。模型若要读飞书，走只读工具；若要改飞书，先请发起人确认。回答出去之前再打一次码。
 
 ```mermaid
 flowchart LR
@@ -23,7 +23,7 @@ flowchart LR
   guard --> pack["拼装：人设、群记忆、技能目录、知识库"]
   pack --> model["Cursor 或 OpenAI 兼容模型"]
   model --> tools["只读工具，可连续多轮"]
-  model --> confirm["写入提案 + 6 位确认码"]
+  model --> confirm["写入提案 + 确认（默认点按钮）"]
   tools --> model
   confirm --> feishu
   model --> out["出口脱敏后回复"]
@@ -61,7 +61,7 @@ flowchart LR
 
 ## 功能开关表
 
-主人在和机器人的私聊里发「设置」，按提示打开或关掉。群里不能改。步骤见 [docs/新手开关功能.md](docs/新手开关功能.md)。
+主人在和机器人的私聊里发「设置」，按提示打开或关掉。群里不能改。确认方式也在这个私聊里改，回复「确认方式」，但不能关掉确认。步骤见 [docs/新手开关功能.md](docs/新手开关功能.md) 和 [docs/确认方式.md](docs/确认方式.md)。
 
 | 功能 | 有什么用 | 怎么开 |
 |---|---|---|

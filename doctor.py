@@ -1,6 +1,7 @@
 # 只读诊断。不启动 event consume，不发消息，不写心跳。
 # 外部命令、进程列表、域名解析都由调用方传入，测试不必连真的飞书。
 import base64, csv, io, json, os, re, socket, subprocess
+import confirm_mode
 
 _SCOPE_RX = re.compile(r"\b[a-z][a-z0-9_.]*(?::[a-z0-9_.]+){1,8}\b")
 _SECRET_KEY = re.compile(r"^(app_secret|api_key|api_secret|password|passwd)$", re.I)
@@ -98,6 +99,8 @@ def required_events(cfg):
     chats = (cfg or {}).get("chats") or {}
     if chats.get("auto_join") and not ((cfg or {}).get("chat_ids") or []):
         events.extend(["im.chat.member.bot.added_v1", "im.chat.member.bot.deleted_v1"])
+    if confirm_mode.wants_cards(cfg):
+        events.append(confirm_mode.CARD_EVENT)
     return events
 
 
@@ -396,6 +399,13 @@ def report(cfg, base, exe, run, processes, resolve, connect, modules, env):
         # event list 列的是命令行认识的全部事件，不是这个应用在开放平台的订阅。不能据此判失败。
         need_ev = required_events(cfg)
         add("OK", "events", "需要 %s。订阅请在开放平台核对，这里不根据 event list 判断" % ", ".join(need_ev))
+        if not confirm_mode.wants_cards(cfg):
+            card_level, card_info = "OK", "当前确认方式不用点按钮"
+        elif confirm_mode.cards_ready(base, env):
+            card_level, card_info = "OK", "本机已经连上卡片回调"
+        else:
+            card_level, card_info = confirm_mode.doctor_card(scope_text)
+        add(card_level, "card", card_info)
 
     try:
         addresses = list(resolve("open.feishu.cn"))
