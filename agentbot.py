@@ -606,7 +606,7 @@ def consumer_keys():
     # 进群、出群的事件名只在飞书适配器里定义一份。要不要订阅仍由核心的认群开关决定。
     keys = ["im.message.receive_v1"]
     if auto_join_active(): keys += [MEMBER_ADDED, MEMBER_DELETED]
-    if confirm_mode.wants_cards(CFG) and confirm_mode.CARD_EVENT not in keys:
+    if confirm_mode.wants_card_process(CFG) and confirm_mode.CARD_EVENT not in keys:
         keys.append(confirm_mode.CARD_EVENT)
     return keys
 def consume_argv(event_key):
@@ -2385,9 +2385,77 @@ def main():
     if auto_join_active(): sync_joined_chats()
     preload_p2p_members()
     keys = consumer_keys()
+    setting = confirm_mode.card_callback_setting(CFG)
+    probe = None
+    if confirm_mode.CARD_EVENT in keys and setting == "auto":
+        probe = _probe_card_subscription()
+        if probe is False:
+            log.warning("card.action.trigger is not subscribed, skip starting it")
+            _give_up_card("probe")
+    keys = confirm_mode.drop_unsubscribed_card(keys, setting, probe)
+    if not keys:
+        log.error("no consumer keys"); finish_shutdown(); return
     for key in keys[1:]:
         threading.Thread(target=_consume_forever, args=(key,), daemon=True).start()
     _consume_forever(keys[0])
+
+def _give_up_card(reason):
+    """这次运行不再启动卡片接收进程。确认改回确认码，并只私聊提醒主人一次。"""
+    confirm_mode.note_cards(BASE, False, reason)
+    log.warning("card callback unavailable, confirmation uses codes")
+    _notify_card_once()
+
+def _notify_card_once():
+    import outbound
+    owners = feature_switch.push_targets(CFG)
+    text = confirm_mode.card_notice_text()
+
+    def send(owner, body=text):
+        key = outbound.idem_key("card-callback|" + str(owner))
+        return _outbound_send("user", owner, body, key)
+
+    sent = confirm_mode.deliver_card_notice(BASE, owners, send)
+    if sent:
+        log.info("card callback notice sent %d", len(sent))
+
+def _probe_card_subscription():
+    """启动前看一眼卡片事件。明确没订阅就返回 False，探测进程不留着。看不出来返回 None。"""
+    argv = consume_argv(confirm_mode.CARD_EVENT)
+    try:
+        proc = subprocess.Popen(argv, cwd=BASE, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
+    except OSError as exc:
+        log.warning("card probe did not start: %s", exc)
+        return None
+    try:
+        try:
+            out, err = proc.communicate(timeout=2.0)
+            text = (out or "") + "\n" + (err or "")
+            return confirm_mode.interpret_probe(proc.returncode, text, False)
+        except subprocess.TimeoutExpired as exc:
+            text = (exc.stdout or "") + "\n" + (exc.stderr or "")
+            still = proc.poll() is None
+            rc = None if still else proc.returncode
+            verdict = confirm_mode.interpret_probe(rc, text, still)
+            if proc.poll() is None:
+                try:
+                    proc.kill()
+                except OSError:
+                    pass
+            try:
+                proc.communicate(timeout=3)
+            except Exception:
+                pass
+            return verdict
+    finally:
+        if proc.poll() is None:
+            try:
+                proc.kill()
+            except OSError:
+                pass
+            try:
+                proc.communicate(timeout=1)
+            except Exception:
+                pass
 
 def _poke_consumer(proc, created, seen, down):
     """连接断了或刚唤醒时，只结束创建时间仍对得上的那一个，好让读取循环返回。"""
@@ -2408,10 +2476,12 @@ def _consume_forever(event_key):
         p = subprocess.Popen(argv, cwd=BASE, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
         created = feishu_link.created_token(p.pid)
         _track_consumer(p)
-        if event_key == "im.message.receive_v1":
+        if event_key == feishu_link.MESSAGE_EVENT:
             open(os.path.join(STATE, "consumer.pid"), "w", encoding="utf-8").write(str(p.pid))
         log.info("consumer %s pid %s", event_key, p.pid)
         down = threading.Event()
+        err_lines = []
+        out_lines = []
         def _note_card_line(line, key=event_key):
             if key != confirm_mode.CARD_EVENT:
                 return
@@ -2419,15 +2489,18 @@ def _consume_forever(event_key):
                 confirm_mode.note_cards(BASE, True, "connected")
             elif confirm_mode.denied_line(line):
                 confirm_mode.note_cards(BASE, False, line)
-        def _err(proc=p, key=event_key, flag=down):
+        def _err(proc=p, key=event_key, flag=down, bucket=err_lines):
             for line in proc.stderr:
+                bucket.append(line)
                 log.info("[consume:%s] %s", key, line.rstrip())
                 _note_card_line(line, key)
                 if _LINK.note(key, line) == "down": flag.set()
-        threading.Thread(target=_err, daemon=True).start()
+        err_thread = threading.Thread(target=_err, daemon=True)
+        err_thread.start()
         threading.Thread(target=_poke_consumer, args=(p, created, seen, down), daemon=True).start()
         for line in p.stdout:
             if lifecycle.SHUTDOWN.is_set() or _LINK.generation != seen or down.is_set(): break
+            out_lines.append(line)
             line = line.strip()
             if not line.startswith("{"):
                 _note_card_line(line, event_key); continue
@@ -2438,9 +2511,11 @@ def _consume_forever(event_key):
         elif _LINK.generation != seen: reason = "wake"
         elif down.is_set(): reason = "down"
         else: reason = "exit"
-        # 这一轮接收结束了。在下一次日志写明 connected 之前，长连接不算健康。
-        if reason in ("wake", "down", "exit"):
-            _LINK.mark_link(False)
+        # 只有收消息这一路断开才算机器人断线。卡片或进群进程结束只记警告。
+        if event_key == feishu_link.MESSAGE_EVENT and reason in ("wake", "down", "exit"):
+            _LINK.mark_link(False, key=event_key)
+        elif reason in ("wake", "down", "exit"):
+            log.warning("consumer %s ended (%s); message link unchanged", event_key, reason)
         if p.poll() is None and reason in ("wake", "down", "shutdown"):
             if feishu_link.may_signal(p, created):
                 try: p.terminate()
@@ -2455,6 +2530,12 @@ def _consume_forever(event_key):
         if action != "restart":
             break
         rc = p.wait()
+        err_thread.join(timeout=1)
+        err_text = "".join(err_lines) + "".join(out_lines)
+        if event_key == confirm_mode.CARD_EVENT and reason != "wake" and confirm_mode.unsubscribed_exit(rc, err_text):
+            log.warning("consumer %s not subscribed rc=%s, not restarting this run", event_key, rc)
+            _give_up_card(err_text or ("rc=%s" % rc))
+            break
         if reason == "wake":
             delay = 0
             log.warning("consumer %s restart after wake", event_key)

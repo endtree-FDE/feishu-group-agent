@@ -607,6 +607,11 @@
           "minimum": 4,
           "maximum": 8,
           "description": "确认码位数。不写是 6。"
+        },
+        "card_callback": {
+          "type": "string",
+          "enum": ["auto", "on", "off"],
+          "description": "要不要启动卡片回调接收进程。不写是 auto：启动前探测，没订阅就不起、这次运行也不再重启，确认改用确认码。on 总是启动，没订阅则退出后不再重启。off 不启动。"
         }
       }
     },

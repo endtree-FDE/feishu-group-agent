@@ -424,7 +424,77 @@ lines, code = doctor.report(cfg_doc, note_base, ["lark-cli"], run_doc, lambda: [
 text = "\n".join(lines)
 check("诊断在卡片回调没开通时是警告，不因此失败",
       code == 0 and "FAIL" not in text and "WARN" in text and "card" in text and "长连接" in text
-      and "card.action.trigger" in text, text)
+      and "card.action.trigger" in text and "不算" in text and "确认码" in text and "一次" in text, text)
+check("card_callback 不写是 auto，off 不启动卡片进程，写错仍是 auto",
+      confirm_mode.card_callback_setting({}) == "auto"
+      and confirm_mode.card_callback_setting({"confirm": {"card_callback": "off"}}) == "off"
+      and confirm_mode.card_callback_setting({"confirm": {"card_callback": "ON"}}) == "on"
+      and confirm_mode.card_callback_setting({"confirm": {"card_callback": "maybe"}}) == "auto"
+      and confirm_mode.wants_card_process({}) is True
+      and confirm_mode.wants_card_process({"confirm": {"card_callback": "off"}}) is False
+      and confirm_mode.wants_card_process({"confirm": {"mode": "code", "high_risk_mode": "code"}}) is False)
+check("auto 探测到没订阅就从启动列表里拿掉卡片事件，on 仍保留",
+      confirm_mode.drop_unsubscribed_card(
+          ["im.message.receive_v1", "card.action.trigger"], "auto", False) == ["im.message.receive_v1"]
+      and confirm_mode.drop_unsubscribed_card(
+          ["im.message.receive_v1", "card.action.trigger"], "on", False) == ["im.message.receive_v1", "card.action.trigger"]
+      and "card.action.trigger" not in doctor.required_events({"chat_ids": ["c"], "confirm": {"card_callback": "off"}}))
+check("没订阅的退出认 failed_precondition、not subscribed 和退出码 2，普通断线不认",
+      confirm_mode.unsubscribed_exit(2, "failed_precondition: EventKey card.action.trigger requires callbacks not subscribed in console")
+      and confirm_mode.unsubscribed_exit(0, "not subscribed")
+      and confirm_mode.unsubscribed_exit(2, "")
+      and not confirm_mode.unsubscribed_exit(1, "websocket: close 1006")
+      and confirm_mode.interpret_probe(2, "", False) is False
+      and confirm_mode.interpret_probe(None, "", True) is True
+      and confirm_mode.interpret_probe(1, "boom", False) is None)
+scheme_ok = confirm_mode.write_mode(example, "button")
+scheme_ok["confirm"]["card_callback"] = "auto"
+scheme_err, _scheme_hints = check_data(scheme_ok, "copied.json", schema)
+scheme_bad = confirm_mode.write_mode(example, "button")
+scheme_bad["confirm"]["card_callback"] = "sometimes"
+scheme_bad_err, _scheme_bad_hints = check_data(scheme_bad, "copied.json", schema)
+check("配置检查接受 card_callback 的 auto/on/off，不接受别的词",
+      not scheme_err and bool(scheme_bad_err), "%s\n%s" % (scheme_err, scheme_bad_err))
+notice_base = tempfile.mkdtemp(prefix="confirm_notice_")
+notice_cfg_owners = ["ou_owner1"]
+said = []
+
+def _say(owner):
+    said.append(owner)
+    return "ok"
+
+first = confirm_mode.deliver_card_notice(notice_base, notice_cfg_owners, _say)
+second = confirm_mode.deliver_card_notice(notice_base, notice_cfg_owners, _say)
+notice_file = open(os.path.join(notice_base, "state", "card_notice.json"), encoding="utf-8").read()
+body = confirm_mode.card_notice_text()
+check("卡片回调没开通时只私聊提醒主人一次，状态里不写编号",
+      first == ["ou_owner1"] and second == [] and said == ["ou_owner1"]
+      and "确认码" in body and "card.action.trigger" in body and "断线" in body
+      and "ou_owner1" not in notice_file and "sent" in notice_file, notice_file)
+confirm_mode.note_cards(notice_base, False, "failed_precondition not subscribed")
+live = confirm_mode.effective_mode({"confirm": {"mode": "button"}}, False, confirm_mode.cards_ready(notice_base, {}))
+check("记下没订阅之后，点按钮会自动退回确认码",
+      live == "code" and confirm_mode.card_note_state(notice_base, {}) is False)
+msg_only = [
+    {"pid": 8, "cmdline": "python agentbot.py a.json"},
+    {"pid": 9, "cmdline": "lark-cli event consume im.message.receive_v1 --profile placeholder --as bot"},
+]
+quiet_rows = doctor.judge_running_consumes(msg_only, notice_base, "placeholder", cfg_doc, {})
+ready_base = tempfile.mkdtemp(prefix="confirm_ready_")
+confirm_mode.note_cards(ready_base, True, "connected")
+missing_rows = doctor.judge_running_consumes(msg_only, ready_base, "placeholder", cfg_doc, {})
+off_rows = doctor.judge_running_consumes(
+    msg_only, ready_base, "placeholder", dict(cfg_doc, confirm={"mode": "button", "card_callback": "off"}), {})
+check("没订阅时接收进程数量不含卡片，连上之后缺了卡片进程才提醒",
+      quiet_rows and quiet_rows[0][0] == "OK" and "不含" in quiet_rows[0][1] and "不算断线" in quiet_rows[0][1]
+      and "预期 1 个，看到 1 个" in quiet_rows[0][1]
+      and missing_rows and missing_rows[0][0] == "WARN" and "card.action.trigger" in missing_rows[0][1]
+      and off_rows and off_rows[0][0] == "OK" and "card_callback=off" in off_rows[0][1],
+      "%s\n%s\n%s" % (quiet_rows, missing_rows, off_rows))
+check("card_callback=off 时即使以前连上过，确认也退回确认码",
+      confirm_mode.cards_ready(ready_base, None, {"confirm": {"card_callback": "off"}}) is False
+      and confirm_mode.plan({"confirm": {"mode": "button", "card_callback": "off"}}, ready_base)["mode"] == "code"
+      and confirm_mode.plan({"confirm": {"mode": "button", "card_callback": "off"}}, ready_base)["fallback"] is True)
 
 # ---------- PowerShell 5.1 ----------
 reload = open(os.path.join(FW, "scripts", "reload.ps1"), "rb").read()
