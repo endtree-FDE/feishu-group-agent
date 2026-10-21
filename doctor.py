@@ -1,6 +1,7 @@
 # 只读诊断。不启动 event consume，不发消息，不写心跳。
 # 外部命令、进程列表、域名解析都由调用方传入，测试不必连真的飞书。
 import base64, csv, io, json, os, re, socket, subprocess
+import confirm_mode
 
 _SCOPE_RX = re.compile(r"\b[a-z][a-z0-9_.]*(?::[a-z0-9_.]+){1,8}\b")
 _SECRET_KEY = re.compile(r"^(app_secret|api_key|api_secret|password|passwd)$", re.I)
@@ -70,6 +71,22 @@ def required_scopes(cfg):
     chats = cfg.get("chats") or {}
     if chats.get("auto_join") and not (cfg.get("chat_ids") or []):
         need.extend(["im:chat:read", "im:chat.members:read"])
+    p2p = cfg.get("p2p") or {}
+    if isinstance(p2p, dict) and p2p.get("allow_group_members"):
+        need.append("im:chat.members:read")
+    # 早晨摘要自己去读日历和任务表。工具开关没开时，这两项权限仍要有，否则摘要读不到。
+    digest_cfg = cfg.get("digest") if isinstance(cfg.get("digest"), dict) else {}
+    if digest_cfg.get("enabled"):
+        import digest as digest_mod
+        if digest_mod.settings(cfg).get("include_calendar") and digest_mod.calendar_id(cfg):
+            need.append("calendar:calendar.event:read")
+        if digest_mod.settings(cfg).get("include_tasks") and digest_mod.task_table(cfg):
+            need.append("base:record:read")
+    kcfg = cfg.get("knowledge") if isinstance(cfg.get("knowledge"), dict) else {}
+    if kcfg.get("enabled"):
+        import knowledge as knowledge_mod
+        for item in knowledge_mod.scopes_for(cfg):
+            need.append(item)
     out = []
     for item in need:
         if item not in out:
@@ -82,7 +99,63 @@ def required_events(cfg):
     chats = (cfg or {}).get("chats") or {}
     if chats.get("auto_join") and not ((cfg or {}).get("chat_ids") or []):
         events.extend(["im.chat.member.bot.added_v1", "im.chat.member.bot.deleted_v1"])
+    if confirm_mode.wants_card_process(cfg):
+        events.append(confirm_mode.CARD_EVENT)
     return events
+
+
+def expected_running_events(cfg, card_state):
+    """真正应该在跑的 event consume。卡片没开通或还没连上过时，不把 card.action.trigger 算进去。"""
+    events = ["im.message.receive_v1"]
+    chats = (cfg or {}).get("chats") or {}
+    if chats.get("auto_join") and not ((cfg or {}).get("chat_ids") or []):
+        events.extend(["im.chat.member.bot.added_v1", "im.chat.member.bot.deleted_v1"])
+    mode = confirm_mode.card_callback_setting(cfg)
+    if mode == "on" or (mode != "off" and confirm_mode.wants_cards(cfg) and card_state is True):
+        if confirm_mode.wants_cards(cfg) and confirm_mode.CARD_EVENT not in events:
+            events.append(confirm_mode.CARD_EVENT)
+    return events
+
+
+def _consume_events(procs, profile):
+    found = {}
+    for proc in procs or []:
+        cmd = proc.get("cmdline") or ""
+        low = cmd.lower()
+        if "lark-cli" not in low or not re.search(r"(?:^|\s)event\s+consume(?:\s|$)", low):
+            continue
+        if profile and profile not in cmd:
+            continue
+        match = re.search(r"event\s+consume\s+(\S+)", cmd, re.I)
+        key = match.group(1) if match else "?"
+        found[key] = found.get(key, 0) + 1
+    return found
+
+
+def judge_running_consumes(procs, base, profile, cfg, env=None):
+    """接收进程数量。后台没订阅卡片回调时，缺少 card.action.trigger 不算少，也不算断线。"""
+    if procs is None:
+        return []
+    state = confirm_mode.card_note_state(base, env)
+    expected = expected_running_events(cfg, state)
+    found = _consume_events(procs, profile)
+    got = [name for name in expected if found.get(name)]
+    missing = [name for name in expected if not found.get(name)]
+    mode = confirm_mode.card_callback_setting(cfg)
+    wants = confirm_mode.wants_cards(cfg)
+    level = "OK"
+    info = "预期 %d 个，看到 %d 个" % (len(expected), len(got))
+    if mode == "off":
+        info += "。card_callback=off，不把卡片进程算进去，确认用确认码"
+    elif wants and confirm_mode.CARD_EVENT not in expected:
+        info += "。不含 card.action.trigger：没开通时不把它算进接收进程数量，这不算断线，确认已改用确认码"
+    if state is False and found.get(confirm_mode.CARD_EVENT):
+        level = "WARN"
+        info += "。本机记录是没开通，进程表里却还有卡片接收进程。这一版不会再反复拉起它"
+    if missing and sum(found.values()):
+        level = "WARN"
+        info += "。还缺 " + ", ".join(missing)
+    return [(level, info)]
 
 
 def scopes_in(text):
@@ -331,6 +404,9 @@ def report(cfg, base, exe, run, processes, resolve, connect, modules, env):
         add("FAIL", "config", "含有密钥字段 %s，请从配置里删掉" % ", ".join(secrets))
     else:
         add("OK", "config", "没有 app_secret")
+    from providers.settings import doctor_lines
+    for level, name, info in doctor_lines(cfg, env):
+        add(level, name, info)
 
     profile = str(cfg.get("profile") or "")
     if not profile:
@@ -377,6 +453,26 @@ def report(cfg, base, exe, run, processes, resolve, connect, modules, env):
         # event list 列的是命令行认识的全部事件，不是这个应用在开放平台的订阅。不能据此判失败。
         need_ev = required_events(cfg)
         add("OK", "events", "需要 %s。订阅请在开放平台核对，这里不根据 event list 判断" % ", ".join(need_ev))
+        if not confirm_mode.wants_cards(cfg):
+            card_level, card_info = "OK", "当前确认方式不用点按钮"
+        elif confirm_mode.card_callback_setting(cfg) == "off":
+            card_level, card_info = "OK", "confirm.card_callback=off，不启动卡片接收进程，确认用确认码。这不算断线"
+        elif confirm_mode.card_note_state(base, env) is True:
+            card_level, card_info = "OK", "本机已经连上卡片回调"
+        elif confirm_mode.card_note_state(base, env) is False:
+            card_level = "WARN"
+            card_info = (
+                "本机记下卡片回调没开通，不会启动或反复重启 card.action.trigger。"
+                "这不算机器人断线，也不会发断线提醒。确认已改用确认码，只私聊提醒主人一次。"
+                + confirm_mode.CARD_STEPS
+            )
+        else:
+            card_level, card_info = confirm_mode.doctor_card(scope_text)
+            card_info += (
+                " 没订阅时不启动、也不反复重启这个接收进程，消息长连接仍算连着，不会发断线提醒。"
+                "确认自动改用确认码，只私聊提醒主人一次。"
+            )
+        add(card_level, "card", card_info)
 
     try:
         addresses = list(resolve("open.feishu.cn"))
@@ -411,6 +507,8 @@ def report(cfg, base, exe, run, processes, resolve, connect, modules, env):
     else:
         for level, info in duplicate_findings(procs, base, profile):
             add(level, "processes", info)
+        for level, info in judge_running_consumes(procs, base, profile, cfg, env):
+            add(level, "consume", info)
     return lines, (1 if fail else 0)
 
 

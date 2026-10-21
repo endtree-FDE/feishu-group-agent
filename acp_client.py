@@ -1049,6 +1049,15 @@ class Pool:
             chosen,
             why,
         )
+        if allowed and why == "web":
+            try:
+                import usage
+                if _web_search_identity(tool):
+                    usage.note_tool("web_search")
+                elif _web_fetch_identity(tool):
+                    usage.note_tool("web_fetch")
+            except Exception:
+                pass
         self._write({"jsonrpc": "2.0", "id": msg["id"], "result": result})
 
     def _rpc(self, method, params, timeout):

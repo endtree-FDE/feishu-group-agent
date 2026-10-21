@@ -25,6 +25,8 @@ def load_schema():
 
 
 def _is_type(value, typ):
+    if isinstance(typ, list):
+        return any(_is_type(value, item) for item in typ)
     if typ == "string":
         return isinstance(value, str)
     if typ == "boolean":
@@ -141,6 +143,22 @@ def secret_errors(data):
     url = agent.get("base_url")
     if isinstance(url, str) and url.strip() and _secretish(url):
         errors.append(("agent.base_url", "地址里不要带密钥，也不要在问号后面写 api_key。"))
+    kn = data.get("knowledge") if isinstance(data.get("knowledge"), dict) else {}
+    emb = kn.get("embeddings") if isinstance(kn.get("embeddings"), dict) else {}
+    kenv = emb.get("api_key_env")
+    if isinstance(kenv, str) and kenv.strip() and (not ENV_NAME.match(kenv) or _secretish(kenv)):
+        errors.append(("knowledge.embeddings.api_key_env", "要写环境变量的名字，不要把密钥写在这里。"))
+    kurl = emb.get("base_url")
+    if isinstance(kurl, str) and kurl.strip() and _secretish(kurl):
+        errors.append(("knowledge.embeddings.base_url", "地址里不要带密钥，也不要在问号后面写 api_key。"))
+    for home in ("model", "search"):
+        block = data.get(home) if isinstance(data.get(home), dict) else {}
+        env = block.get("api_key_env")
+        if isinstance(env, str) and env.strip() and (not ENV_NAME.match(env) or _secretish(env)):
+            errors.append(("%s.api_key_env" % home, "要写环境变量的名字，例如 OPENAI_API_KEY。不要把密钥写在这里。"))
+        url = block.get("base_url")
+        if isinstance(url, str) and url.strip() and _secretish(url):
+            errors.append(("%s.base_url" % home, "地址里不要带密钥，也不要在问号后面写 api_key。"))
     return errors
 
 
@@ -174,6 +192,12 @@ def check_data(data, filename="config.json", schema=None):
     for path, msg in secret_errors(data):
         if path not in seen:
             errors.append((path, msg))
+            seen.add(path)
+    from providers.settings import key_problems
+    for path, msg in key_problems(data):
+        if path not in seen:
+            errors.append((path, msg))
+            seen.add(path)
     return errors, placeholder_hints(data, filename)
 
 

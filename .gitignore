@@ -38,3 +38,6 @@ redact_candidates.txt
 # 本地工具缓存
 agent-tools/
 **/.attach/
+
+# 回答质量回归的报告和沙箱。基线在 evals/baseline/，可以提交。
+evals/out/

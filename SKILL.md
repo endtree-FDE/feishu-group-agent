@@ -18,13 +18,15 @@ description: >-
 - 模型看 `model_provider` 和 `agent.model`。没写 `model_provider` 时用这台电脑上的 Cursor。只有这条路在 `agent.model` 留空时才用 `grok-4.7-high-fast`。DeepSeek、通义、智谱、盘古或别的 OpenAI 兼容地址以配置里的模型名为准，不会套这个名字。额度是对方自己电脑上 `cursor-agent login` 的账号，或对方自己的环境变量。不要写死任何账号，不要改用你自己的登录去顶替对方。
 - 不往群里发测试消息。验收请一位真人私聊一次、在群里 @ 一次。
 - 不删除、不覆盖正文、不改权限、不邀请他人。写操作只有白名单的人、白名单的资源、白名单的命令，加上本人 6 位确认码。
-- 不主动发消息。看门狗只写本地日志。
+- 不主动发消息。看门狗默认只写本地日志。断线私聊和早晨摘要默认关；对方明确要求时才按 `docs/断线提醒与晨报.md` 打开。摘要不点名所有人。
 - 对方机器上的配置会有真实群编号和文档编号，这是正常的。不要把填好的配置、`redact.txt`、`logs/`、`memory/` 提交进这个模板仓库。
 - 话题红线默认空。不要擅自加屏蔽词。对方要限制话题时，按 `agents/CONFIG.md` 写 `policy.redlines`。
 
 ## 从零新建
 
-按 `docs/新建智能体.md` 的编号做完再进入下一步。
+对方是第一次在 Windows 上装、不改配置文件的人：让对方自己运行 `scripts\setup.ps1`（说明在 `docs/一键安装.md`）。向导一次问一个问题。App Secret 只由对方向导交给 `lark-cli config init --name <profile> --app-secret-stdin`，你不要代贴，也不要写进文件。
+
+需要逐步核对时，再按 `docs/新建智能体.md` 的编号做完再进入下一步。
 
 1. 对方在开放平台创建企业自建应用，把 App ID 给你。Secret 不给你。
 2. 用文档里的一键链接申请权限（把 `clientID` 换成 App ID）。事件订阅用长连接，事件名 `im.message.receive_v1`。然后由对方发布版本并设置可用范围。

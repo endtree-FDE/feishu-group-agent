@@ -78,7 +78,7 @@
 ## 明确不做
 
 - 插件市场，或让模型自己改技能、改人设。
-- 到点往群里发消息，包括晨报、提醒、进群招呼。
+- 进群招呼，以及没打开开关时到点往群里发消息。早晨摘要是唯一的例外：`digest.enabled` 为 true 才发，每个群每天最多一条，不点名所有人。断线提醒和用量周报只私聊主人，默认关。见 [断线提醒与晨报](断线提醒与晨报.md) 和 [用量周报](用量周报.md)。
 - 框架内置话题屏蔽。话题限制继续只由每个机器人自己的 `policy.redlines` 决定，默认为空。
 - 放宽写入：不取消确认码，不取消白名单，不邀请人，不代发 `@全员`（除非对方原话要求，且是已确认的日程）。
 - 把问题原文、工具结果或提示词写成可外传的轨迹。
@@ -112,7 +112,7 @@
 ### 12. CHANGELOG、版本号和 Release（本轮草稿）
 
 - **目标：** 每次对用户可见的改动有一条记录，打标签就能下载。
-- **现状：** 根目录 `VERSION` 是 `0.4.0`，`CHANGELOG.md` 有 `[0.4.0] - 2026-10-19`。程序不读这两个文件。`acp_client.py` 里给协议用的 `clientInfo` 版本字符串仍不是对外发布号。
+- **现状：** 根目录 `VERSION` 是 `0.9.0`，`CHANGELOG.md` 有 `[0.9.0] - 2026-10-20`。程序不读这两个文件。`acp_client.py` 里给协议用的 `clientInfo` 版本字符串仍不是对外发布号。发布说明见 [docs/release-0.9.0.md](release-0.9.0.md)。这份准备不打 tag。
 - **参考：** [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)、[语义化版本](https://semver.org/lang/zh-CN/)、[GitHub Releases](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)。
 - **验收：** 仓库根有 `CHANGELOG.md`，至少有一个未发布或已发布的版本节。有一处单一版本号（例如 `VERSION` 文件），和 changelog、Release 标签一致。缺这个文件时，程序行为与现在相同。Release 说明不包含密钥和真实编号。
 
@@ -147,9 +147,9 @@
 ### 17. 模型和平台可替换（本轮草稿）
 
 - **目标：** 参赛或换供应商时，只换模型或换运行平台，不复制一份飞书门卫、确认码和 SSRF 检查。
-- **现状：** `model_provider` 可以是 `cursor`、`openai_compat`、`fake`，也可以是预设 `deepseek`、`dashscope`、`zhipu`、`pangu`。预设只补空着的地址、模型名和变量名，密钥仍只在环境变量里。飞书入口没有换成别的平台。openJiuwen 用同一套 OpenAI 兼容字段对接，说明在 [用本框架参赛.md](用本框架参赛.md)。仓库里没有比赛密钥、股票池或赛题数据。
+- **现状：** `model_provider` 可以是 `cursor`、`openai_compat`、`fake`，也可以是预设 `deepseek`、`dashscope`、`zhipu`、`pangu`。预设只补空着的地址、模型名和变量名，密钥仍只在环境变量里。渠道适配器默认仍是飞书；企业微信只有实验骨架，不连接。说明在 [渠道.md](渠道.md) 和 [渠道-企业微信.md](渠道-企业微信.md)。openJiuwen 用同一套 OpenAI 兼容字段对接，说明在 [用本框架参赛.md](用本框架参赛.md)。仓库里没有比赛密钥、股票池或赛题数据。
 - **参考：** [docs/模型接口.md](模型接口.md)、[openJiuwen 赛题报道](https://caijing.chinadaily.com.cn/a/202607/20/WS6a5dd2a3a310d709c2fbe862.html)、[职场赛题](https://competitions.atomgit.com/competition/2079523455267733506)、[量化赛题](https://competitions.atomgit.com/competition/2079794808848314369)、[论文赛题](https://competitions.atomgit.com/competition/2079803553561747457)。赛题要接的是 openJiuwen / JiuwenSwarm 这一类运行时，模型名由参赛者自己配。
-- **验收：** 不写新的平台配置时，飞书入口和现有两种模型与现在相同。文档说明怎样接另一种 OpenAI 兼容模型，以及平台接口要守住的边界：白名单、确认码、脱敏、不主动发消息。仓库不收录比赛密钥、账号或赛题数据。默认不自动切换到第二家模型（那是第 8 项，默认关）。
+- **验收：** 不写新的平台配置时，飞书入口和现有两种模型与现在相同。文档说明怎样接另一种 OpenAI 兼容模型，以及平台接口要守住的边界：白名单、确认码、脱敏、默认不主动发消息。仓库不收录比赛密钥、账号或赛题数据。默认不自动切换到第二家模型（那是第 8 项，默认关）。
 
 ### 18. 自动化密钥扫描（本轮草稿）
 

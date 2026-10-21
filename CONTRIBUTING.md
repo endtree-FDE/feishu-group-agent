@@ -20,6 +20,14 @@ python tests/run_tests.py
 
 改了启动脚本、配置键或工具名时，把对应的检查补进 `tests/run_tests.py`。
 
+回答质量回归是另一套，不替代上面的单元测试。假模型这一档在 CI 里跑，不访问飞书：
+
+```text
+python evals/run.py --config agents/example.json --provider fake --tag ci --baseline evals/baseline/ci.json --out evals/out
+```
+
+加用例和升级前怎么跑真模型，见 [docs/回归测试.md](docs/回归测试.md)。不要把 `evals/out/` 或真实聊天写进仓库。
+
 另外运行：
 
 ```text

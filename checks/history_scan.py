@@ -66,6 +66,11 @@ def fixture(kind, value, path):
         tail = re.sub(r"[\"')\]},]+$", "", tail)
         if tail.lower() in {"false", "true", "none", "null", "", "abc"}:
             return True
+        # 日志打码留下的星号或「已隐藏」，不是写进仓库的密钥。
+        if tail and set(tail) <= {"*"}:
+            return True
+        if tail in {"[已隐藏]", "已隐藏"}:
+            return True
         if tail.startswith("REPLACE") or "environ" in tail or tail == "supersecretvalue123":
             return True
         if "api-key=" in value.lower() and "sk-" not in value.lower():
