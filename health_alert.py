@@ -260,6 +260,11 @@ def _emit(cfg, base, names, state, action, sender, log):
         maybe_toast(True, title or text, body or text)
     if log:
         log.info("health alert %s feishu=%d/%d", action, sent, len(owners))
+    try:
+        import usage
+        usage.note_health(action)
+    except Exception:
+        pass
 
 
 def tick(cfg, base, names, link_up, link_since, now=None, sender=None, log=None):

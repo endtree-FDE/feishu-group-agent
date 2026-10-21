@@ -1,6 +1,6 @@
-# 工具层：只允许白名单内的 lark-cli 命令，统一 --as bot；写操作需确认码；全部写审计日志；缺权限优雅降级。
+# 工具层：只允许白名单内的 lark-cli 命令，统一 --as bot；写操作要确认；全部写审计日志；缺权限优雅降级。
 import json, os, re, sqlite3, subprocess, struct, time, random, threading, datetime, glob, shutil, zipfile
-import guard, skills
+import confirm_mode, guard, skills, usage
 from channels.base import TOOL_CAPS
 
 def run_capture(cmd, cwd=None, timeout=60):
@@ -42,7 +42,7 @@ SCOPE_HINT = {
     "calendar_update": "calendar:calendar.event:update", "calendar_delete": "calendar:calendar.event:delete",
     "base_create": "base:record:create", "merge_forward": "im:message:readonly",
 }
-READ_TOOLS = {"history", "docs_read", "docs_search", "calendar_read", "base_read", "message_attachment", "kb_read"}
+READ_TOOLS = {"history", "docs_read", "docs_search", "calendar_read", "base_read", "message_attachment", "kb_read", "kb_search", "web_search"}
 _KB_EXT = {".md", ".txt", ".markdown"}
 WRITE_TOOLS = {"docs_create", "docs_append", "calendar_create", "calendar_create_batch", "calendar_update", "calendar_delete", "base_create"}
 _CAL_FOLLOW = {"calendar_create_batch", "calendar_update", "calendar_delete"}
@@ -171,7 +171,7 @@ class Tools:
         self.legacy_hints = apply_legacy_names(cfg)
         self.t = cfg.get("tools", {}); self.w = cfg.get("write", {})
         self.audit_dir = os.path.join(base, "audit"); os.makedirs(self.audit_dir, exist_ok=True)
-        self.pending = {}; self.pl = threading.Lock(); self.al = threading.Lock()
+        self.pending = {}; self.pl = threading.Lock(); self.al = threading.Lock(); self._tls = threading.local()
         self.names = guard.load_names(os.path.join(base, cfg.get("redact_file", "redact.txt")))
         self._db = None
         self._load_pending()
@@ -187,6 +187,14 @@ class Tools:
             if not isinstance(spec, dict) or "enabled" not in spec:
                 return self.enabled("attachment")
             return bool(spec.get("enabled"))
+        # 分群检索默认关。只有 knowledge.enabled 才出现，不看 tools 里有没有这一项。
+        if name == "kb_search":
+            import knowledge
+            return knowledge.enabled(self.cfg)
+        # 网页搜索默认关。只有 search.enabled 才出现，避免改掉原来的提示词。
+        if name == "web_search":
+            import search_backend
+            return search_backend.enabled(self.cfg)
         # 旧配置没有 kb_read 时默认可以读知识库。写成 enabled false 才关掉。
         if name == "kb_read" and name not in self.t: return True
         spec = self.t.get(name)
@@ -216,11 +224,34 @@ class Tools:
             stage(tool, argv, cwd)
         return ch.transport_read(tool, argv, call)
     def audit(self, **kw):
+        count_usage = kw.pop("count_usage", True)
+        scope = kw.pop("scope", None)
+        raw_types = kw.pop("file_types", None)
         kw["ts"] = datetime.datetime.now().isoformat(timespec="seconds")
+        hits = 0
         for k in ("args", "summary", "detail", "err", "result"):
-            if isinstance(kw.get(k), str): kw[k] = guard.redact(kw[k], self.names)
+            if isinstance(kw.get(k), str):
+                kw[k], n_hit = guard.redact_counted(kw[k], self.names)
+                hits += n_hit
+        safe_types = []
+        for item in raw_types or []:
+            tok = str(item or "")
+            if re.fullmatch(r"[a-z0-9]{1,8}", tok):
+                safe_types.append(tok)
+        if safe_types:
+            kw["file_types"] = safe_types
+        if hits:
+            kw["redact_hits"] = hits
+        kw["traffic"] = usage.current_traffic()
+        chat_raw = kw.get("chat") or ""
+        safe = confirm_mode.scrub_audit(kw)
         with self.al, open(os.path.join(self.audit_dir, datetime.date.today().strftime("%Y%m") + ".jsonl"), "a", encoding="utf-8") as f:
-            f.write(json.dumps(kw, ensure_ascii=False) + "\n")
+            f.write(json.dumps(safe, ensure_ascii=False) + "\n")
+        try:
+            usage.note_audit(kw.get("kind"), kw.get("tool"), file_types=safe_types, redact_hits=hits,
+                             chat_id=chat_raw, scope=scope, count_tool=bool(count_usage) and kw.get("ok", True) is not False)
+        except Exception:
+            self.log.warning("usage audit note failed")
 
     def lark(self, tool, argv, cwd=None, timeout=60):
         argv = list(argv) + ["--profile", self.cfg["profile"], "--as", "bot"]
@@ -281,16 +312,46 @@ class Tools:
             if not self.enabled(name): raise ToolError("这项能力还没在配置里启用")
             self._require_cap(name)
             call = getattr(self, "_" + name)
+        if isinstance(ctx, dict):
+            ctx["_file_types"] = []
         try: res = call(args or {}, ctx)
         except ToolError as e:
-            self.audit(kind="read", tool=name, user=ctx["user"], chat=ctx["chat_id"], ok=False, err=e.user_msg); raise
-        self.audit(kind="read", tool=name, user=ctx["user"], chat=ctx["chat_id"], ok=True, args=_brief(args))
+            self.audit(kind="read", tool=name, user=ctx["user"], chat=ctx["chat_id"], ok=False, err=e.user_msg, count_usage=False); raise
+        types = list(ctx.get("_file_types") or []) if isinstance(ctx, dict) else []
+        fields = {"kind": "read", "tool": name, "user": ctx["user"], "chat": ctx["chat_id"], "ok": True,
+                  "file_types": types, "scope": (ctx or {}).get("chat_type")}
+        # 读文件只记类型。路径和原文件名可能是客户资料，不写进审计。
+        if name not in ("kb_read", "message_attachment", "attachment"):
+            fields["args"] = _brief(args)
+        self.audit(**fields)
         return res
 
     def _skill_read(self, a, ctx):
         """只读技能正文。名字必须在启动时扫到的目录里，不拼接用户给的路径。"""
         try: return self.skills.read((a or {}).get("name"))
         except skills.SkillError as e: raise ToolError(str(e))
+
+    def _web_search(self, a, ctx):
+        """没有自带联网的模型用这个查公开网页。默认关。密钥不进日志。"""
+        import search_backend
+        try:
+            return search_backend.run(self.cfg, a or {}, self.names)
+        except search_backend.SearchError as e:
+            raise ToolError(e.user_msg)
+
+    def _kb_search(self, a, ctx):
+        """只查当前会话自己的索引。参数里的群号一律忽略。"""
+        import knowledge
+        if not knowledge.enabled(self.cfg):
+            raise ToolError("未知工具")
+        query = str((a or {}).get("query") or (a or {}).get("keyword") or "").strip()
+        if not query:
+            raise ToolError("没有给出要检索的内容")
+        chat = str((ctx or {}).get("chat_id") or "")
+        text = knowledge.search_text(self.base, self.cfg, chat, query, self.names, knowledge.tool_budget(self.cfg))
+        if not text:
+            return "本会话的知识库里没有查到相关内容。不要编造。"
+        return text
 
     def _kb_read(self, a, ctx):
         """只读知识库里的 md/txt。路径必须落在 kb_dir 内。"""
@@ -301,6 +362,8 @@ class Tools:
             raise ToolError("知识库里没有这个文件")
         if os.path.splitext(dest)[1].lower() not in _KB_EXT:
             raise ToolError("知识库只读取 md 和 txt")
+        if isinstance(ctx, dict):
+            ctx.setdefault("_file_types", []).append(usage.safe_file_type(dest))
         limit = (self.t.get("kb_read") or {}).get("max_chars", 8000)
         try:
             raw = open(dest, encoding="utf-8-sig", errors="replace").read()
@@ -446,7 +509,9 @@ class Tools:
         days = self._history_days()
         if time.time() - ts > days * 86400:
             raise ToolError("这条消息超过了最近 %d 天，不能读取附件" % days)
-        d, files, mtype, saved = self.fetch_attachments(mid, ctx, os.path.join(self.base, "tmp"), must_enable=False)
+        d, files, mtype, saved = self.fetch_attachments(mid, ctx, os.path.join(self.base, "tmp"), must_enable=False, count_usage=False)
+        if isinstance(ctx, dict):
+            ctx.setdefault("_file_types", []).extend(usage.safe_file_type(path) for path in files)
         saved_id = str((saved or {}).get("message_id") or (saved or {}).get("id") or "")
         saved_chat = _msg_chat(saved)
         if (saved_id and saved_id != mid) or (saved_chat and saved_chat != chat):
@@ -508,12 +573,7 @@ class Tools:
         raw = args or {}
         argv, summary, steps = self._build_write(name, raw)
         notify = _want_notify(name, raw, ctx.get("question") or "")
-        rec = {"tool": name, "argv": argv, "steps": steps, "summary": summary, "user": ctx["user"],
-               "chat_id": ctx["chat_id"], "scope": str(ctx.get("scope") or ""), "ts": time.time(), "notify_all": notify}
-        code = self._reserve(rec)
-        self.audit(kind="write_proposed", tool=name, user=ctx["user"], chat=ctx["chat_id"], code=code, summary=summary)
-        ttl = int(self.w.get("confirm_ttl_sec", 300)) // 60
-        return "将要执行：%s\n请发起人在 %d 分钟内 @我 回复「确认 %s」执行，或「取消 %s」。" % (summary, ttl, code, code)
+        return self._propose_record(name, summary, steps, argv, ctx, notify, memory_text="")
 
     def propose_memory(self, args, ctx):
         """模型提议记一条。落盘仍要白名单发起人用确认码点头。"""
@@ -528,13 +588,87 @@ class Tools:
         if len(text) < 2: raise ToolError("要记的内容太短")
         if limit > 0 and len(text) > limit: raise ToolError("太长了，请控制在 %d 字以内" % limit)
         summary = "写入群记忆：%s" % text[:80]
-        rec = {"tool": "memory_propose", "argv": [], "steps": [], "summary": summary, "memory_text": text,
-               "user": ctx["user"], "chat_id": ctx["chat_id"], "scope": str(ctx.get("scope") or ""),
-               "ts": time.time(), "notify_all": False}
+        return self._propose_record("memory_propose", summary, [], [], ctx, False, memory_text=text)
+
+    def _propose_record(self, name, summary, steps, argv, ctx, notify, memory_text=""):
+        plan = confirm_mode.plan(self.cfg, self.base, confirm_mode.is_high_risk(name))
+        scope = str(ctx.get("scope") or "")
+        ah = confirm_mode.action_hash(name, steps, ctx["user"], ctx["chat_id"], scope, memory_text[:80] if memory_text else "")
+        now = time.time()
+        rec = {"tool": name, "argv": argv, "steps": steps, "summary": summary, "user": ctx["user"],
+               "chat_id": ctx["chat_id"], "scope": scope, "ts": now, "notify_all": bool(notify),
+               "usage_scope": "p2p" if ctx.get("chat_type") == "p2p" else "group",
+               "mode": plan["mode"], "token": plan["token"], "action_hash": ah,
+               "expires": now + plan["ttl"], "button_ok": False, "code_ok": False,
+               "fallback": plan["fallback"], "impact": confirm_mode.impact(name, notify)}
+        if memory_text:
+            rec["memory_text"] = memory_text
         code = self._reserve(rec)
-        self.audit(kind="write_proposed", tool="memory_propose", user=ctx["user"], chat=ctx["chat_id"], code=code, summary=summary)
-        ttl = int(self.w.get("confirm_ttl_sec", 300)) // 60
-        return "将要记入本群记忆：%s\n请发起人在 %d 分钟内 @我 回复「确认 %s」执行，或「取消 %s」。没确认之前，不要把它当成已经记住。" % (text[:200], ttl, code, code)
+        self.audit(kind="write_proposed", tool=name, user=ctx["user"], chat=ctx["chat_id"], code=code,
+                   token=plan["token"], summary=summary, scope=ctx.get("chat_type"))
+        if plan["fallback"]:
+            self.log.warning("confirm cards unavailable, using code")
+        if plan["mode"] == "code":
+            self._arm_card(None)
+            minutes = int(plan["ttl"]) // 60
+            if memory_text:
+                return "将要记入本群记忆：%s\n请发起人在 %d 分钟内 @我 回复「确认 %s」执行，或「取消 %s」。没确认之前，不要把它当成已经记住。" % (memory_text[:200], minutes, code, code)
+            return "将要执行：%s\n请发起人在 %d 分钟内 @我 回复「确认 %s」执行，或「取消 %s」。" % (summary, minutes, code, code)
+        shown = summary if not memory_text else ("记入本群记忆：" + memory_text[:200])
+        text = confirm_mode.button_text(guard.redact(shown, self.names), rec["impact"], plan["mode"], code, plan["ttl"])
+        text = guard.redact(text, self.names)
+        if memory_text and plan["mode"] != "button":
+            text += "\n没确认之前，不要把它当成已经记住。"
+        elif memory_text:
+            text += "\n没点确认之前，不要把它当成已经记住。"
+        card = confirm_mode.build_card(text, plan["token"], ah)
+        self._arm_card({"card": card, "token": plan["token"]})
+        return text
+
+    def _arm_card(self, payload):
+        self._tls.card = payload
+
+    def take_confirm_card(self):
+        payload = getattr(self._tls, "card", None)
+        self._tls.card = None
+        return payload
+
+    def reveal_code(self, token):
+        """卡片没发出去时改回确认码，避免按钮模式卡住。"""
+        with self.pl:
+            code, rec = self._find_token(str(token or ""))
+            if not code or not rec or (rec.get("mode") or "code") == "code":
+                return ""
+            rec["mode"] = "code"
+            rec["fallback"] = True
+            self.pending[code] = rec
+            if not self._update_pending(code, rec):
+                return ""
+            left = int(float(rec.get("expires") or 0) - time.time())
+            if left >= 60:
+                when = "%d 分钟" % (left // 60)
+            else:
+                when = "%d 秒" % max(1, left)
+            summary = rec.get("summary") or ""
+            mem = rec.get("memory_text") or ""
+            if mem:
+                body = "将要记入本群记忆：%s\n请发起人在 %s内 @我 回复「确认 %s」执行，或「取消 %s」。没确认之前，不要把它当成已经记住。" % (mem[:200], when, code, code)
+            else:
+                body = "将要执行：%s\n请发起人在 %s内 @我 回复「确认 %s」执行，或「取消 %s」。" % (summary, when, code, code)
+            return "卡片没发出去，改用确认码。\n" + body
+
+    def bind_card_message(self, token, message_id):
+        token = str(token or "")
+        message_id = str(message_id or "")
+        if not token or not message_id:
+            return
+        with self.pl:
+            for code, rec in list(self.pending.items()):
+                if rec.get("token") == token:
+                    rec["card_mid"] = message_id
+                    self.pending[code] = rec
+                    self._update_pending(code, rec)
+                    return
 
     def _build_write(self, name, a):
         """返回 (首条命令, 给人看的说明, 步骤列表)。每一步是 {"tool","argv"}。旧的单步记录仍只靠 argv。"""
@@ -623,20 +757,43 @@ class Tools:
         conn = sqlite3.connect(os.path.join(d, "state.db"), check_same_thread=False)
         conn.execute("create table if not exists pending_writes(code text primary key, ts real, payload text)")
         conn.execute("create table if not exists used_writes(code text primary key, ts real)")
+        conn.execute("create table if not exists used_confirm_tokens(token text primary key, ts real)")
         self._db = conn
         return conn
 
+    def _stale(self, rec, now=None):
+        now = time.time() if now is None else now
+        if not isinstance(rec, dict):
+            return True
+        if rec.get("expires"):
+            try:
+                return now > float(rec["expires"])
+            except (TypeError, ValueError):
+                return True
+        ttl = int(self.w.get("confirm_ttl_sec", 300))
+        return now - float(rec.get("ts") or 0) > ttl
+
     def _load_pending(self):
-        """重启后恢复还没过期、也没被用过的确认码。用过的码即使被写回表里也不再执行。"""
-        ttl = int(self.w.get("confirm_ttl_sec", 300)); now = time.time()
+        """重启后恢复还没过期、也没被用过的确认。用过的即使被写回表里也不再执行。"""
+        now = time.time()
         try: rows = list(self._state_db().execute("select code, ts, payload from pending_writes"))
         except Exception: return
         with self.pl:
             for code, ts, payload in rows:
-                if self._code_used(code) or now - float(ts or 0) > ttl:
+                if self._code_used(code):
                     self._drop_pending(code); continue
-                try: self.pending[code] = json.loads(payload)
-                except Exception: self._drop_pending(code)
+                try: rec = json.loads(payload)
+                except Exception:
+                    self._drop_pending(code); continue
+                if not isinstance(rec, dict):
+                    self._drop_pending(code); continue
+                if "ts" not in rec:
+                    rec["ts"] = ts
+                if self._token_used(rec.get("token")):
+                    self._drop_pending(code); continue
+                if self._stale(rec, now):
+                    self._expire_pending(code, rec); continue
+                self.pending[code] = rec
 
     def _save_pending(self, code, rec):
         """只插入。撞上已有的码就失败，不能覆盖别人还没确认的操作。"""
@@ -651,6 +808,14 @@ class Tools:
             self.log.warning("pending save failed: %s", guard.redact(str(e), self.names)[:200])
             return False
 
+    def _expire_pending(self, code, payload=None):
+        """确认码过了有效期。审计只记动作，不把待写入的正文再抄一遍。"""
+        p = payload if isinstance(payload, dict) else (self.pending.get(code) or {})
+        self.pending.pop(code, None)
+        self._drop_pending(code)
+        self.audit(kind="write_expired", tool=str(p.get("tool") or ""), user=str(p.get("user") or ""),
+                   chat=str(p.get("chat_id") or ""), scope=p.get("usage_scope") or "")
+
     def _drop_pending(self, code):
         try:
             self._state_db().execute("delete from pending_writes where code=?", (code,))
@@ -664,21 +829,45 @@ class Tools:
         except Exception:
             return False
 
-    def _mark_used(self, code):
+    def _update_pending(self, code, rec):
+        try:
+            self._state_db().execute("update pending_writes set payload=? where code=?",
+                                     (json.dumps(rec, ensure_ascii=False), code))
+            self._state_db().commit()
+            return True
+        except Exception as e:
+            self.log.warning("pending update failed: %s", guard.redact(str(e), self.names)[:200])
+            return False
+
+    def _token_used(self, token):
+        token = str(token or "")
+        if not token:
+            return False
+        try:
+            row = self._state_db().execute("select 1 from used_confirm_tokens where token=?", (token,)).fetchone()
+            return bool(row)
+        except Exception:
+            return False
+
+    def _mark_used(self, code, token=""):
         """先记下已用。记不上就不执行，避免删失败之后重启还能再确认一次。"""
         try:
             self._state_db().execute("insert or ignore into used_writes(code, ts) values(?,?)", (code, time.time()))
+            if token:
+                self._state_db().execute("insert or ignore into used_confirm_tokens(token, ts) values(?,?)", (token, time.time()))
             self._state_db().commit()
-            return self._code_used(code)
+            return self._code_used(code) and (not token or self._token_used(token))
         except Exception as e:
             self.log.warning("used mark failed: %s", guard.redact(str(e), self.names)[:200])
             return False
 
     def _reserve(self, rec):
+        digits = confirm_mode.code_digits(self.cfg)
+        span = 10 ** digits
         with self.pl:
             self._gc()
             for _ in range(8):
-                code = "%06d" % random.SystemRandom().randint(0, 999999)
+                code = "%0*d" % (digits, random.SystemRandom().randint(0, span - 1))
                 if code in self.pending or self._code_used(code): continue
                 if self._save_pending(code, rec):
                     self.pending[code] = rec
@@ -686,14 +875,30 @@ class Tools:
         raise ToolError("暂时发不出确认码，请再试一次")
 
     def _gc(self):
-        ttl = int(self.w.get("confirm_ttl_sec", 300))
-        for c in [c for c, p in self.pending.items() if time.time() - p["ts"] > ttl]:
-            self.pending.pop(c, None); self._drop_pending(c)
+        now = time.time()
+        for c in [c for c, p in self.pending.items() if self._stale(p, now)]:
+            self._expire_pending(c, self.pending.get(c))
         try:
             self._state_db().execute("delete from used_writes where ts < ?", (time.time() - 86400,))
+            self._state_db().execute("delete from used_confirm_tokens where ts < ?", (time.time() - 86400,))
             self._state_db().commit()
         except Exception:
             pass
+
+    def _find_token(self, token):
+        for code, rec in self.pending.items():
+            if rec.get("token") == token:
+                return code, rec
+        return "", None
+
+    def _same_write_actor(self, rec, ctx, from_card=False):
+        if rec.get("user") != ctx.get("user") or rec.get("chat_id") != ctx.get("chat_id"):
+            return False
+        want = str(rec.get("scope") or "")
+        got = str(ctx.get("scope") or "")
+        if from_card and not got:
+            return True
+        return got == want
 
     def confirm(self, code, ctx, cancel=False):
         ctx = ctx or {}
@@ -702,23 +907,81 @@ class Tools:
         with self.pl:
             self._gc(); p = self.pending.get(code)
             if not p or self._code_used(code): return "确认码无效或已过期。"
-            same = p["user"] == ctx["user"] and p["chat_id"] == ctx["chat_id"] and str(p.get("scope") or "") == str(ctx.get("scope") or "")
-            if not same: return "只有发起人本人在原会话里才能确认。"
-            if not self._mark_used(code): return "确认没能记下，请稍后再试。"
+            if not self._same_write_actor(p, ctx, False): return "只有发起人本人在原会话里才能确认。"
+            mode = p.get("mode") or "code"
+            if mode == "button":
+                return "这次请点卡片上的「确认」或「取消」。回复数字不算。"
+            if mode == "button_and_code" and not cancel and not p.get("button_ok"):
+                p["code_ok"] = True
+                self.pending[code] = p
+                if not self._update_pending(code, p):
+                    return "确认没能记下，请稍后再试。"
+                return "确认码已记下。请再点卡片上的「确认」。"
+            if not self._mark_used(code, p.get("token") or ""): return "确认没能记下，请稍后再试。"
             self.pending.pop(code, None); self._drop_pending(code)
+        return self._finish_write(p, ctx, code, cancel)
+
+    def confirm_click(self, token, op, given_hash, ctx, message_id=""):
+        """卡片按钮。返回给界面的文字和更新后的卡片。记号不是我们发的时 text 说明无效。"""
+        ctx = ctx or {}
+        token = str(token or "")
+        invalid = {"text": "确认无效或已过期。", "card": confirm_mode.done_card("已失效", "这张卡片不能再用。请重新发起。"), "patch": True, "ok": False}
+        if not token or not _actor_ok(ctx):
+            return {"text": "不能确认：缺少发送人或会话。", "card": invalid["card"], "patch": True, "ok": False}
+        with self.pl:
+            if self._token_used(token):
+                return {"text": "已经处理过，不能再点一次。", "card": confirm_mode.done_card("已处理", "这次已经点过了。"), "patch": True, "ok": False}
+            code, p = self._find_token(token)
+            if not p or self._code_used(code):
+                return invalid
+            if self._stale(p):
+                self._expire_pending(code, p)
+                return {"text": "这次确认已经过期。请重新发起。", "card": confirm_mode.done_card("已过期", "时间过了，没有执行。"), "patch": True, "ok": False}
+            if not self._same_write_actor(p, ctx, True):
+                self.audit(kind="write_denied", tool=p.get("tool"), user=ctx.get("user"), chat=ctx.get("chat_id"), token=token, err="other")
+                return {"text": "只有发起人本人在原会话里才能确认。", "card": None, "patch": False, "ok": False}
+            if str(given_hash or "") != str(p.get("action_hash") or ""):
+                self.audit(kind="write_denied", tool=p.get("tool"), user=ctx.get("user"), chat=ctx.get("chat_id"), token=token, err="tamper")
+                return {"text": "卡片内容和要做的事对不上，没有执行。", "card": None, "patch": False, "ok": False}
+            card_mid = str(p.get("card_mid") or "")
+            if card_mid and message_id and card_mid != message_id:
+                return {"text": "不是原来的那张卡片。", "card": None, "patch": False, "ok": False}
+            mode = p.get("mode") or "code"
+            cancel = op == "no"
+            if mode == "code":
+                return {"text": "这次请回复确认码，点按钮不算。", "card": None, "patch": False, "ok": False}
+            if mode == "button_and_code" and not cancel and not p.get("code_ok"):
+                p["button_ok"] = True
+                self.pending[code] = p
+                if not self._update_pending(code, p):
+                    return {"text": "确认没能记下，请稍后再试。", "card": None, "patch": False, "ok": False}
+                return {"text": "按钮已记下。请再回复确认码。",
+                        "card": confirm_mode.done_card("还差确认码", "按钮已记下。请在原来的会话里回复确认码。"),
+                        "patch": True, "ok": False}
+            if not self._mark_used(code, token):
+                return {"text": "确认没能记下，请稍后再试。", "card": None, "patch": False, "ok": False}
+            self.pending.pop(code, None); self._drop_pending(code)
+        text = self._finish_write(p, ctx, code, cancel)
+        title = "已取消" if cancel else ("已确认" if str(text).startswith("已完成") or str(text).startswith("已记") else "没做成")
+        return {"text": text, "card": confirm_mode.done_card(title, text), "patch": True, "ok": title == "已确认"}
+
+    def _finish_write(self, p, ctx, code, cancel):
         if cancel:
-            self.audit(kind="write_cancelled", tool=p["tool"], user=ctx["user"], code=code); return "已取消。"
+            self.audit(kind="write_cancelled", tool=p["tool"], user=ctx["user"], chat=ctx.get("chat_id"), code=code,
+                       token=p.get("token") or "", scope=ctx.get("chat_type") or p.get("usage_scope"))
+            return "已取消。"
         if p.get("tool") == "memory_propose":
             hook = getattr(self, "memory_hook", None)
             if not hook:
-                self.audit(kind="write_failed", tool="memory_propose", user=ctx["user"], code=code, err="no hook")
+                self.audit(kind="write_failed", tool="memory_propose", user=ctx["user"], code=code, token=p.get("token") or "", err="no hook")
                 return "记忆功能还没接上。"
             try: msg = hook(p.get("memory_text") or "", ctx)
             except Exception as e:
-                self.audit(kind="write_failed", tool="memory_propose", user=ctx["user"], code=code, err=str(e)[:200])
+                self.audit(kind="write_failed", tool="memory_propose", user=ctx["user"], code=code, token=p.get("token") or "", err=str(e)[:200])
                 return "执行失败：" + str(e)[:120]
             kind = "write_done" if str(msg).startswith("已记") else "write_failed"
-            self.audit(kind=kind, tool="memory_propose", user=ctx["user"], chat=ctx["chat_id"], code=code, summary=p.get("summary"), result=_brief(msg))
+            self.audit(kind=kind, tool="memory_propose", user=ctx["user"], chat=ctx["chat_id"], code=code,
+                       token=p.get("token") or "", summary=p.get("summary"), result=_brief(msg))
             return msg
         steps = p.get("steps") or [{"tool": p.get("tool"), "argv": p.get("argv") or []}]
         links, done = [], 0
@@ -729,17 +992,17 @@ class Tools:
                 link = d.get("url") or d.get("doc" + "_url") or (d.get("document") or {}).get("url") or d.get("app_link") or ""
                 if link: links.append(link)
         except ToolError as e:
-            self.audit(kind="write_failed", tool=p["tool"], user=ctx["user"], code=code, err=e.user_msg, detail=e.detail[:300])
+            self.audit(kind="write_failed", tool=p["tool"], user=ctx["user"], code=code, token=p.get("token") or "", err=e.user_msg, detail=e.detail[:300])
             if done: return "已完成 %d/%d 步。后面的失败了：%s" % (done, len(steps), e.user_msg)
             return "执行失败：" + e.user_msg
-        self.audit(kind="write_done", tool=p["tool"], user=ctx["user"], chat=ctx["chat_id"], code=code, summary=p["summary"],
-                   result=_brief({"n": done, "links": links[:5]}))
+        self.audit(kind="write_done", tool=p["tool"], user=ctx["user"], chat=ctx["chat_id"], code=code,
+                   token=p.get("token") or "", summary=p["summary"], result=_brief({"n": done, "links": links[:5]}))
         msg = "已完成：%s%s" % (p["summary"], ("\n" + "\n".join(links)) if links else "")
         if p.get("notify_all"): msg = '<at user_id="all"></at>\n' + msg
         return msg
 
     # ---------- 附件（图片/文件） ----------
-    def fetch_attachments(self, message_id, ctx, tmp_root, must_enable=True):
+    def fetch_attachments(self, message_id, ctx, tmp_root, must_enable=True, count_usage=True):
         if must_enable and not self.enabled("attachment"): raise ToolError("图片和文件识别还没在配置里启用")
         d = os.path.join(tmp_root, "att_" + re.sub(r"\W", "", message_id)[-20:]); os.makedirs(d, exist_ok=True)
         j = self._transport("attachment", ["im", "+messages-mget", "--message-ids", message_id, "--download-resources", "--no-reactions"], cwd=d, timeout=120)
@@ -761,7 +1024,9 @@ class Tools:
             shutil.rmtree(d, ignore_errors=True)
             raise ToolError("只能读取当前会话里的附件")
         files = apply_original_names(files, msg, self.names)
-        self.audit(kind="read", tool="attachment", user=ctx["user"], chat=ctx["chat_id"], ok=True, n=len(files))
+        types = [usage.safe_file_type(path) for path in files]
+        self.audit(kind="read", tool="attachment", user=ctx["user"], chat=ctx["chat_id"], ok=True, n=len(files),
+                   file_types=types, count_usage=count_usage, scope=(ctx or {}).get("chat_type"))
         return d, files, (msg.get("msg_type") or msg.get("message_type") or ""), msg
 
     def expand_merge(self, message_id, ctx):

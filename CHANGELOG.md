@@ -2,15 +2,112 @@
 
 用户能看到的变化写在这里。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。版本号只以仓库根目录的 `VERSION` 为准。
 
-程序不读取 `VERSION` 或本文件。删掉它们时，机器人的行为与现在相同。
+设置卡片会读取 `VERSION` 来显示版本号。读不到，或不是 `x.y.z` 这种写法时，卡片上就不写版本。删掉 `VERSION` 不影响开关本身。本文件不参与运行。删掉本文件时，机器人的行为与现在相同。
 
-当前 `VERSION` 是 `0.5.0`，发布日期是 2026-10-19。发布说明见 [docs/release-0.5.0.md](docs/release-0.5.0.md)。从 0.4.1 升上来见 [docs/升级到0.5.0.md](docs/升级到0.5.0.md)。说明里不要写密钥、群号、open_id 或客户名。
+当前 `VERSION` 是 `0.9.0`，发布日期是 2026-10-20。发布说明见 [docs/release-0.9.0.md](docs/release-0.9.0.md)。下面 [Unreleased] 里的改动还没发版。说明里不要写密钥、群号、open_id 或客户名。
 
 ## [Unreleased]
+
+### 变更
+
+- 飞书私聊发「设置」只发一张卡片，不再先发一段「先看这一项」。卡片按「通知与推送」「回答能力」「记忆与学习」分组。功能名用产品里的说法，例如「用量周报」「离线告警」「技能（工作流）」。以前的叫法仍能用，回复「打开用量周报」或「打开断线提醒」还是原来那一项。
+- 每一行是彩色标准图标、功能名、一句不超过 16 个字的说明和右侧勾选。卡片上不写序号，也不再写「开 / 关」。标题下写着「变更需确认后生效」。「技能自动迭代」缩在「技能（工作流）」下面；父项未启用时这一行变灰，点它不会单独记下。在卡片上关掉父项时，还开着的子项会一起待保存。「长期记忆」和「任务复盘」仍是两项。
+- 点勾选后，原来那张卡片当场变成待保存。底部主按钮是「保存 N 项改动」，次按钮是「全部推荐设置」，还有「取消」。可以一次勾几项，只保存一次。点保存才备份、写入、检查并重启。失败仍会改回备份。没有改动时主按钮停用。长说明点这一行的小箭头展开。配置名字和确认方式收在底部「高级」里，默认不展开。
+- 卡片顶部是大号的已开项数、一行小字、绿点和九格进度，并带版本号和上次启动时间。版本来自仓库根目录的 `VERSION`。标题用飞书预设的蓝色主题。没有可用的头图钥匙，所以不加横幅。
+- 卡片回调没连上时，改发一条短文字，仍带序号 1 到 9。回复序号，多个用空格，例如 `1 5`。回复 `0` 是推荐设置。确认仍不能关掉。密钥、模型接口、私聊范围仍不能在对话里改。只有主人能改。
+
+示意图和示例 JSON 在 [docs/demo/](docs/demo/README.md)。这不是发版，版本号仍是 0.9.0。
+
+## [0.9.0] - 2026-10-20
+
+下面是用户能看到的变化。没写进旧配置的键，仍用各项自己的默认值。发布说明见 [docs/release-0.9.0.md](docs/release-0.9.0.md)。
+
+### 添加
+
+- 调用记录。每轮回答在本机 `logs/calls.jsonl` 记一条调用链：收到的消息、用过的技能和工具、每步耗时和 token、结果。写入前脱敏，客户名写成「某客户」，不记密钥。默认开。`observability.calls.retain_days` 不写是 30 天。主人私聊发「最近调用」或「这条怎么答的」可看。用量周报在有记录时多一段合计。不新开收消息进程。见 [docs/调用记录.md](docs/调用记录.md)。
+- 复盘写回。一轮群聊做完后，把「做了什么、哪里出错、下次怎么做」写成一条记忆提案，走现有的「确认记忆」。点头才写入这个群，驳回或不回复不写。客户名写成「某客户」。默认关，在私聊「设置」里开。不另调模型，不新开收消息进程。见 [docs/复盘写回.md](docs/复盘写回.md)。
+- 技能自动改进。技能有版本和基线哈希。主人私聊发「改进技能」时，根据失败的调用和复盘提议下一版。`evals/run.py` 的分数必须更高，并且用原来的确认方式点头，才替换 `SKILL.md`。发「回滚技能 名字」并确认，可回到上一版。默认关。不执行技能脚本，不新开收消息进程。见 [docs/技能自动改进.md](docs/技能自动改进.md)。
+- 主理人加专员。复杂问题拆成查资料、读文档、起草，再汇总。专员只有只读工具，写入仍走白名单和确认。总预算和每一步的轮数、额度、时间都有上限，不写时用较宽的默认值。默认关。不新开收消息进程。见 [docs/主理人与专员.md](docs/主理人与专员.md)。
+
+旧配置不用改。调用记录默认开，另外三项默认关。
+
+## [0.8.1] - 2026-10-20
+
+下面是用户能看到的变化。没写进旧配置的键，仍用各项自己的默认值。发布说明见 [docs/release-0.8.1.md](docs/release-0.8.1.md)。
+
+### 修复
+
+- 飞书后台没开通卡片回调时，`card.action.trigger` 接收进程会以 `failed_precondition`（退出码 2）马上退出。0.8.0 大约每 60 秒重启一次，并且任何接收进程退出都会把共用的连接状态记成断线。收消息的长连接还在，断线提醒却反复发给主人。
+- 连接状态按接收进程分开记。只有 `im.message.receive_v1` 断了才算机器人断线。卡片进程异常只记一条警告，不发断线提醒。
+- 启动前先探测卡片回调。已经能确认没订阅（`failed_precondition`、`not subscribed` 或退出码 2）时，这次运行不再启动、也不再重启卡片进程。确认自动改回确认码，并只私聊提醒主人一次，说明怎么开通。
+- `--doctor` 会说明：没开通卡片回调不算断线，接收进程数量也不把 `card.action.trigger` 算进去。
+
+### 添加
+
+- `confirm.card_callback`：`auto`（默认）、`on`、`off`。`on` 仍会去启动，没订阅则退出后不再重启。`off` 不启动卡片进程，确认用确认码。
+
+旧配置不用改。没写这项时按 `auto`。本说明不打 tag。
+
+## [0.8.0] - 2026-10-20
+
+下面是用户能看到的变化。没写进旧配置的键，仍用各项自己的默认值。发布说明见 [docs/release-0.8.0.md](docs/release-0.8.0.md)。
+
+### 添加
+
+- Windows 上一键安装向导。入口是 `scripts/setup.ps1`，提问在 `setup_wizard.py`，Mac 和 Linux 也可以直接跑这个 Python 脚本。一次只问一个问题，并说明为什么、去飞书开放平台的哪一页、直接回车用什么。说明见 [docs/一键安装.md](docs/一键安装.md)。
+- 向导会检查 Python、Git、飞书命令行和 Cursor 在不在、登录了没有。缺了只给指引，不自动安装，也不改已有登录。
+- App Secret 只从标准输入交给 `lark-cli config init --name <profile> --app-secret-stdin`。配置、草稿和屏幕上都不留密钥。模型如果改成 OpenAI 兼容接口或 Claude，配置里只写环境变量名。
+- 可以列出机器人所在的群和成员来选择；查不到就手填。人设有通用、黑客松小组、工作室、课题组。用量周报、知识检索、记忆成长、早间待办、断线提醒、技能默认关闭，装好后在私聊里发「设置」再开。
+- 已有配置先备份再改，不删除原文件和备份。中途关掉可以接着填，草稿不存密钥。`--dry-run` 不写文件；`--answers` 给非交互检查用。
+- 写完会跑配置检查和 `--doctor`，每条失败和提醒都用白话说明怎么处理。可选创建登录计划任务和看门狗。同一个应用已经有接收进程时拒绝再启动。启动后由机器人私聊主人做自我介绍。
+- 写入确认默认改成飞书卡片上的「确认」「取消」。卡片用大白话写要做什么、改哪里、影响谁。只有发起人本人点了才算，服务端核对人、会话、动作有没有被改过，以及有没有过期。点完卡片变成已确认或已取消，再回报结果。飞书没开通卡片回调时，自动改回确认码。`--doctor` 会给出警告和开通步骤。要在飞书后台用长连接添加 `card.action.trigger`。说明见 [docs/确认方式.md](docs/确认方式.md)。
+- 可以配置 `confirm.mode`：`button`（默认）、`code`、`button_or_code`、`button_and_code`。批量写入、改功能开关、重启可以用 `confirm.high_risk_mode` 单独指定。确认码位数和有效期也可以改。主人在私聊里回复「确认方式」就能换，但不能关掉确认。
+
+### 安全
+
+- 确认仍然不能跳过。别人点按钮、过期、重放、改掉卡片上的动作，都不会执行。写入日志不留确认码、按钮记号和人的编号。
+
+旧配置不用改。没写 `confirm` 时按点按钮；权限不够时自动退回确认码。从 0.7.0 升上来见 [docs/升级到0.8.0.md](docs/升级到0.8.0.md)。
+
+## [0.7.0] - 2026-10-20
+
+下面是用户能看到的变化。没写进旧配置的键，仍用各项自己的默认值。这一版新加的键默认关着，或不写就保持 0.6.0 的行为。发布说明见 [docs/release-0.7.0.md](docs/release-0.7.0.md)。
+
+### 添加
+
+- 可替换的模型提供方。不写 `model` 时仍是 Cursor（`cursor-agent`，配置里 `agent.mode` 为 `acp` 时仍是常驻进程），行为与现在相同。`model.provider` 可写成 `openai_compatible`（OpenAI Chat Completions 兼容，含 DeepSeek、通义、Kimi、OpenRouter、本机 Ollama）或 `anthropic`（Claude Messages API）。地址、模型名、温度、超时和最大 token 写在 `model` 里。密钥只写环境变量名（`model.api_key_env`），不能写进配置。说明和四份示例见 [docs/换模型.md](docs/换模型.md)。
+- 这两个新接口走原来的工具循环：读群历史和知识库、记忆提议、写入确认码。没有自带联网。可选 `search`（Tavily 或 SearXNG）默认关，打开后用 `web_search`。流式进度仍在；有思考才放收起的思考摘要，没有就跳过。多轮上下文仍按话题拼进提示词。接口若返回 token 数，会计入用量周报的「模型用量」，没有则不写这一行。
+- 主人可以在飞书私聊里开关功能。发「设置」或「/设置」会看到一张清单：用量周报、知识检索、记忆成长、早间待办、断线提醒、技能。每一项写着现在开没开、有什么用、打开后会不会主动发消息、要不要先准备资料。点「第 N 项」或回复数字，先看改动摘要，再用原来的 6 位确认码。确认码只认发起人、原来的私聊和原来的话题。说明见 [docs/新手开关功能.md](docs/新手开关功能.md)。
+- 确认之后先备份配置，再写入，再跑配置检查，然后按停止再启动的方式重新拉起，并且不会同时留下两个接收进程。检查或重启失败会改回备份，并用大白话说明原因和下一步。
+- 第一次被主人私聊，或刚启动且已经写了主人时，私聊发一段短介绍。不发到群里。群里有人问怎么开，只会请对方找主人到私聊里发「设置」，不讲配置细节。
+- 对话不能改密钥、模型配置、谁可以私聊。这些只提示去改配置文件。改动记在 `logs/feature_switch.jsonl`，不含编号、确认码和密钥。
+
+### 安全
+
+- 密钥不进日志。`python checks/check_config.py`、`--check` 和 `--doctor` 在密钥变量没设置时失败，并说明在当前窗口怎么设。只读回答和白名单写入确认码不变。
+- 私聊开关只改用量周报、知识检索、记忆成长、早间待办、断线提醒、技能。不能改模型配置、密钥和谁可以私聊。
+
+旧配置不用改。从 0.6.0 升上来见 [docs/升级到0.7.0.md](docs/升级到0.7.0.md)。
+
+## [0.6.0] - 2026-10-20
+
+下面是用户能看到的变化。没写进旧配置的键，仍用各项自己的默认值。发布说明见 [docs/release-0.6.0.md](docs/release-0.6.0.md)。这一版新加的开关默认都关着。
 
 ### 添加
 
 - 回答质量回归 `python evals/run.py`。用例在 `evals/cases/suite.json`，假模型基线在 `evals/baseline/ci.json`。说明见 [docs/回归测试.md](docs/回归测试.md)。不改默认配置。正式运行仍不读这些文件。CI 只跑假模型那一档，不连接飞书，也不拿单实例锁。
+- 用量周报 `report`，默认关。不写或 `enabled` 为 `false` 时不发私聊，`/状态` 也不多这一行。打开后，按 `weekday` 和 `time`（不写是周一 09:00、`Asia/Shanghai`）把上一周的合计私聊给主人，每周一次，重启不重发。接收人优先用 `report.owner_open_ids`，空着再用 `alerts.owner_open_ids`。正文只有合计：问题与完成数、响应时间中位数和 P90、工具和文件类型、写入提议与确认、脱敏次数、错误、连接中断和健康提醒、粗问题类别。没有问题原文、人名、open_id 或群编号。
+- 主人可以在私聊发 `/report` 再看一份，不占每周名额。群里发这条只回一句已私聊，明细不进群。没打开时，`/report` 仍交给模型。
+- `python agentbot.py <配置> --report [--week 2026-W42] [--out 文件.md|文件.csv]` 只打印或导出，不发送。`enabled` 为 false 时也能用。
+- 读文件的审计和用量只记扩展名，不记原文件名。脱敏命中只记次数。`--dry-run`、测试替身和停机补答会标成演练或补答，周报不把它们算进真实用量。
+- 分群知识库检索，默认关。没写 `knowledge` 或 `enabled` 为 `false` 时，不收录、不检索，提示词、工具和 `/状态` 与现在一样。打开后，每个群或私聊一份本地 SQLite 索引：本地 `kb/`、可选的群文件，以及配置或群里出现的飞书云文档、知识库和多维表格。中文用字双字进 FTS5。配了 OpenAI 兼容的向量地址才做混合检索，否则只用关键词。模型用 `kb_search` 查，也可以打开 `auto_retrieve` 自动附上片段。回答按标题、章节或页码引用，飞书文档带链接。白名单成员发「/kb refresh」更新；「/kb」或「/kb status」查看。`refresh_min` 大于 0 时按间隔补一次，一个周期只更新一个会话。说明见 [docs/知识库.md](docs/知识库.md)。
+- 记忆成长 `memory.growth`，默认关。不写或 `enabled` 为 `false` 时，不调用模型，不发提案，也不改「记一下」、`/记忆`、`/忘记`。长期记忆和成长都打开后，才会在配置的时间（不写是 03:00）或一段对话闲下来时，对照本群近期消息提议新事实、更新或作废。提案默认私聊 `approver_open_ids`，也可以改成发在本群。每条用单独的 6 位码，审批人才能 `确认记忆`、`改记忆` 或 `驳回记忆`。别人、别的群、过期和用过的码都不会写入。事实会记下日期、会话、消息编号和把握。客户名、手机号、证件号、邮箱和密钥整条不提议。群与群仍然分开。`/搜记忆` 只在长期记忆开着时可用。成长打开后，`/忘记` 要本人再确认；关着时仍是立刻删除。见 [docs/记忆成长.md](docs/记忆成长.md)。
+
+旧配置不用改。说明见 [docs/用量周报.md](docs/用量周报.md)。从 0.5.0 升上来见 [docs/升级到0.6.0.md](docs/升级到0.6.0.md)。
+
+### 安全
+
+- 知识库按会话分开，检索不能指定别的群。收录前和送出前都打码，并消掉工具标记和伪造确认码。资料里的网址不会被拿去访问，只把飞书文档、知识库、多维表格的编号交给原来的只读命令。压缩包、PDF 页数和单文件大小仍用附件那一套上限。向量地址只来自配置，密钥只读环境变量。需要的飞书权限都是只读，没打开这项时 `--doctor` 不多要权限。
 
 ## [0.5.0] - 2026-10-19
 
@@ -90,6 +187,14 @@
 
 ## English
 
-The version is the `VERSION` file (`0.5.0`), released on 2026-10-19. Do not put secrets or Feishu IDs in release notes. The program does not read this file. Missing keys keep the previous behavior. 0.5.0 adds six creative-workflow skills, a channel adapter (Feishu is the first implementation; WeCom is an experimental skeleton and does not connect), optional disconnect alerts, and an optional morning digest. `skills.enabled`, `alerts.enabled`, and `digest.enabled` stay false when omitted. An empty `skills.only` still means every valid skill once skills are turned on. Writes still need the allow-list and a confirmation code. Alert DMs and digest posts go through the channel `push_text` method. On Feishu that is `im +messages-send` and does not start the event consumer. The digest posts at most once per local day per configured chat and never mentions everyone. Upgrade and rollback steps are in `docs/升级到0.5.0.md`. Rolling back to v0.4.1 (`deb498f`) also drops the channel adapter and the creative skills.
+The version is the `VERSION` file (`0.8.1`), released on 2026-10-20. Do not put secrets or Feishu IDs in release notes. The program does not read this file. If `card.action.trigger` is not subscribed, that consumer is not restarted, confirmation falls back to the code, and the owner is notified once. Only the message consumer marks the bot offline. `--doctor` does not count the card consumer until callbacks are connected. `confirm.card_callback` defaults to `auto`. Old config files do not need new keys. Rollback target is `8604f62` (`0.8.0`). This note does not create the tag.
+
+The previous version is the `VERSION` file (`0.8.0`), released on 2026-10-20. Do not put secrets or Feishu IDs in release notes. The program does not read this file. This release adds a one-question-at-a-time install wizard and makes write confirmation a card button by default. `confirm.mode` can be `button`, `code`, `button_or_code`, or `button_and_code`. Confirmation cannot be turned off. If the app has not subscribed to `card.action.trigger` on the long connection, new writes fall back to the confirmation code and `--doctor` warns with the enable steps. Old config files do not need new keys. Upgrade steps are in `docs/升级到0.8.0.md`. Rolling back to `26f37c5` keeps the wizard and drops the card buttons; that commit still says `VERSION` `0.7.0`. This note does not create the tag.
+
+The previous version is the `VERSION` file (`0.7.0`), released on 2026-10-20. Do not put secrets or Feishu IDs in release notes. The program does not read this file. Omitting `model` keeps the Cursor path from 0.6.0. `search` stays off when omitted. Owners can toggle the existing usage report, knowledge search, memory growth, morning digest, disconnect alerts, and skills in a private chat. That switch cannot change model settings, secrets, or who may use private chat. Upgrade and rollback steps are in `docs/升级到0.7.0.md`. Rolling back to v0.6.0 (`4da9e42`) drops the model providers and the private-chat switch. This note does not create the tag.
+
+The previous version is the `VERSION` file (`0.6.0`), released on 2026-10-20. Do not put secrets or Feishu IDs in release notes. The program does not read this file. 0.6.0 adds answer-quality evals, an optional weekly usage report, optional per-chat knowledge search, and optional memory growth. All four stay off when omitted. Evals do not connect to Feishu. The report is a weekly owner DM with totals only. Knowledge search indexes one chat and cites sources. Memory growth writes nothing until an approver confirms. Upgrade and rollback steps are in `docs/升级到0.6.0.md`. Rolling back to v0.5.0 (`e842684`) drops these four. This note does not create the tag.
+
+The previous version is the `VERSION` file (`0.5.0`), released on 2026-10-19. Do not put secrets or Feishu IDs in release notes. The program does not read this file. Missing keys keep the previous behavior. 0.5.0 adds six creative-workflow skills, a channel adapter (Feishu is the first implementation; WeCom is an experimental skeleton and does not connect), optional disconnect alerts, and an optional morning digest. `skills.enabled`, `alerts.enabled`, and `digest.enabled` stay false when omitted. An empty `skills.only` still means every valid skill once skills are turned on. Writes still need the allow-list and a confirmation code. Alert DMs and digest posts go through the channel `push_text` method. On Feishu that is `im +messages-send` and does not start the event consumer. The digest posts at most once per local day per configured chat and never mentions everyone. Upgrade and rollback steps are in `docs/升级到0.5.0.md`. Rolling back to v0.4.1 (`deb498f`) also drops the channel adapter and the creative skills.
 
 0.4.1 remains the previous release. (#58) Confirmation codes are bound to the initiator, chat, and topic. Used or cancelled codes are stored in `used_writes` before they run and cannot be replayed after a restart. Untrusted text cannot become a tool call or a confirmation code. Redirect checks connect only to addresses that were already validated. One Feishu app has one receiver. Lock files become visible only after they are fully written. Confirm, status, help, and memory commands skip the per-user gap and use `rate_limit.max_commands_per_min` (default 40). (#59) `p2p.allow_group_members` defaults to false. When enabled, current members of served groups may use private chat, which needs `im:chat.members:read`. `open_to_all` still wins, and a failed or truncated member list fails closed. Those upgrade steps are in `docs/升级到0.4.1.md`. 0.4.0 still includes several read-only tool calls per round, configurable read caps, and the (#57) doctor and UTF-8 fixes.

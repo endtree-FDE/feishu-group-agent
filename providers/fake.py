@@ -98,4 +98,4 @@ class UnknownProvider(Provider):
         return None
 
     def check_items(self):
-        return [("model_provider", False, "不认识 %s（可用 cursor、openai_compat、fake，或预设 deepseek、dashscope、zhipu、pangu）" % self.name)]
+        return [("model_provider", False, "不认识 %s（可用 cursor、openai_compatible、anthropic、fake，或预设 deepseek、dashscope、zhipu、pangu）" % self.name)]

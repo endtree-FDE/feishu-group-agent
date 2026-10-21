@@ -176,5 +176,127 @@ for mode, expect, title in (
         import shutil
         shutil.rmtree(work, ignore_errors=True)
 
+isolated = feishu_link.LinkWatch()
+isolated.mark_link(True, 1000)
+isolated.note("card.action.trigger", "feishu-websocket: disconnected")
+card_up, card_since = isolated.link_snapshot()
+isolated.note("card.action.trigger", "feishu-websocket: connected")
+still_card_up, still_card_since = isolated.link_snapshot()
+check("卡片进程断开或连上都不改变收消息的健康状态",
+      card_up is True and card_since == 1000 and still_card_up is True and still_card_since == 1000)
+isolated.note("im.message.receive_v1", "feishu-websocket: disconnected")
+msg_up, msg_since = isolated.link_snapshot()
+check("只有收消息的日志写明断开，健康状态才变成断线", msg_up is False and msg_since != 1000)
+check("没订阅的日志本身不是断线",
+      feishu_link.classify_log("failed_precondition: requires callbacks not subscribed in console") == "")
+
+card_src = r'''
+import os, sys, threading
+sys.argv = ["agentbot.py", os.environ["CFG"], "--dry-run"]
+import agentbot, confirm_mode, feishu_link, health_alert
+agentbot.CFG["alerts"]["enabled"] = True
+agentbot.CFG["alerts"]["unhealthy_after_sec"] = 1
+agentbot.CFG["alerts"]["owner_open_ids"] = ["ou_owner1"]
+agentbot.CFG["report"]["owner_open_ids"] = ["ou_owner1"]
+notes = []
+def send(kind, target, text, key):
+    notes.append((kind, target, text))
+    return "ok"
+agentbot._outbound_send = send
+calls = []
+def argv(key):
+    calls.append(key)
+    return [sys.executable, os.environ["FAKE"]]
+agentbot.consume_argv = argv
+agentbot._LINK.mark_link(True, now=1000)
+print("PROBE", agentbot._probe_card_subscription())
+print("PROBE_CALLS", len(calls))
+calls.clear()
+def run():
+    agentbot._consume_forever(confirm_mode.CARD_EVENT)
+worker = threading.Thread(target=run)
+worker.start()
+worker.join(15)
+up, since = agentbot._LINK.link_snapshot()
+print("JOINED", int(not worker.is_alive()))
+print("RUN_CALLS", len(calls))
+print("UP", int(bool(up)))
+print("SINCE", since)
+action = health_alert.tick(agentbot.CFG, agentbot.BASE, (), up, since, now=float(since) + 1000, sender=send)
+print("ALERT", action)
+before = len(notes)
+agentbot._give_up_card("second")
+print("NOTES", len(notes))
+print("SECOND", len(notes) - before)
+print("MODE", confirm_mode.effective_mode(agentbot.CFG, False, confirm_mode.cards_ready(agentbot.BASE)))
+notice = open(os.path.join(agentbot.BASE, "state", "card_notice.json"), encoding="utf-8").read()
+print("SECRET", int("ou_owner1" in notice))
+print("TEXT", notes[0][2] if notes else "")
+'''
+boom_src = r'''
+import os, sys, threading
+sys.argv = ["agentbot.py", os.environ["CFG"], "--dry-run"]
+import agentbot, feishu_link
+calls = []
+def argv(key):
+    calls.append(key)
+    if len(calls) >= 2:
+        agentbot.lifecycle.request_shutdown(agentbot.STATE)
+    return [sys.executable, os.environ["FAKE"]]
+agentbot.consume_argv = argv
+agentbot._LINK.mark_link(True, now=3000)
+def run():
+    agentbot._consume_forever(feishu_link.MESSAGE_EVENT)
+worker = threading.Thread(target=run)
+worker.start()
+worker.join(15)
+up, _since = agentbot._LINK.link_snapshot()
+print("MSG_JOINED", int(not worker.is_alive()))
+print("MSG_CALLS", len(calls))
+print("MSG_UP", int(bool(up)))
+'''
+unsub = tempfile.mkdtemp(prefix="agentbot_unsub_")
+crash = tempfile.mkdtemp(prefix="agentbot_crash_")
+try:
+    open(os.path.join(unsub, "exit2.py"), "w", encoding="utf-8").write(
+        "import sys\n"
+        "sys.stderr.write('failed_precondition: EventKey card.action.trigger requires callbacks not subscribed in console\\n')\n"
+        "sys.exit(2)\n")
+    open(os.path.join(crash, "exit1.py"), "w", encoding="utf-8").write(
+        "import sys\nsys.stderr.write('boom\\n')\nsys.exit(1)\n")
+    cfg = json.load(open(os.path.join(FW, "agents", "example.json"), encoding="utf-8-sig"))
+    cfg["base_dir"] = unsub
+    cfg["bot_open_id"] = "ou_placeholder_not_a_real_account"
+    cfg["alerts"]["owner_open_ids"] = ["ou_owner1"]
+    cfg["report"]["owner_open_ids"] = ["ou_owner1"]
+    path = os.path.join(unsub, "bot.json")
+    json.dump(cfg, open(path, "w", encoding="utf-8"), ensure_ascii=False)
+    env = dict(os.environ)
+    env["CFG"] = path
+    env["FAKE"] = os.path.join(unsub, "exit2.py")
+    r = subprocess.run([sys.executable, "-c", card_src], cwd=FW, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=40)
+    out = (r.stdout or "") + (r.stderr or "")
+    check("启动前能探测到没订阅", r.returncode == 0 and "PROBE False" in out and "PROBE_CALLS 1" in out, out)
+    check("没订阅时卡片进程只启动一次，不再重启",
+          "JOINED 1" in out and "RUN_CALLS 1" in out, out)
+    check("卡片进程退出后收消息仍算连着，断线提醒不发",
+          "UP 1" in out and "ALERT None" in out, out)
+    check("确认自动退回确认码，开通提醒只发一次，状态里不写编号",
+          "MODE code" in out and "NOTES 1" in out and "SECOND 0" in out and "SECRET 0" in out
+          and "确认码" in out and "card.action.trigger" in out, out)
+    cfg["base_dir"] = crash
+    path = os.path.join(crash, "bot.json")
+    json.dump(cfg, open(path, "w", encoding="utf-8"), ensure_ascii=False)
+    env["CFG"] = path
+    env["FAKE"] = os.path.join(crash, "exit1.py")
+    r = subprocess.run([sys.executable, "-c", boom_src], cwd=FW, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=40)
+    out = (r.stdout or "") + (r.stderr or "")
+    check("收消息进程退出仍会重连，并把健康状态记成断线",
+          r.returncode == 0 and "MSG_JOINED 1" in out and "MSG_CALLS 2" in out and "MSG_UP 0" in out, out)
+finally:
+    import shutil
+    shutil.rmtree(unsub, ignore_errors=True)
+    shutil.rmtree(crash, ignore_errors=True)
+
 print("\n%d/%d passed" % (sum(1 for _, ok in results if ok), len(results)))
 sys.exit(0 if all(ok for _, ok in results) else 1)

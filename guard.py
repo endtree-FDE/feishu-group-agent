@@ -84,23 +84,49 @@ def _flex_ascii(name):
         _FLEX[key] = rx
     return rx
 
+def _replace_counted(text, rx, repl):
+    """替换并返回 (新文字, 次数)。次数只是数字，不带回被替换的原文。"""
+    hits = 0
+
+    def replacer(match):
+        nonlocal hits
+        hits += 1
+        return match.expand(repl) if isinstance(repl, str) else repl(match)
+
+    return rx.sub(replacer, text), hits
+
+
 def redact(text, names, placeholder="某客户"):
+    return redact_counted(text, names, placeholder)[0]
+
+
+def redact_counted(text, names, placeholder="某客户"):
+    """返回 (脱敏后的文字, 命中次数)。命中次数不含被替换的原文。"""
     text = normalize(text)
+    hits = 0
     for n in names or ():
         n2 = normalize(n)
-        if not n2: continue
+        if not n2:
+            continue
         if n2.isascii():
-            text = re.compile(re.escape(n2), re.I).sub(placeholder, text)
+            text, n_hit = _replace_counted(text, re.compile(re.escape(n2), re.I), placeholder)
+            hits += n_hit
             flex = _flex_ascii(n2)
             if flex is not None:
-                text = flex.sub(placeholder, text)
+                text, n_hit = _replace_counted(text, flex, placeholder)
+                hits += n_hit
         else:
-            text = text.replace(n2, placeholder)
+            found = text.count(n2)
+            if found:
+                hits += found
+                text = text.replace(n2, placeholder)
             if len(n2) >= 2:
-                text = _flex_cjk(n2).sub(placeholder, text)
+                text, n_hit = _replace_counted(text, _flex_cjk(n2), placeholder)
+                hits += n_hit
     for rx, rep in _SENSITIVE:
-        text = rx.sub(rep, text)
-    return text
+        text, n_hit = _replace_counted(text, rx, rep)
+        hits += n_hit
+    return text, hits
 
 _MARK = re.compile(r"(?i)<<\s*(tool|mem|fake_tool|end)\s*>>")
 _CONFIRM_FAKE = re.compile(r"(确认清空|确认|取消)[\s\u3000]*[0-9]{6}")

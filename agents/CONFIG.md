@@ -8,7 +8,7 @@
 2. 「小助手」「小李」只是例子，改成你的机器人名字和同事的称呼。
 3. **不要**在这个文件里写应用密钥（App Secret）。密钥只在你自己电脑上、运行初始化命令时输入一次，见 `docs/新建智能体.md`。
 
-默认走这台电脑上的 Cursor：模型名字写在 `agent.model`，默认是 `grok-4.7-high-fast`，额度算已经执行过 `cursor-agent login` 的那个账号。要换成自己的模型账号，把 `model_provider` 写成 `openai_compat`，密钥放在环境变量里。配置里不写账号，也不要写别人的账号。见 [docs/模型接口.md](../docs/模型接口.md)。
+默认走这台电脑上的 Cursor：模型名字写在 `agent.model`，默认是 `grok-4.7-high-fast`，额度算已经执行过 `cursor-agent login` 的那个账号。要换成自己的模型账号，把 `model_provider` 写成 `openai_compat`，或改用 `model.provider`（`openai_compatible` 或 `anthropic`）。密钥放在环境变量里。配置里不写账号，也不要写别人的账号。见 [docs/换模型.md](../docs/换模型.md) 和 [docs/模型接口.md](../docs/模型接口.md)。
 
 下面按文件里的顺序说明每一项。
 
@@ -136,6 +136,11 @@
 - `max_fact_chars`：一条「记一下」最多多少字，默认 `300`。
 - `scope`：现在固定用 `topic`（按话题分开）。
 - `per_user`：按人记一份档案。**先保持 `false`。** 个人记忆默认不开启。
+- `growth`：从近期对话里提议新的长期记忆。**默认关。** 不写或 `enabled` 为 `false` 时，不调用模型，不发提案，`/忘记` 仍是立刻删除。打开之后的审批、命令和配置键见 [docs/记忆成长.md](../docs/记忆成长.md)。
+
+- `retrospect`：一轮群聊做完后，写一句「做了什么、哪里出错、下次怎么做」，走记忆成长的审批。**默认关。** 不写或 `enabled` 为 `false` 时不提议。长期记忆也要开着；从私聊「设置」打开时会一起打开。审批人仍用 `memory.growth.approver_open_ids`。没人点头不写入。说明见 [docs/复盘写回.md](../docs/复盘写回.md)。
+
+`agents/example.json` 里 `memory.growth.enabled` 和 `memory.retrospect.enabled` 仍是 `false`。旧配置没有这两段时，行为和以前一样。
 
 ## 技能 skills
 
@@ -154,7 +159,9 @@
 
 预放的正文放在这一题会变的部分，紧挨在问题前面。技能目录和群档案仍在前面，不跟着这一题变。常驻模式下冻住的也只是群档案。一题最多预放 1 个；命中多个时取得分最高的，得分是命中关键词的字数相加。怎么写 `triggers` 见 [docs/技能.md](../docs/技能.md)。
 
-升级旧机器人时先保持 `enabled` 为 `false`。`agents/example.json` 里这项仍是 `false`，`only` 仍是 `[]`。不改这两项时，行为和以前一样：技能关着，提示词里没有目录。
+- `evolve`：根据失败的调用和复盘，提议技能的下一版。**默认关。** 不写或 `enabled` 为 `false` 时不记信号，也不改 `SKILL.md`。打开后要主人私聊发「改进技能」。程序会跑 `evals/run.py`（假模型，默认带 `ci` 标记的整套题）。分数没有更高不替换。分数更高，还要用原来的确认方式点头。`cases` 不写就跑整套；写成用例编号就只跑那几条。回滚发「回滚技能 名字」，确认后回到上一版。不执行技能里的脚本。说明见 [docs/技能自动改进.md](../docs/技能自动改进.md)。
+
+升级旧机器人时先保持 `enabled` 为 `false`。`agents/example.json` 里这项和 `evolve.enabled` 仍是 `false`，`only` 仍是 `[]`。不改这些项时，行为和以前一样：技能关着，提示词里没有目录，也不会改技能文件。
 
 自带的技能：`progress-table`（查进度表，只读多维表格）、`meeting-minutes`（整理会议纪要，只组织文字）。另外六份是创作流程，同样要自己打开：`topic-ideation`（选题打分）、`short-video-script`（口播稿）、`storyboard`（分镜表）、`aigc-prompt-pack`（不绑定工具的提示词）、`creative-brief`（项目策划书）、`post-mortem`（复盘）。步骤和每份技能的短对话见 [docs/技能.md](../docs/技能.md)。
 
@@ -233,6 +240,7 @@
 | `max_chars` | 回答最多保留多少字。默认 `3500`。模型写出的更长内容会在这里截断。 |
 | `body_max_chars` | 工具结果放进提示词时最多多少字。默认 `20000`。`0` 表示不截。附件和文档还可以各自再设上限，见下面。 |
 | `max_tool_rounds` | 只读工具最多连续几轮。不写是 `4`。小于 `1` 时按 `1`，查一次就回答。每一轮里可以按顺序执行多条只读调用，每条仍做原来的校验。每轮都会告诉模型还剩几轮。写操作不占「再读一轮」：同一轮里一旦提议写入就停，后面的调用不再执行，等确认码。轮数用尽时，如果模型只吐出工具行、没有正文，会说明这几步已经查完，并附上已读内容的摘要，摘要里不带消息编号。 |
+| `crew` | 复杂问题交给主理人和只读专员。**默认关。** 不写或 `enabled` 为 `false` 时，回答路径和以前一样。打开后，长问题或同时要做几件事才会拆成查资料、读文档、起草。短句不拆。专员不能调用写入工具。总预算不写时是 16 轮、40 万 token、900 秒；每一步不写时是 6 轮、12 万 token、240 秒。写 0、负数或过大时分别回到默认或上限。说明见 [docs/主理人与专员.md](../docs/主理人与专员.md)。 |
 | `tool_context_budget_chars` | 多轮工具结果重新发给模型时，加起来最多多少字。不写是 `120000`。超过时先把较早的结果压成短摘要，仍然超过就截断并注明，不会因此报错。`0` 表示不设预算。写错或负数按 120000。 |
 | `reply_chunk_chars` | 一条飞书消息最多多少字。默认 `3500`。只有回答比这个长时才拆成多条，每条开头写（1/N）。`0` 表示不拆。不改 `max_chars` 时，回答本来就不超过 3500 字，仍然是一条。想发出更长的回答，先把 `max_chars` 调大。 |
 | `acp_max_sessions` | 常驻时最多保留几个话题会话。默认 `8`。超出就丢掉最久没人问的那个。只在 `mode` 为 `acp` 时有用。 |
@@ -343,6 +351,19 @@ python checks/check_config.py agents/example.json
 
 这些编号都不是密钥，但它们指向你的真实文档和表。不要把填好的配置发到公开的地方。
 
+## 确认 confirm
+
+怎么点头。不写这一段时，默认点卡片上的按钮。飞书还没开通卡片回调时，自动改回确认码，旧配置不用改。确认不能关掉。细节见 [docs/确认方式.md](../docs/确认方式.md)。
+
+| 键 | 填什么 |
+|---|---|
+| `mode` | `button`（点按钮，默认）、`code`（6 位确认码）、`button_or_code`（两种都行）、`button_and_code`（两样都要）。写成关掉也会按 `button`。 |
+| `high_risk_mode` | 批量建日程、改功能开关、重启这一类用哪种。不写时和 `mode` 相同。 |
+| `ttl_sec` | 按钮有效秒数。不写是 `600`（10 分钟）。 |
+| `code_ttl_sec` | 确认码有效秒数。不写时用上面的 `write.confirm_ttl_sec`。 |
+| `code_digits` | 确认码位数，4 到 8。不写是 `6`。 |
+| `card_callback` | `auto`（不写也是这个）、`on`、`off`。`auto` 会在启动前看飞书有没有开通卡片回调；没开通就不起这个接收进程，确认改用确认码，并且只私聊提醒主人一次。`on` 总是去启动，没订阅则退出后不再重启。`off` 不启动，确认用确认码。旧配置不用加这项。 |
+
 ## 进度卡片 progress
 
 `enabled` 默认 `false`：不发表情、不发「处理中」卡片，直接等答案。升级时先保持关闭，只读跑稳了再改成 `true`。
@@ -391,9 +412,11 @@ python checks/check_config.py agents/example.json
 
 ## 本机日志 observability
 
-这两份日志都只在运行的那台电脑上，不要提交，也不要外传。它们记的不是同一件事。
+这几份日志都只在运行的那台电脑上，不要提交，也不要外传。它们记的不是同一件事。
 
 `observability.journal` 不写或为 `true` 时，每道交给模型的题在 `logs/journal.jsonl` 追加一行。里面只有时间、群聊或私聊、是否成功、字数、耗时、用过的工具名。没有问题原文、没有工具参数、没有回复正文、没有路径和编号。写成 `false` 就不再追加。原来的 `metric` 行仍在 `logs/bot.log` 里。升级旧配置时不用改；不想记这一行就写成 `"observability": {"journal": false}`。
+
+`logs/calls.jsonl` 是调用链。`observability.calls` 不写，或 `enabled` 不为 `false` 时，每道交给模型的题追加一条：收到的消息、用过的技能和工具、每步耗时和 token、结果。写入前先脱敏，客户名变成「某客户」，密钥、手机号、路径和编号不留原文。`retain_days` 不写是 30，更早的行在下次写入时丢掉。写成 `false` 或 `"enabled": false` 就不记。主人在私聊里发「最近调用」或「这条怎么答的」可以看。用量周报只加一段合计，没有记录时周报正文和以前一样。说明见 [docs/调用记录.md](../docs/调用记录.md)。
 
 `logs/events.jsonl` 是诊断日志，没有单独的开关。每道题记一条回答，每个工具记一条：消息编号、工具名、是否成功、飞书错误码、耗时。问题原文不写进去。看起来像手机号、邮箱或密钥的字符串会打码。大约 2MB 轮转，保留 5 份 `.1`。`--doctor` 不写这个文件，也不写心跳。
 
@@ -435,6 +458,25 @@ python checks/check_config.py agents/example.json
 
 群里需要机器人已经在里面。权限：`im:message:send_as_bot`。日历编号是真的才需要 `calendar:calendar.event:read`；任务表编号是真的才需要 `base:record:read`。改完要发布版本。演练、自检和 `--doctor` 不发摘要。
 
+## 用量周报 report
+
+默认关。不写这一段，或 `enabled` 不是 `true`，就不会私聊，也不会占每周一次的名额。这是私聊，不是群消息。群里主动发的仍然只有早晨摘要。
+
+打开后，到了 `weekday` 和 `time`（不写是周一 `09:00`，时区不写是 `Asia/Shanghai`），把上一整周的合计私聊给主人。`window_min` 不写是 180，这三小时里重启也不会再发一份。`report.owner_open_ids` 有可用编号时用它；空着就用 `alerts.owner_open_ids`，不要求 `alerts` 已经打开。两边都空、或都是 `REPLACE_` 开头，就不发。
+
+统计在本机 `logs/usage.jsonl`。周报里没有问题原文、人名、open_id 或群编号，只有 `群 1` 这种标签。演练（`--dry-run` 或测试替身）和停机后的补答会做标记，不进合计。主人在私聊里发 `/report` 可以马上再看一份，这不占每周的名额；在群里发只回一句「已私聊」，明细不进群。
+
+不发送、只导出：`python agentbot.py agents/<名字>.json --report [--week 2026-W42] [--out 文件.md|文件.csv]`。`enabled` 为 false 时这条命令仍可用。细节见 [docs/用量周报.md](../docs/用量周报.md)。
+
+| 键 | 默认 | 填什么 |
+|---|---|---|
+| `enabled` | `false` | `true` 才到点私聊。 |
+| `owner_open_ids` | `[]` | 接收人。空着就用 `alerts.owner_open_ids`。 |
+| `weekday` | `mon` | `mon` 到 `sun`，或 `周一` 到 `周日`，或 `0` 到 `6`（`0` 是周一）。认不出来就不发。 |
+| `time` | `09:00` | `HH:MM`。写错就不发。 |
+| `timezone` | `Asia/Shanghai` | 认不出来的时区不发。 |
+| `window_min` | `180` | 到点之后多少分钟内还可以补发。`0` 表示只在那一分钟。负数按 180。 |
+
 ## 知识库目录 kb_index
 
 模型每次回答前，如果知识库里有 `.md` 或 `.txt`，提示词里会多一份目录：只有相对路径和第一行标题，没有正文。正文要模型输出 `kb_read` 才会读。
@@ -447,6 +489,56 @@ python checks/check_config.py agents/example.json
 `tools.kb_read` 不写时也可以读。写成 `{"enabled": false}` 就关掉。`max_chars` 默认 `8000`，只限制读进提示词的正文。
 
 升级旧配置：不用改。没写 `kb_index` 和 `kb_read` 时，空知识库的提示词和以前一样；放了文件之后才会多出目录，并可以按路径读取。读出来的客户名会打码。`../`、绝对路径和跳出目录的链接读不到。未列入私聊名单的人看不到目录，也不能读。
+
+## 分群知识库检索 knowledge
+
+默认关。不写 `knowledge`，或 `enabled` 为 `false` 时，不建索引、不检索，提示词里也不会出现 `kb_search`。`/状态` 不多一行。已经在用的 `kb/` 目录、`kb_read` 和 `kb_sync` 都不变。
+
+打开之后，每个群、每次私聊各有一份本地索引，存在本机 `state/kb/<会话>/`，不要提交。检索只能查当前这一份。甲群的文件和链接不会进乙群。
+
+| 键 | 默认 | 填什么 |
+|---|---|---|
+| `enabled` | `false` | `true` 才收录、才响应 `/kb`。 |
+| `auto_retrieve` | `false` | `true` 时，普通问题会先附上最多几条片段。命令不会。 |
+| `local` | `true` | 收录本机器人 `kb/` 里的文件。这是机器人自己的资料，每个打开检索的会话都会收一份。设为 `false` 就只收下面几项。 |
+| `group_files` | `false` | `true` 才收本群里发过的文件。私聊没有这一项。 |
+| `group_links` | `false` | `true` 才收本群消息里的飞书云文档、知识库、多维表格链接。别的网址跳过，不会去访问。 |
+| `docs` | `[]` | 云文档链接或 token。`REPLACE_` 开头的会丢掉。 |
+| `wiki` | `[]` | 知识库链接或节点 token。 |
+| `bases` | `[]` | 多维表格。可以写 `{"base_token":"…","table_id":"…","title":"任务表"}`，或 `base_token/table_id`。链接里要能看出 `table=`。 |
+| `refresh_min` | `0` | `0` 不定时。写了分钟数就按这个间隔补收录，小于 5 按 5，避免打太勤。一个周期只更新一个会话。 |
+| `chunk_chars` | `480` | 每段大约多少字。 |
+| `chunk_overlap` | `80` | 相邻段重叠多少字。 |
+| `top_k` | `5` | 一次最多回几段。 |
+| `max_chars` | `4000` | 检索结果最多多少字，并且不会超过 `agent.tool_context_budget_chars`。 |
+| `embeddings.enabled` | `false` | `true` 才请求向量。失败就只用关键词，不中断回答。 |
+| `embeddings.base_url` | 空 | OpenAI 兼容地址，例如 `https://api.example.com/v1`。不要在地址里写密钥。本机可以用 `http://127.0.0.1:端口/v1`。 |
+| `embeddings.api_key_env` | 空 | 环境变量的名字，不是密钥本身。 |
+| `embeddings.model` | 空 | 向量模型名。空着就不会去请求。 |
+| `embeddings.timeout_sec` | `20` | 请求最多等几秒。 |
+
+群里的命令（要先打开 `enabled`，否则这几个字仍交给模型）：
+
+| 命令 | 谁可以 | 做什么 |
+|---|---|---|
+| `/kb`、`/kb status`、`/kb 状态` | 能叫到机器人的人 | 看本会话收录了几份、上次什么时候更新。不调用模型。 |
+| `/kb refresh`、`/kb 刷新` | 只有 `write.allowed_users` | 按上面的来源更新这一份索引。不调用模型。 |
+
+模型侧的工具是 `kb_search`，参数 `{"query":"关键词"}`。它不能指定别的群。
+
+飞书权限都是只读，只有打开并且用到对应来源时，`--doctor` 才会多要求这些：
+
+| 来源 | 权限 |
+|---|---|
+| 只收本地 `kb/` | 不需要新的飞书权限 |
+| 群文件 | `im:message:readonly`、`im:message.group_msg`、`im:resource` |
+| 云文档 | `docx:document:readonly` |
+| 知识库 | `wiki:node:read`（或 `wiki:wiki:readonly`、`wiki:node:retrieve`） |
+| 多维表格 | `base:record:read` |
+
+文档没分享给应用时，这一份会记失败，已经收过的内容先留着。图片没有单独的文字识别，不进索引。PDF、Word、PPT、Excel、CSV、Markdown、文本和 zip 用原来的读取和上限。细节见 [docs/知识库.md](docs/知识库.md)。
+
+`tools.docs_read.allow_tokens` 如果写了非空名单，知识库也只收名单里的云文档和知识库，不会因为开了检索就读得更宽。
 
 ## 知识库同步 kb_sync
 
