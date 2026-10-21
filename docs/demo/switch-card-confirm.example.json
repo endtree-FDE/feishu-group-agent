@@ -13,91 +13,39 @@
     },
     "subtitle": {
       "tag": "plain_text",
-      "content": "已开 6/9 · v0.9.0 · 在线 · 上次启动 10-21 09:50"
+      "content": "确认后才写入"
     },
-    "template": "blue"
+    "template": "blue",
+    "icon": {
+      "tag": "standard_icon",
+      "token": "setting_outlined"
+    }
   },
   "body": {
     "elements": [
       {
-        "tag": "markdown",
-        "content": "已开 6/9 · v0.9.0 · <text_tag color='green'>在线</text_tag> · 上次启动 10-21 09:50",
-        "text_size": "normal"
-      },
-      {
-        "tag": "div",
-        "text": {
-          "tag": "plain_text",
-          "content": "待确认：打开知识检索、打开早间待办"
-        }
-      },
-      {
-        "tag": "div",
-        "text": {
-          "tag": "plain_text",
-          "content": "早间待办会发到群里。"
-        }
-      },
-      {
-        "tag": "button",
-        "text": {
-          "tag": "plain_text",
-          "content": "确认这 2 项"
-        },
-        "type": "primary",
-        "behaviors": [
-          {
-            "type": "callback",
-            "value": {
-              "kind": "write_confirm",
-              "id": "example-token-not-real",
-              "op": "yes",
-              "hash": "example-hash-not-real"
-            }
-          }
-        ]
-      },
-      {
-        "tag": "button",
-        "text": {
-          "tag": "plain_text",
-          "content": "取消"
-        },
-        "type": "danger",
-        "behaviors": [
-          {
-            "type": "callback",
-            "value": {
-              "kind": "write_confirm",
-              "id": "example-token-not-real",
-              "op": "no",
-              "hash": "example-hash-not-real"
-            }
-          }
-        ]
-      },
-      {
-        "tag": "markdown",
-        "content": "**日常**",
-        "text_size": "normal"
-      },
-      {
         "tag": "column_set",
         "flex_mode": "none",
-        "background_style": "default",
+        "background_style": "wathet",
         "horizontal_spacing": "8px",
-        "margin": "0px 0px 4px 0px",
+        "margin": "0px 0px 8px 0px",
         "columns": [
           {
             "tag": "column",
             "width": "weighted",
-            "weight": 5,
+            "weight": 1,
             "vertical_align": "center",
+            "padding": "8px 4px 8px 8px",
             "elements": [
               {
                 "tag": "markdown",
-                "content": "📊 **1 用量周报** 每周私聊合计 <text_tag color='green'>开</text_tag>",
-                "text_size": "normal"
+                "content": "**已开 6/9**\n<font color='grey'>v0.9.0 · 上次启动 10-21 09:50</font>",
+                "text_size": "normal",
+                "icon": {
+                  "tag": "standard_icon",
+                  "token": "setting_outlined",
+                  "color": "blue"
+                }
               }
             ]
           },
@@ -105,220 +53,12 @@
             "tag": "column",
             "width": "auto",
             "vertical_align": "center",
-            "elements": [
-              {
-                "tag": "checker",
-                "name": "report",
-                "element_id": "sw_report",
-                "checked": true,
-                "text": {
-                  "tag": "plain_text",
-                  "content": "开",
-                  "text_size": "notation"
-                },
-                "overall_checkable": true,
-                "checked_style": {
-                  "show_strikethrough": false,
-                  "opacity": 1
-                },
-                "behaviors": [
-                  {
-                    "type": "callback",
-                    "value": {
-                      "kind": "settings",
-                      "op": "stage",
-                      "switch": "report"
-                    }
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "tag": "column",
-            "width": "auto",
-            "vertical_align": "center",
-            "elements": [
-              {
-                "tag": "button",
-                "text": {
-                  "tag": "plain_text",
-                  "content": "?"
-                },
-                "type": "default",
-                "size": "tiny",
-                "behaviors": [
-                  {
-                    "type": "callback",
-                    "value": {
-                      "kind": "settings",
-                      "op": "help",
-                      "switch": "report"
-                    }
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      },
-      {
-        "tag": "column_set",
-        "flex_mode": "none",
-        "background_style": "default",
-        "horizontal_spacing": "8px",
-        "margin": "0px 0px 4px 0px",
-        "columns": [
-          {
-            "tag": "column",
-            "width": "weighted",
-            "weight": 5,
-            "vertical_align": "center",
+            "padding": "8px 8px 8px 0px",
             "elements": [
               {
                 "tag": "markdown",
-                "content": "🌅 **4 早间待办** 早上发到群里 <text_tag color='orange'>将开</text_tag>",
+                "content": "<text_tag color='green'>在线</text_tag>",
                 "text_size": "normal"
-              }
-            ]
-          },
-          {
-            "tag": "column",
-            "width": "auto",
-            "vertical_align": "center",
-            "elements": [
-              {
-                "tag": "checker",
-                "name": "digest",
-                "element_id": "sw_digest",
-                "checked": true,
-                "text": {
-                  "tag": "plain_text",
-                  "content": "开",
-                  "text_size": "notation"
-                },
-                "overall_checkable": true,
-                "checked_style": {
-                  "show_strikethrough": false,
-                  "opacity": 1
-                },
-                "behaviors": [
-                  {
-                    "type": "callback",
-                    "value": {
-                      "kind": "settings",
-                      "op": "stage",
-                      "switch": "digest"
-                    }
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "tag": "column",
-            "width": "auto",
-            "vertical_align": "center",
-            "elements": [
-              {
-                "tag": "button",
-                "text": {
-                  "tag": "plain_text",
-                  "content": "?"
-                },
-                "type": "default",
-                "size": "tiny",
-                "behaviors": [
-                  {
-                    "type": "callback",
-                    "value": {
-                      "kind": "settings",
-                      "op": "help",
-                      "switch": "digest"
-                    }
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      },
-      {
-        "tag": "column_set",
-        "flex_mode": "none",
-        "background_style": "default",
-        "horizontal_spacing": "8px",
-        "margin": "0px 0px 4px 0px",
-        "columns": [
-          {
-            "tag": "column",
-            "width": "weighted",
-            "weight": 5,
-            "vertical_align": "center",
-            "elements": [
-              {
-                "tag": "markdown",
-                "content": "🔔 **5 断线提醒** 断线时私聊你 <text_tag color='green'>开</text_tag>",
-                "text_size": "normal"
-              }
-            ]
-          },
-          {
-            "tag": "column",
-            "width": "auto",
-            "vertical_align": "center",
-            "elements": [
-              {
-                "tag": "checker",
-                "name": "alerts",
-                "element_id": "sw_alerts",
-                "checked": true,
-                "text": {
-                  "tag": "plain_text",
-                  "content": "开",
-                  "text_size": "notation"
-                },
-                "overall_checkable": true,
-                "checked_style": {
-                  "show_strikethrough": false,
-                  "opacity": 1
-                },
-                "behaviors": [
-                  {
-                    "type": "callback",
-                    "value": {
-                      "kind": "settings",
-                      "op": "stage",
-                      "switch": "alerts"
-                    }
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "tag": "column",
-            "width": "auto",
-            "vertical_align": "center",
-            "elements": [
-              {
-                "tag": "button",
-                "text": {
-                  "tag": "plain_text",
-                  "content": "?"
-                },
-                "type": "default",
-                "size": "tiny",
-                "behaviors": [
-                  {
-                    "type": "callback",
-                    "value": {
-                      "kind": "settings",
-                      "op": "help",
-                      "switch": "alerts"
-                    }
-                  }
-                ]
               }
             ]
           }
@@ -326,331 +66,267 @@
       },
       {
         "tag": "markdown",
-        "content": "**记忆**",
+        "content": "**待保存 2 项** <text_tag color='orange'>未写入</text_tag>\n<font color='grey'>打开知识检索、打开早间待办</font>",
         "text_size": "normal"
-      },
-      {
-        "tag": "column_set",
-        "flex_mode": "none",
-        "background_style": "default",
-        "horizontal_spacing": "8px",
-        "margin": "0px 0px 4px 0px",
-        "columns": [
-          {
-            "tag": "column",
-            "width": "weighted",
-            "weight": 5,
-            "vertical_align": "center",
-            "elements": [
-              {
-                "tag": "markdown",
-                "content": "📚 **2 知识检索** 提问时查资料 <text_tag color='orange'>将开</text_tag>",
-                "text_size": "normal"
-              }
-            ]
-          },
-          {
-            "tag": "column",
-            "width": "auto",
-            "vertical_align": "center",
-            "elements": [
-              {
-                "tag": "checker",
-                "name": "knowledge",
-                "element_id": "sw_knowledge",
-                "checked": true,
-                "text": {
-                  "tag": "plain_text",
-                  "content": "开",
-                  "text_size": "notation"
-                },
-                "overall_checkable": true,
-                "checked_style": {
-                  "show_strikethrough": false,
-                  "opacity": 1
-                },
-                "behaviors": [
-                  {
-                    "type": "callback",
-                    "value": {
-                      "kind": "settings",
-                      "op": "stage",
-                      "switch": "knowledge"
-                    }
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "tag": "column",
-            "width": "auto",
-            "vertical_align": "center",
-            "elements": [
-              {
-                "tag": "button",
-                "text": {
-                  "tag": "plain_text",
-                  "content": "?"
-                },
-                "type": "default",
-                "size": "tiny",
-                "behaviors": [
-                  {
-                    "type": "callback",
-                    "value": {
-                      "kind": "settings",
-                      "op": "help",
-                      "switch": "knowledge"
-                    }
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      },
-      {
-        "tag": "column_set",
-        "flex_mode": "none",
-        "background_style": "default",
-        "horizontal_spacing": "8px",
-        "margin": "0px 0px 4px 0px",
-        "columns": [
-          {
-            "tag": "column",
-            "width": "weighted",
-            "weight": 5,
-            "vertical_align": "center",
-            "elements": [
-              {
-                "tag": "markdown",
-                "content": "🧠 **3 记忆成长** 提议记住约定 <text_tag color='neutral'>关</text_tag>",
-                "text_size": "normal"
-              }
-            ]
-          },
-          {
-            "tag": "column",
-            "width": "auto",
-            "vertical_align": "center",
-            "elements": [
-              {
-                "tag": "checker",
-                "name": "growth",
-                "element_id": "sw_growth",
-                "checked": false,
-                "text": {
-                  "tag": "plain_text",
-                  "content": "关",
-                  "text_size": "notation"
-                },
-                "overall_checkable": true,
-                "checked_style": {
-                  "show_strikethrough": false,
-                  "opacity": 1
-                },
-                "behaviors": [
-                  {
-                    "type": "callback",
-                    "value": {
-                      "kind": "settings",
-                      "op": "stage",
-                      "switch": "growth"
-                    }
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "tag": "column",
-            "width": "auto",
-            "vertical_align": "center",
-            "elements": [
-              {
-                "tag": "button",
-                "text": {
-                  "tag": "plain_text",
-                  "content": "?"
-                },
-                "type": "default",
-                "size": "tiny",
-                "behaviors": [
-                  {
-                    "type": "callback",
-                    "value": {
-                      "kind": "settings",
-                      "op": "help",
-                      "switch": "growth"
-                    }
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      },
-      {
-        "tag": "column_set",
-        "flex_mode": "none",
-        "background_style": "default",
-        "horizontal_spacing": "8px",
-        "margin": "0px 0px 4px 0px",
-        "columns": [
-          {
-            "tag": "column",
-            "width": "weighted",
-            "weight": 5,
-            "vertical_align": "center",
-            "elements": [
-              {
-                "tag": "markdown",
-                "content": "📝 **7 复盘写回** 做完写一句 <text_tag color='green'>开</text_tag>",
-                "text_size": "normal"
-              }
-            ]
-          },
-          {
-            "tag": "column",
-            "width": "auto",
-            "vertical_align": "center",
-            "elements": [
-              {
-                "tag": "checker",
-                "name": "retrospect",
-                "element_id": "sw_retrospect",
-                "checked": true,
-                "text": {
-                  "tag": "plain_text",
-                  "content": "开",
-                  "text_size": "notation"
-                },
-                "overall_checkable": true,
-                "checked_style": {
-                  "show_strikethrough": false,
-                  "opacity": 1
-                },
-                "behaviors": [
-                  {
-                    "type": "callback",
-                    "value": {
-                      "kind": "settings",
-                      "op": "stage",
-                      "switch": "retrospect"
-                    }
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "tag": "column",
-            "width": "auto",
-            "vertical_align": "center",
-            "elements": [
-              {
-                "tag": "button",
-                "text": {
-                  "tag": "plain_text",
-                  "content": "?"
-                },
-                "type": "default",
-                "size": "tiny",
-                "behaviors": [
-                  {
-                    "type": "callback",
-                    "value": {
-                      "kind": "settings",
-                      "op": "help",
-                      "switch": "retrospect"
-                    }
-                  }
-                ]
-              }
-            ]
-          }
-        ]
       },
       {
         "tag": "markdown",
-        "content": "**技能**",
+        "content": "<font color='orange'>早间待办会发到群里。</font>",
         "text_size": "normal"
       },
       {
+        "tag": "hr"
+      },
+      {
         "tag": "column_set",
         "flex_mode": "none",
-        "background_style": "default",
-        "horizontal_spacing": "8px",
-        "margin": "0px 0px 4px 0px",
+        "background_style": "grey",
+        "horizontal_spacing": "0px",
+        "margin": "0px 0px 8px 0px",
         "columns": [
           {
             "tag": "column",
             "width": "weighted",
-            "weight": 5,
-            "vertical_align": "center",
+            "weight": 1,
+            "padding": "4px 8px 8px 8px",
+            "vertical_spacing": "2px",
             "elements": [
               {
                 "tag": "markdown",
-                "content": "🧩 **6 技能** 按现成步骤做 <text_tag color='green'>开</text_tag>",
+                "content": "**日常**",
                 "text_size": "normal"
-              }
-            ]
-          },
-          {
-            "tag": "column",
-            "width": "auto",
-            "vertical_align": "center",
-            "elements": [
+              },
               {
-                "tag": "checker",
-                "name": "skills",
-                "element_id": "sw_skills",
-                "checked": true,
-                "text": {
-                  "tag": "plain_text",
-                  "content": "开",
-                  "text_size": "notation"
-                },
-                "overall_checkable": true,
-                "checked_style": {
-                  "show_strikethrough": false,
-                  "opacity": 1
-                },
-                "behaviors": [
+                "tag": "column_set",
+                "flex_mode": "none",
+                "background_style": "default",
+                "horizontal_spacing": "8px",
+                "margin": "4px 0px 4px 0px",
+                "columns": [
                   {
-                    "type": "callback",
-                    "value": {
-                      "kind": "settings",
-                      "op": "stage",
-                      "switch": "skills"
-                    }
+                    "tag": "column",
+                    "width": "weighted",
+                    "weight": 5,
+                    "vertical_align": "top",
+                    "elements": [
+                      {
+                        "tag": "markdown",
+                        "content": "**用量周报** <text_tag color='green'>开</text_tag>\n<font color='grey'>1 · 每周私聊合计</font>",
+                        "text_size": "normal",
+                        "icon": {
+                          "tag": "standard_icon",
+                          "token": "sheet-histogram_outlined",
+                          "color": "green"
+                        }
+                      },
+                      {
+                        "tag": "button",
+                        "text": {
+                          "tag": "plain_text",
+                          "content": "详情"
+                        },
+                        "type": "text",
+                        "size": "tiny",
+                        "behaviors": [
+                          {
+                            "type": "callback",
+                            "value": {
+                              "kind": "settings",
+                              "op": "help",
+                              "switch": "report"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "tag": "column",
+                    "width": "auto",
+                    "vertical_align": "top",
+                    "elements": [
+                      {
+                        "tag": "checker",
+                        "name": "report",
+                        "element_id": "sw_report",
+                        "checked": true,
+                        "text": {
+                          "tag": "plain_text",
+                          "content": "开"
+                        },
+                        "overall_checkable": true,
+                        "checked_style": {
+                          "show_strikethrough": false,
+                          "opacity": 1
+                        },
+                        "behaviors": [
+                          {
+                            "type": "callback",
+                            "value": {
+                              "kind": "settings",
+                              "op": "stage",
+                              "switch": "report"
+                            }
+                          }
+                        ]
+                      }
+                    ]
                   }
                 ]
-              }
-            ]
-          },
-          {
-            "tag": "column",
-            "width": "auto",
-            "vertical_align": "center",
-            "elements": [
+              },
               {
-                "tag": "button",
-                "text": {
-                  "tag": "plain_text",
-                  "content": "?"
-                },
-                "type": "default",
-                "size": "tiny",
-                "behaviors": [
+                "tag": "column_set",
+                "flex_mode": "none",
+                "background_style": "default",
+                "horizontal_spacing": "8px",
+                "margin": "4px 0px 4px 0px",
+                "columns": [
                   {
-                    "type": "callback",
-                    "value": {
-                      "kind": "settings",
-                      "op": "help",
-                      "switch": "skills"
-                    }
+                    "tag": "column",
+                    "width": "weighted",
+                    "weight": 5,
+                    "vertical_align": "top",
+                    "elements": [
+                      {
+                        "tag": "markdown",
+                        "content": "**早间待办** <text_tag color='orange'>将开</text_tag>\n<font color='grey'>4 · 早上发到群里</font>",
+                        "text_size": "normal",
+                        "icon": {
+                          "tag": "standard_icon",
+                          "token": "calendar-tomorrow_outlined",
+                          "color": "orange"
+                        }
+                      },
+                      {
+                        "tag": "button",
+                        "text": {
+                          "tag": "plain_text",
+                          "content": "详情"
+                        },
+                        "type": "text",
+                        "size": "tiny",
+                        "behaviors": [
+                          {
+                            "type": "callback",
+                            "value": {
+                              "kind": "settings",
+                              "op": "help",
+                              "switch": "digest"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "tag": "column",
+                    "width": "auto",
+                    "vertical_align": "top",
+                    "elements": [
+                      {
+                        "tag": "checker",
+                        "name": "digest",
+                        "element_id": "sw_digest",
+                        "checked": true,
+                        "text": {
+                          "tag": "plain_text",
+                          "content": "开"
+                        },
+                        "overall_checkable": true,
+                        "checked_style": {
+                          "show_strikethrough": false,
+                          "opacity": 1
+                        },
+                        "behaviors": [
+                          {
+                            "type": "callback",
+                            "value": {
+                              "kind": "settings",
+                              "op": "stage",
+                              "switch": "digest"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "tag": "column_set",
+                "flex_mode": "none",
+                "background_style": "default",
+                "horizontal_spacing": "8px",
+                "margin": "4px 0px 4px 0px",
+                "columns": [
+                  {
+                    "tag": "column",
+                    "width": "weighted",
+                    "weight": 5,
+                    "vertical_align": "top",
+                    "elements": [
+                      {
+                        "tag": "markdown",
+                        "content": "**断线提醒** <text_tag color='green'>开</text_tag>\n<font color='grey'>5 · 断线时私聊你</font>",
+                        "text_size": "normal",
+                        "icon": {
+                          "tag": "standard_icon",
+                          "token": "bell_outlined",
+                          "color": "green"
+                        }
+                      },
+                      {
+                        "tag": "button",
+                        "text": {
+                          "tag": "plain_text",
+                          "content": "详情"
+                        },
+                        "type": "text",
+                        "size": "tiny",
+                        "behaviors": [
+                          {
+                            "type": "callback",
+                            "value": {
+                              "kind": "settings",
+                              "op": "help",
+                              "switch": "alerts"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "tag": "column",
+                    "width": "auto",
+                    "vertical_align": "top",
+                    "elements": [
+                      {
+                        "tag": "checker",
+                        "name": "alerts",
+                        "element_id": "sw_alerts",
+                        "checked": true,
+                        "text": {
+                          "tag": "plain_text",
+                          "content": "开"
+                        },
+                        "overall_checkable": true,
+                        "checked_style": {
+                          "show_strikethrough": false,
+                          "opacity": 1
+                        },
+                        "behaviors": [
+                          {
+                            "type": "callback",
+                            "value": {
+                              "kind": "settings",
+                              "op": "stage",
+                              "switch": "alerts"
+                            }
+                          }
+                        ]
+                      }
+                    ]
                   }
                 ]
               }
@@ -661,163 +337,432 @@
       {
         "tag": "column_set",
         "flex_mode": "none",
-        "background_style": "default",
-        "horizontal_spacing": "8px",
-        "margin": "0px 0px 4px 0px",
+        "background_style": "grey",
+        "horizontal_spacing": "0px",
+        "margin": "0px 0px 8px 0px",
         "columns": [
           {
             "tag": "column",
             "width": "weighted",
-            "weight": 5,
-            "vertical_align": "center",
+            "weight": 1,
+            "padding": "4px 8px 8px 8px",
+            "vertical_spacing": "2px",
             "elements": [
               {
                 "tag": "markdown",
-                "content": "✨ **8 技能改进** 提议下一版 <text_tag color='green'>开</text_tag>",
+                "content": "**记忆**",
                 "text_size": "normal"
-              }
-            ]
-          },
-          {
-            "tag": "column",
-            "width": "auto",
-            "vertical_align": "center",
-            "elements": [
+              },
               {
-                "tag": "checker",
-                "name": "skill_evolve",
-                "element_id": "sw_skill_evolve",
-                "checked": true,
-                "text": {
-                  "tag": "plain_text",
-                  "content": "开",
-                  "text_size": "notation"
-                },
-                "overall_checkable": true,
-                "checked_style": {
-                  "show_strikethrough": false,
-                  "opacity": 1
-                },
-                "behaviors": [
+                "tag": "column_set",
+                "flex_mode": "none",
+                "background_style": "default",
+                "horizontal_spacing": "8px",
+                "margin": "4px 0px 4px 0px",
+                "columns": [
                   {
-                    "type": "callback",
-                    "value": {
-                      "kind": "settings",
-                      "op": "stage",
-                      "switch": "skill_evolve"
-                    }
+                    "tag": "column",
+                    "width": "weighted",
+                    "weight": 5,
+                    "vertical_align": "top",
+                    "elements": [
+                      {
+                        "tag": "markdown",
+                        "content": "**知识检索** <text_tag color='orange'>将开</text_tag>\n<font color='grey'>2 · 提问时查资料</font>",
+                        "text_size": "normal",
+                        "icon": {
+                          "tag": "standard_icon",
+                          "token": "wiki-book_outlined",
+                          "color": "orange"
+                        }
+                      },
+                      {
+                        "tag": "button",
+                        "text": {
+                          "tag": "plain_text",
+                          "content": "详情"
+                        },
+                        "type": "text",
+                        "size": "tiny",
+                        "behaviors": [
+                          {
+                            "type": "callback",
+                            "value": {
+                              "kind": "settings",
+                              "op": "help",
+                              "switch": "knowledge"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "tag": "column",
+                    "width": "auto",
+                    "vertical_align": "top",
+                    "elements": [
+                      {
+                        "tag": "checker",
+                        "name": "knowledge",
+                        "element_id": "sw_knowledge",
+                        "checked": true,
+                        "text": {
+                          "tag": "plain_text",
+                          "content": "开"
+                        },
+                        "overall_checkable": true,
+                        "checked_style": {
+                          "show_strikethrough": false,
+                          "opacity": 1
+                        },
+                        "behaviors": [
+                          {
+                            "type": "callback",
+                            "value": {
+                              "kind": "settings",
+                              "op": "stage",
+                              "switch": "knowledge"
+                            }
+                          }
+                        ]
+                      }
+                    ]
                   }
                 ]
-              }
-            ]
-          },
-          {
-            "tag": "column",
-            "width": "auto",
-            "vertical_align": "center",
-            "elements": [
+              },
               {
-                "tag": "button",
-                "text": {
-                  "tag": "plain_text",
-                  "content": "?"
-                },
-                "type": "default",
-                "size": "tiny",
-                "behaviors": [
+                "tag": "column_set",
+                "flex_mode": "none",
+                "background_style": "default",
+                "horizontal_spacing": "8px",
+                "margin": "4px 0px 4px 0px",
+                "columns": [
                   {
-                    "type": "callback",
-                    "value": {
-                      "kind": "settings",
-                      "op": "help",
-                      "switch": "skill_evolve"
-                    }
+                    "tag": "column",
+                    "width": "weighted",
+                    "weight": 5,
+                    "vertical_align": "top",
+                    "elements": [
+                      {
+                        "tag": "markdown",
+                        "content": "**记忆成长** <text_tag color='neutral'>关</text_tag>\n<font color='grey'>3 · 提议记住约定</font>",
+                        "text_size": "normal",
+                        "icon": {
+                          "tag": "standard_icon",
+                          "token": "mindnote_outlined",
+                          "color": "grey"
+                        }
+                      },
+                      {
+                        "tag": "button",
+                        "text": {
+                          "tag": "plain_text",
+                          "content": "详情"
+                        },
+                        "type": "text",
+                        "size": "tiny",
+                        "behaviors": [
+                          {
+                            "type": "callback",
+                            "value": {
+                              "kind": "settings",
+                              "op": "help",
+                              "switch": "growth"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "tag": "column",
+                    "width": "auto",
+                    "vertical_align": "top",
+                    "elements": [
+                      {
+                        "tag": "checker",
+                        "name": "growth",
+                        "element_id": "sw_growth",
+                        "checked": false,
+                        "text": {
+                          "tag": "plain_text",
+                          "content": "关"
+                        },
+                        "overall_checkable": true,
+                        "checked_style": {
+                          "show_strikethrough": false,
+                          "opacity": 1
+                        },
+                        "behaviors": [
+                          {
+                            "type": "callback",
+                            "value": {
+                              "kind": "settings",
+                              "op": "stage",
+                              "switch": "growth"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "tag": "column_set",
+                "flex_mode": "none",
+                "background_style": "default",
+                "horizontal_spacing": "8px",
+                "margin": "4px 0px 4px 0px",
+                "columns": [
+                  {
+                    "tag": "column",
+                    "width": "weighted",
+                    "weight": 5,
+                    "vertical_align": "top",
+                    "elements": [
+                      {
+                        "tag": "markdown",
+                        "content": "**复盘写回** <text_tag color='green'>开</text_tag>\n<font color='grey'>7 · 做完写一句</font>",
+                        "text_size": "normal",
+                        "icon": {
+                          "tag": "standard_icon",
+                          "token": "edit_outlined",
+                          "color": "green"
+                        }
+                      },
+                      {
+                        "tag": "button",
+                        "text": {
+                          "tag": "plain_text",
+                          "content": "详情"
+                        },
+                        "type": "text",
+                        "size": "tiny",
+                        "behaviors": [
+                          {
+                            "type": "callback",
+                            "value": {
+                              "kind": "settings",
+                              "op": "help",
+                              "switch": "retrospect"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "tag": "column",
+                    "width": "auto",
+                    "vertical_align": "top",
+                    "elements": [
+                      {
+                        "tag": "checker",
+                        "name": "retrospect",
+                        "element_id": "sw_retrospect",
+                        "checked": true,
+                        "text": {
+                          "tag": "plain_text",
+                          "content": "开"
+                        },
+                        "overall_checkable": true,
+                        "checked_style": {
+                          "show_strikethrough": false,
+                          "opacity": 1
+                        },
+                        "behaviors": [
+                          {
+                            "type": "callback",
+                            "value": {
+                              "kind": "settings",
+                              "op": "stage",
+                              "switch": "retrospect"
+                            }
+                          }
+                        ]
+                      }
+                    ]
                   }
                 ]
               }
             ]
           }
         ]
-      },
-      {
-        "tag": "markdown",
-        "content": "**高级**",
-        "text_size": "normal"
       },
       {
         "tag": "column_set",
         "flex_mode": "none",
-        "background_style": "default",
-        "horizontal_spacing": "8px",
-        "margin": "0px 0px 4px 0px",
+        "background_style": "grey",
+        "horizontal_spacing": "0px",
+        "margin": "0px 0px 8px 0px",
         "columns": [
           {
             "tag": "column",
             "width": "weighted",
-            "weight": 5,
-            "vertical_align": "center",
+            "weight": 1,
+            "padding": "4px 8px 8px 8px",
+            "vertical_spacing": "2px",
             "elements": [
               {
                 "tag": "markdown",
-                "content": "👥 **9 主理人** 复杂问题拆开 <text_tag color='green'>开</text_tag>",
+                "content": "**技能**",
                 "text_size": "normal"
-              }
-            ]
-          },
-          {
-            "tag": "column",
-            "width": "auto",
-            "vertical_align": "center",
-            "elements": [
+              },
               {
-                "tag": "checker",
-                "name": "crew",
-                "element_id": "sw_crew",
-                "checked": true,
-                "text": {
-                  "tag": "plain_text",
-                  "content": "开",
-                  "text_size": "notation"
-                },
-                "overall_checkable": true,
-                "checked_style": {
-                  "show_strikethrough": false,
-                  "opacity": 1
-                },
-                "behaviors": [
+                "tag": "column_set",
+                "flex_mode": "none",
+                "background_style": "default",
+                "horizontal_spacing": "8px",
+                "margin": "4px 0px 4px 0px",
+                "columns": [
                   {
-                    "type": "callback",
-                    "value": {
-                      "kind": "settings",
-                      "op": "stage",
-                      "switch": "crew"
-                    }
+                    "tag": "column",
+                    "width": "weighted",
+                    "weight": 5,
+                    "vertical_align": "top",
+                    "elements": [
+                      {
+                        "tag": "markdown",
+                        "content": "**技能** <text_tag color='green'>开</text_tag>\n<font color='grey'>6 · 按现成步骤做</font>",
+                        "text_size": "normal",
+                        "icon": {
+                          "tag": "standard_icon",
+                          "token": "list-check_outlined",
+                          "color": "green"
+                        }
+                      },
+                      {
+                        "tag": "button",
+                        "text": {
+                          "tag": "plain_text",
+                          "content": "详情"
+                        },
+                        "type": "text",
+                        "size": "tiny",
+                        "behaviors": [
+                          {
+                            "type": "callback",
+                            "value": {
+                              "kind": "settings",
+                              "op": "help",
+                              "switch": "skills"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "tag": "column",
+                    "width": "auto",
+                    "vertical_align": "top",
+                    "elements": [
+                      {
+                        "tag": "checker",
+                        "name": "skills",
+                        "element_id": "sw_skills",
+                        "checked": true,
+                        "text": {
+                          "tag": "plain_text",
+                          "content": "开"
+                        },
+                        "overall_checkable": true,
+                        "checked_style": {
+                          "show_strikethrough": false,
+                          "opacity": 1
+                        },
+                        "behaviors": [
+                          {
+                            "type": "callback",
+                            "value": {
+                              "kind": "settings",
+                              "op": "stage",
+                              "switch": "skills"
+                            }
+                          }
+                        ]
+                      }
+                    ]
                   }
                 ]
-              }
-            ]
-          },
-          {
-            "tag": "column",
-            "width": "auto",
-            "vertical_align": "center",
-            "elements": [
+              },
               {
-                "tag": "button",
-                "text": {
-                  "tag": "plain_text",
-                  "content": "?"
-                },
-                "type": "default",
-                "size": "tiny",
-                "behaviors": [
+                "tag": "column_set",
+                "flex_mode": "none",
+                "background_style": "default",
+                "horizontal_spacing": "8px",
+                "margin": "4px 0px 4px 0px",
+                "columns": [
                   {
-                    "type": "callback",
-                    "value": {
-                      "kind": "settings",
-                      "op": "help",
-                      "switch": "crew"
-                    }
+                    "tag": "column",
+                    "width": "weighted",
+                    "weight": 5,
+                    "vertical_align": "top",
+                    "elements": [
+                      {
+                        "tag": "markdown",
+                        "content": "**技能改进** <text_tag color='green'>开</text_tag>\n<font color='grey'>8 · 提议下一版</font>",
+                        "text_size": "normal",
+                        "icon": {
+                          "tag": "standard_icon",
+                          "token": "refresh_outlined",
+                          "color": "green"
+                        }
+                      },
+                      {
+                        "tag": "button",
+                        "text": {
+                          "tag": "plain_text",
+                          "content": "详情"
+                        },
+                        "type": "text",
+                        "size": "tiny",
+                        "behaviors": [
+                          {
+                            "type": "callback",
+                            "value": {
+                              "kind": "settings",
+                              "op": "help",
+                              "switch": "skill_evolve"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "tag": "column",
+                    "width": "auto",
+                    "vertical_align": "top",
+                    "elements": [
+                      {
+                        "tag": "checker",
+                        "name": "skill_evolve",
+                        "element_id": "sw_skill_evolve",
+                        "checked": true,
+                        "text": {
+                          "tag": "plain_text",
+                          "content": "开"
+                        },
+                        "overall_checkable": true,
+                        "checked_style": {
+                          "show_strikethrough": false,
+                          "opacity": 1
+                        },
+                        "behaviors": [
+                          {
+                            "type": "callback",
+                            "value": {
+                              "kind": "settings",
+                              "op": "stage",
+                              "switch": "skill_evolve"
+                            }
+                          }
+                        ]
+                      }
+                    ]
                   }
                 ]
               }
@@ -826,77 +771,103 @@
         ]
       },
       {
-        "tag": "collapsible_panel",
-        "expanded": false,
-        "header": {
-          "title": {
-            "tag": "plain_text",
-            "content": "说明"
-          }
-        },
-        "elements": [
+        "tag": "column_set",
+        "flex_mode": "none",
+        "background_style": "grey",
+        "horizontal_spacing": "0px",
+        "margin": "0px 0px 8px 0px",
+        "columns": [
           {
-            "tag": "div",
-            "text": {
-              "tag": "plain_text",
-              "content": "【用量周报】\n每周把用了多少次整理成一份合计，私聊发给你。\n关掉之后，这项不再主动做上面说的事。\n准备：不用先准备资料。"
-            }
-          },
-          {
-            "tag": "div",
-            "text": {
-              "tag": "plain_text",
-              "content": "【知识检索】\n有人提问时，用这个群已经放进来的资料来回答，并写上来源。\n打开之后：不会主动发消息。只有有人提问时才拿资料来答。\n准备：要先把资料放进知识库文件夹（一般就在机器人旁边，文件夹名字是 kb）。现在里面还没有资料，打开了也搜不到。"
-            }
-          },
-          {
-            "tag": "div",
-            "text": {
-              "tag": "plain_text",
-              "content": "【记忆成长】\n隔一段时间看看群里定过的事，提议记住。有人点头才写入。\n打开之后：会私聊审批人，请他们点头。不点头不会记，也不会把草稿发到群里。还没指定谁来点头的话，不会自动提议。\n准备：不用先准备一份稿子。它只会提议，有人点头才记住。"
-            }
-          },
-          {
-            "tag": "div",
-            "text": {
-              "tag": "plain_text",
-              "content": "【早间待办】\n到了早上，往群里发一条今天的日程和还没完成的任务。\n打开之后：会主动发到群里，每个群每天最多一条，不点名所有人。还没指定发到哪些群的话，暂时不会发。\n准备：日历或任务表要先接上。没接上的那一项会说暂时没读到，不会编造。"
-            }
-          },
-          {
-            "tag": "div",
-            "text": {
-              "tag": "plain_text",
-              "content": "【断线提醒】\n机器人连不上时，私聊告诉主人。\n关掉之后，这项不再主动做上面说的事。\n准备：不用先准备资料。"
-            }
-          },
-          {
-            "tag": "div",
-            "text": {
-              "tag": "plain_text",
-              "content": "【技能】\n遇到选题、写稿这类事，按现成的步骤来做。\n关掉之后，这项不再主动做上面说的事。\n准备：技能文件夹里要已经有步骤说明。没有的话，打开了也不会多出新本事。"
-            }
-          },
-          {
-            "tag": "div",
-            "text": {
-              "tag": "plain_text",
-              "content": "【复盘写回】\n一轮群里的事做完后，写一句短复盘。有人点头才记进这个群。\n关掉之后，这项不再主动做上面说的事。\n准备：不用先写稿。它只根据刚结束的这一轮写一句，有人点头才记住。"
-            }
-          },
-          {
-            "tag": "div",
-            "text": {
-              "tag": "plain_text",
-              "content": "【技能改进】\n根据用过的记录和复盘，提议技能的下一版。分数不下降并且你点头才替换。\n关掉之后，这项不再主动做上面说的事。\n准备：技能文件夹里要已经有步骤说明。没有失败记录或复盘时，发「改进技能」也不会改文件。"
-            }
-          },
-          {
-            "tag": "div",
-            "text": {
-              "tag": "plain_text",
-              "content": "【主理人】\n复杂问题拆给查资料、读文档、起草。他们只能读，写入还是要你确认。\n关掉之后，这项不再主动做上面说的事。\n准备：不用先准备。只有比较复杂的问题才会拆开。"
-            }
+            "tag": "column",
+            "width": "weighted",
+            "weight": 1,
+            "padding": "4px 8px 8px 8px",
+            "vertical_spacing": "2px",
+            "elements": [
+              {
+                "tag": "markdown",
+                "content": "**高级**",
+                "text_size": "normal"
+              },
+              {
+                "tag": "column_set",
+                "flex_mode": "none",
+                "background_style": "default",
+                "horizontal_spacing": "8px",
+                "margin": "4px 0px 4px 0px",
+                "columns": [
+                  {
+                    "tag": "column",
+                    "width": "weighted",
+                    "weight": 5,
+                    "vertical_align": "top",
+                    "elements": [
+                      {
+                        "tag": "markdown",
+                        "content": "**主理人** <text_tag color='green'>开</text_tag>\n<font color='grey'>9 · 复杂问题拆开</font>",
+                        "text_size": "normal",
+                        "icon": {
+                          "tag": "standard_icon",
+                          "token": "group_outlined",
+                          "color": "green"
+                        }
+                      },
+                      {
+                        "tag": "button",
+                        "text": {
+                          "tag": "plain_text",
+                          "content": "详情"
+                        },
+                        "type": "text",
+                        "size": "tiny",
+                        "behaviors": [
+                          {
+                            "type": "callback",
+                            "value": {
+                              "kind": "settings",
+                              "op": "help",
+                              "switch": "crew"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "tag": "column",
+                    "width": "auto",
+                    "vertical_align": "top",
+                    "elements": [
+                      {
+                        "tag": "checker",
+                        "name": "crew",
+                        "element_id": "sw_crew",
+                        "checked": true,
+                        "text": {
+                          "tag": "plain_text",
+                          "content": "开"
+                        },
+                        "overall_checkable": true,
+                        "checked_style": {
+                          "show_strikethrough": false,
+                          "opacity": 1
+                        },
+                        "behaviors": [
+                          {
+                            "type": "callback",
+                            "value": {
+                              "kind": "settings",
+                              "op": "stage",
+                              "switch": "crew"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
           }
         ]
       },
@@ -921,8 +892,70 @@
       },
       {
         "tag": "markdown",
-        "content": "确认方式现在是点按钮。回复「确认方式」可以更换。确认不能关掉。",
-        "text_size": "normal"
+        "content": "<font color='grey'>确认方式现在是点按钮。回复「确认方式」可以更换。确认不能关掉。</font>",
+        "text_size": "notation"
+      },
+      {
+        "tag": "button",
+        "text": {
+          "tag": "plain_text",
+          "content": "保存 2 项改动"
+        },
+        "type": "primary",
+        "behaviors": [
+          {
+            "type": "callback",
+            "value": {
+              "kind": "write_confirm",
+              "id": "example-token-not-real",
+              "op": "yes",
+              "hash": "example-hash-not-real"
+            }
+          }
+        ],
+        "width": "fill",
+        "margin": "4px 0px 0px 0px"
+      },
+      {
+        "tag": "button",
+        "text": {
+          "tag": "plain_text",
+          "content": "全部推荐设置"
+        },
+        "type": "default",
+        "size": "medium",
+        "behaviors": [
+          {
+            "type": "callback",
+            "value": {
+              "kind": "settings",
+              "op": "recommend"
+            }
+          }
+        ],
+        "width": "fill",
+        "margin": "4px 0px 0px 0px"
+      },
+      {
+        "tag": "button",
+        "text": {
+          "tag": "plain_text",
+          "content": "取消"
+        },
+        "type": "text",
+        "behaviors": [
+          {
+            "type": "callback",
+            "value": {
+              "kind": "write_confirm",
+              "id": "example-token-not-real",
+              "op": "no",
+              "hash": "example-hash-not-real"
+            }
+          }
+        ],
+        "width": "fill",
+        "margin": "4px 0px 0px 0px"
       }
     ]
   }

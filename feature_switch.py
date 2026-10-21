@@ -31,7 +31,7 @@ FEATURES = (
         "aliases": ("用量周报", "周报"),
         "use": "每周把用了多少次整理成一份合计，私聊发给你。",
         "key": "report.enabled",
-        "icon": "📊",
+        "symbol": "sheet-histogram_outlined",
         "blurb": "每周私聊合计",
         "group": "daily",
     },
@@ -42,7 +42,7 @@ FEATURES = (
         "aliases": ("知识检索", "知识库"),
         "use": "有人提问时，用这个群已经放进来的资料来回答，并写上来源。",
         "key": "knowledge.enabled",
-        "icon": "📚",
+        "symbol": "wiki-book_outlined",
         "blurb": "提问时查资料",
         "group": "memory",
     },
@@ -53,7 +53,7 @@ FEATURES = (
         "aliases": ("记忆成长", "记忆"),
         "use": "隔一段时间看看群里定过的事，提议记住。有人点头才写入。",
         "key": "memory.growth.enabled",
-        "icon": "🧠",
+        "symbol": "mindnote_outlined",
         "blurb": "提议记住约定",
         "group": "memory",
     },
@@ -64,7 +64,7 @@ FEATURES = (
         "aliases": ("早间待办", "早晨摘要", "晨报", "待办"),
         "use": "到了早上，往群里发一条今天的日程和还没完成的任务。",
         "key": "digest.enabled",
-        "icon": "🌅",
+        "symbol": "calendar-tomorrow_outlined",
         "blurb": "早上发到群里",
         "group": "daily",
     },
@@ -75,7 +75,7 @@ FEATURES = (
         "aliases": ("断线提醒", "掉线提醒", "提醒"),
         "use": "机器人连不上时，私聊告诉主人。",
         "key": "alerts.enabled",
-        "icon": "🔔",
+        "symbol": "bell_outlined",
         "blurb": "断线时私聊你",
         "group": "daily",
     },
@@ -86,7 +86,7 @@ FEATURES = (
         "aliases": ("技能",),
         "use": "遇到选题、写稿这类事，按现成的步骤来做。",
         "key": "skills.enabled",
-        "icon": "🧩",
+        "symbol": "list-check_outlined",
         "blurb": "按现成步骤做",
         "group": "skills",
     },
@@ -97,7 +97,7 @@ FEATURES = (
         "aliases": ("复盘写回", "复盘"),
         "use": "一轮群里的事做完后，写一句短复盘。有人点头才记进这个群。",
         "key": "memory.retrospect.enabled",
-        "icon": "📝",
+        "symbol": "edit_outlined",
         "blurb": "做完写一句",
         "group": "memory",
     },
@@ -108,7 +108,7 @@ FEATURES = (
         "aliases": ("技能改进", "自动改进"),
         "use": "根据用过的记录和复盘，提议技能的下一版。分数不下降并且你点头才替换。",
         "key": "skills.evolve.enabled",
-        "icon": "✨",
+        "symbol": "refresh_outlined",
         "blurb": "提议下一版",
         "group": "skills",
     },
@@ -119,7 +119,7 @@ FEATURES = (
         "aliases": ("主理人", "专员"),
         "use": "复杂问题拆给查资料、读文档、起草。他们只能读，写入还是要你确认。",
         "key": "agent.crew.enabled",
-        "icon": "👥",
+        "symbol": "group_outlined",
         "blurb": "复杂问题拆开",
         "group": "advanced",
     },
@@ -479,9 +479,7 @@ def _pairs_from_pending(cfg, pending):
 
 
 def _confirm_label(pairs):
-    if len(pairs) == 1:
-        return "确认开启" if pairs[0][1] else "确认关闭"
-    return "确认这 %d 项" % len(pairs)
+    return "保存 %d 项改动" % len(pairs)
 
 
 def _pending_line(pairs):
@@ -497,22 +495,32 @@ def _group_warning(pairs):
     return ""
 
 
-def _md(content):
-    return {"tag": "markdown", "content": content, "text_size": "normal"}
+def _md(content, size="normal", icon=None):
+    node = {"tag": "markdown", "content": content, "text_size": size}
+    if icon:
+        node["icon"] = icon
+    return node
 
 
 def _plain_div(content):
     return {"tag": "div", "text": {"tag": "plain_text", "content": content}}
 
 
-def _callback_button(label, color, value, size="small"):
-    return {
+def _standard_icon(token, color):
+    return {"tag": "standard_icon", "token": token, "color": color}
+
+
+def _callback_button(label, color, value, size="medium", width=""):
+    button = {
         "tag": "button",
         "text": {"tag": "plain_text", "content": label},
         "type": color,
         "size": size,
         "behaviors": [{"type": "callback", "value": value}],
     }
+    if width:
+        button["width"] = width
+    return button
 
 
 def _settings_value(op, feature_id=""):
@@ -522,48 +530,108 @@ def _settings_value(op, feature_id=""):
     return value
 
 
-def _row(cfg, item, pending):
+def _icon_color(cfg, item, pending):
+    if item["id"] in (pending or {}):
+        return "orange"
+    return "green" if is_on(cfg, item["id"]) else "grey"
+
+
+def _row(cfg, base, item, pending, help_id):
     word = _status_word(cfg, item, pending)
     color = _status_color(cfg, item, pending)
     desired = _desired(cfg, item, pending)
-    line = "%s **%d %s** %s <text_tag color='%s'>%s</text_tag>" % (
-        item["icon"], item["n"], item["title"], item["blurb"], color, word)
+    opened = help_id == item["id"]
+    title = "**%s** <text_tag color='%s'>%s</text_tag>\n<font color='grey'>%d · %s</font>" % (
+        item["title"], color, word, item["n"], item["blurb"])
+    text = [_md(title, icon=_standard_icon(item["symbol"], _icon_color(cfg, item, pending)))]
+    text.append(_callback_button(
+        "收起" if opened else "详情", "text", _settings_value("help", item["id"]), size="tiny"))
+    if opened:
+        text.append(_md("<font color='grey'>%s</font>" % _help_body(cfg, base, item), size="notation"))
     checker = {
         "tag": "checker",
         "name": item["id"],
         "element_id": ("sw_" + item["id"])[:20],
         "checked": bool(desired),
-        "text": {"tag": "plain_text", "content": "开" if desired else "关", "text_size": "notation"},
+        "text": {"tag": "plain_text", "content": "开" if desired else "关"},
         "overall_checkable": True,
         "checked_style": {"show_strikethrough": False, "opacity": 1},
         "behaviors": [{"type": "callback", "value": _settings_value("stage", item["id"])}],
     }
-    ask = _callback_button("?", "default", _settings_value("help", item["id"]), size="tiny")
     return {
         "tag": "column_set",
         "flex_mode": "none",
         "background_style": "default",
         "horizontal_spacing": "8px",
-        "margin": "0px 0px 4px 0px",
+        "margin": "4px 0px 4px 0px",
         "columns": [
             {
                 "tag": "column",
                 "width": "weighted",
                 "weight": 5,
-                "vertical_align": "center",
-                "elements": [_md(line)],
+                "vertical_align": "top",
+                "elements": text,
             },
             {
                 "tag": "column",
                 "width": "auto",
-                "vertical_align": "center",
+                "vertical_align": "top",
                 "elements": [checker],
             },
+        ],
+    }
+
+
+def _group_block(title, rows):
+    return {
+        "tag": "column_set",
+        "flex_mode": "none",
+        "background_style": "grey",
+        "horizontal_spacing": "0px",
+        "margin": "0px 0px 8px 0px",
+        "columns": [{
+            "tag": "column",
+            "width": "weighted",
+            "weight": 1,
+            "padding": "4px 8px 8px 8px",
+            "vertical_spacing": "2px",
+            "elements": [_md("**%s**" % title)] + rows,
+        }],
+    }
+
+
+def _status_bar(cfg, base):
+    on, total = enabled_count(cfg)
+    bits = []
+    ver = product_version()
+    if ver:
+        bits.append("v" + ver)
+    started = started_label(base)
+    if started:
+        bits.append("上次启动 " + started)
+    sub = " · ".join(bits) if bits else "确认后才写入"
+    left = "**已开 %d/%d**\n<font color='grey'>%s</font>" % (on, total, sub)
+    return {
+        "tag": "column_set",
+        "flex_mode": "none",
+        "background_style": "wathet",
+        "horizontal_spacing": "8px",
+        "margin": "0px 0px 8px 0px",
+        "columns": [
+            {
+                "tag": "column",
+                "width": "weighted",
+                "weight": 1,
+                "vertical_align": "center",
+                "padding": "8px 4px 8px 8px",
+                "elements": [_md(left, icon=_standard_icon("setting_outlined", "blue"))],
+            },
             {
                 "tag": "column",
                 "width": "auto",
                 "vertical_align": "center",
-                "elements": [ask],
+                "padding": "8px 8px 8px 0px",
+                "elements": [_md("<text_tag color='green'>在线</text_tag>")],
             },
         ],
     }
@@ -586,64 +654,72 @@ def callback_body(card, toast=""):
     return body
 
 
+def _fill_confirm(label, color, token, op, action_hash_value):
+    button = confirm_mode._button(label, color, token, op, action_hash_value)
+    button["width"] = "fill"
+    button["margin"] = "4px 0px 0px 0px"
+    return button
+
+
+def _action_row(pairs, issued):
+    """底部：主按钮保存，次按钮推荐。没有待确认时主按钮停用。确认码模式不放保存按钮。"""
+    buttons = []
+    ready = bool(pairs) and isinstance(issued, dict) and issued.get("token") and issued.get("mode") != "code"
+    if ready:
+        buttons.append(_fill_confirm(
+            _confirm_label(pairs), "primary", issued["token"], "yes", issued.get("hash") or ""))
+    elif not pairs:
+        buttons.append({
+            "tag": "button",
+            "text": {"tag": "plain_text", "content": "保存 0 项改动"},
+            "type": "primary",
+            "width": "fill",
+            "disabled": True,
+            "disabled_tips": {"tag": "plain_text", "content": "先点右侧开关，再保存"},
+        })
+    buttons.append(_callback_button(
+        "全部推荐设置", "default", _settings_value("recommend"), width="fill"))
+    buttons[-1]["margin"] = "4px 0px 0px 0px"
+    if ready:
+        buttons.append(_fill_confirm("取消", "text", issued["token"], "no", issued.get("hash") or ""))
+    return buttons
+
+
 def card(cfg, base, cfg_path, pending=None, help_id="", issued=None):
     """一张紧凑设置卡。pending 是还没写入的目标状态。issued 带确认按钮的记号。"""
     pending = pending or {}
     summary = overview_line(cfg, base)
-    elements = [_md(summary.replace("在线", "<text_tag color='green'>在线</text_tag>", 1))]
+    elements = [_status_bar(cfg, base)]
     pairs = _pairs_from_pending(cfg, pending)
     if pairs and isinstance(issued, dict) and issued.get("token"):
-        elements.append(_plain_div(_pending_line(pairs)))
+        names = "、".join("%s%s" % ("打开" if on else "关掉", item["title"]) for item, on in pairs)
+        elements.append(_md("**待保存 %d 项** <text_tag color='orange'>未写入</text_tag>\n<font color='grey'>%s</font>" % (
+            len(pairs), names)))
         warn = _group_warning(pairs)
         if warn:
-            elements.append(_plain_div(warn))
+            elements.append(_md("<font color='orange'>%s</font>" % warn))
         if issued.get("show_code") and issued.get("code"):
             lead = "请回复" if issued.get("mode") == "code" else "还要回复"
             elements.append(_plain_div("%s：确认 %s" % (lead, issued["code"])))
-        if issued.get("mode") != "code":
-            elements.append(confirm_mode._button(
-                _confirm_label(pairs), "primary", issued["token"], "yes", issued.get("hash") or ""))
-            elements.append(confirm_mode._button(
-                "取消", "danger", issued["token"], "no", issued.get("hash") or ""))
     elif pairs:
         elements.append(_plain_div("确认还没准备好。请再点一次开关。"))
-    elif not pairs:
-        elements.append({
-            "tag": "interactive_container",
-            "width": "fill",
-            "height": "auto",
-            "background_style": "grey",
-            "has_border": False,
-            "padding": "8px 12px 8px 12px",
-            "behaviors": [{"type": "callback", "value": _settings_value("recommend")}],
-            "elements": [_md("**全部推荐设置**\n先开断线提醒和用量周报，只私聊你。点这里之后还要确认。")],
-        })
+    elements.append({"tag": "hr"})
     for gid, title in GROUPS:
         rows = [item for item in FEATURES if item.get("group") == gid]
         if not rows:
             continue
-        elements.append(_md("**%s**" % title))
-        for item in rows:
-            elements.append(_row(cfg, item, pending))
-    help_items = []
-    if help_id and feature(help_id):
-        picked = feature(help_id)
-        help_items.append("【%s】\n%s" % (picked["title"], _help_body(cfg, base, picked)))
-    for item in FEATURES:
-        if help_id and item["id"] == help_id:
-            continue
-        help_items.append("【%s】\n%s" % (item["title"], _help_body(cfg, base, item)))
-    elements.append(_panel("说明", help_items, bool(help_id)))
+        elements.append(_group_block(title, [_row(cfg, base, item, pending, help_id) for item in rows]))
     elements.append(_panel("配置名字", [detail_text(cfg_path)], False))
-    elements.append(_md(confirm_mode.menu_line(cfg, base)))
-    summary = overview_line(cfg, base)
+    elements.append(_md("<font color='grey'>%s</font>" % confirm_mode.menu_line(cfg, base), size="notation"))
+    elements.extend(_action_row(pairs, issued))
     return {
         "schema": "2.0",
         "config": {"update_multi": True, "summary": {"content": summary[:40]}},
         "header": {
             "title": {"tag": "plain_text", "content": "功能开关"},
-            "subtitle": {"tag": "plain_text", "content": summary[:80]},
+            "subtitle": {"tag": "plain_text", "content": "确认后才写入"},
             "template": "blue",
+            "icon": {"tag": "standard_icon", "token": "setting_outlined"},
         },
         "body": {"elements": elements},
     }

@@ -491,7 +491,9 @@ try:
     names = _panel_text(shown, "配置名字")
     tags = [el for el in _walk(shown) if el.get("tag") == "checker"]
     columns = [el for el in _walk(shown) if el.get("tag") == "column_set"]
-    containers = [el for el in _walk(shown) if el.get("tag") == "interactive_container"]
+    labels = [((el.get("text") or {}).get("content") or "") for el in _walk(shown) if el.get("tag") == "button"]
+    icons = [el.get("icon", {}).get("token") for el in _walk(shown) if isinstance(el.get("icon"), dict)]
+    names_panel = _panel_text(shown, "配置名字")
     check("卡片回调连上时只准备一张紧凑卡片，文字留着但标记为不另发",
           menu.get("card_only") and shown and shown.get("schema") == "2.0"
           and menu.get("callback", {}).get("card", {}).get("type") == "raw"
@@ -499,10 +501,13 @@ try:
           and "已开 0/9" in visible and "v" + feature_switch.product_version() in visible
           and "在线" in visible and all(name in visible for name in ("日常", "记忆", "技能", "高级"))
           and all(item["title"] in visible and item["blurb"] in visible for item in feature_switch.FEATURES)
-          and len(tags) == len(feature_switch.FEATURES) and columns and containers
+          and len(tags) == len(feature_switch.FEATURES) and columns
+          and "详情" in labels and "?" not in labels and "保存 0 项改动" in labels
           and "全部推荐设置" in visible and "第 1 项" not in visible and "先看这一项" not in visible
+          and all(item["symbol"] in icons for item in feature_switch.FEATURES)
+          and "setting_outlined" in icons
           and plain(visible) and "report.enabled" not in visible
-          and "report.enabled" in names and shown["body"]["elements"][-2].get("expanded") is False
+          and "report.enabled" in names and names_panel and '"expanded": false' in names
           and _confirm_value(shown, "yes") is None, visible[:500])
     stranger = feature_switch.handle_settings(
         CFG, base, {"user": "user_other", "chat_id": "oc_p2p1", "message_id": "om_set1", "op": "stage", "switch": "report"},
@@ -523,13 +528,13 @@ try:
     staged_card = staged["card"]
     yes = _confirm_value(staged_card, "yes")
     no = _confirm_value(staged_card, "no")
-    check("点一下只把原卡片改成确认开启和取消，配置还没写",
+    check("点一下只把原卡片改成保存和取消，配置还没写",
           staged.get("patch") and staged.get("quiet") and staged.get("text") == ""
           and staged.get("callback", {}).get("card", {}).get("type") == "raw"
           and yes and no and yes.get("kind") == "write_confirm"
-          and "确认开启" in json.dumps(staged_card, ensure_ascii=False)
+          and "保存 1 项改动" in json.dumps(staged_card, ensure_ascii=False)
           and "取消" in json.dumps(staged_card, ensure_ascii=False)
-          and "待确认" in json.dumps(staged_card, ensure_ascii=False)
+          and "待保存" in json.dumps(staged_card, ensure_ascii=False)
           and json.load(open(path, encoding="utf-8"))["report"]["enabled"] is False)
     tampered = feature_switch.try_click(
         CFG, base, path, yes["id"], "yes", "0" * 64, OWNER, apply=True, check=lambda _p: ([], []), message_id="om_set1")
@@ -543,10 +548,10 @@ try:
     mid = json.load(open(path, encoding="utf-8"))
     check("勾选第二项后，旧确认按钮不能再生效",
           again and stale and stale.get("quiet") and mid["report"]["enabled"] is False and mid["alerts"]["enabled"] is False
-          and "待确认" in json.dumps(stale.get("card") or {}, ensure_ascii=False))
+          and "待保存" in json.dumps(stale.get("card") or {}, ensure_ascii=False))
     fresh_yes = _confirm_value(again["card"], "yes")
-    check("两项一起确认时按钮写成确认这 2 项",
-          fresh_yes and "确认这 2 项" in json.dumps(again["card"], ensure_ascii=False))
+    check("两项一起确认时按钮写成保存 2 项改动",
+          fresh_yes and "保存 2 项改动" in json.dumps(again["card"], ensure_ascii=False))
     bad = feature_switch.try_click(
         CFG, base, path, fresh_yes["id"], "yes", fresh_yes["hash"], OWNER, apply=True,
         check=lambda _p: ([("report.enabled", "不要")], []), message_id="om_set1")
@@ -584,9 +589,11 @@ try:
           and changed["p2p"]["open_to_all"] is False and backup == before)
     asked = feature_switch.handle_settings(
         changed, base, feature_switch.parse_settings(_settings_event("help", "digest", "om_help")), cfg_path=path)
-    help_panel = _panel_text(asked["card"], "说明")
-    check("问号展开说明，默认仍把配置名字折起来",
-          asked and asked.get("patch") and "早间待办" in help_panel and "主动发到群里" in help_panel
+    asked_raw = json.dumps(asked["card"], ensure_ascii=False)
+    asked_labels = [((el.get("text") or {}).get("content") or "") for el in _walk(asked["card"]) if el.get("tag") == "button"]
+    check("详情展开这一项的说明，配置名字仍折着",
+          asked and asked.get("patch") and "主动发到群里" in asked_raw and "收起" in asked_labels
+          and "?" not in asked_labels
           and _panel_text(asked["card"], "配置名字") and "digest.enabled" in _panel_text(asked["card"], "配置名字")
           and "digest.enabled" not in _visible(asked["card"]))
 finally:
@@ -637,9 +644,11 @@ check("仓库里的示例卡片和确认态都是这张紧凑卡，没有真实�
       and len([el for el in _walk(listing) if el.get("tag") == "checker"]) == 9
       and _confirm_value(listing, "yes") is None
       and "report.enabled" not in shown and "report.enabled" in keys
-      and "第 1 项" not in shown
-      and "确认这 2 项" in json.dumps(confirming, ensure_ascii=False)
+      and "第 1 项" not in shown and "详情" in shown and ' "?"' not in shown
+      and "保存 2 项改动" in json.dumps(confirming, ensure_ascii=False)
+      and "全部推荐设置" in json.dumps(confirming, ensure_ascii=False)
       and "早间待办会发到群里" in json.dumps(confirming, ensure_ascii=False)
+      and "sheet-histogram_outlined" in shown and "📊" not in shown
       and "example-token-not-real" in sample and "ou_" not in sample and "secret" not in sample.lower())
 
 
