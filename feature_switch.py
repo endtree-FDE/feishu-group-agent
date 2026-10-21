@@ -11,6 +11,8 @@ _CODE = re.compile(r"\d{6}")
 _MENU = re.compile(r"^(?:/设置|/set|/settings|设置|功能开关|开关功能|看设置|打开设置)\s*$", re.I)
 _INDEX = re.compile(r"^第\s*([1-9])\s*项$")
 _DIGIT = re.compile(r"^([1-9])$")
+_ZERO = re.compile(r"^0$")
+_NUMS = re.compile(r"^[0-9](?:[\s,，、]+[0-9]){1,8}$")
 _OFF = re.compile(r"不要开|别开|关掉|关闭|停用|关上")
 _ON = re.compile(r"打开|开启|启用|开一下|开开")
 _SENSITIVE = re.compile(
@@ -29,6 +31,9 @@ FEATURES = (
         "aliases": ("用量周报", "周报"),
         "use": "每周把用了多少次整理成一份合计，私聊发给你。",
         "key": "report.enabled",
+        "icon": "📊",
+        "blurb": "每周私聊合计",
+        "group": "daily",
     },
     {
         "id": "knowledge",
@@ -37,6 +42,9 @@ FEATURES = (
         "aliases": ("知识检索", "知识库"),
         "use": "有人提问时，用这个群已经放进来的资料来回答，并写上来源。",
         "key": "knowledge.enabled",
+        "icon": "📚",
+        "blurb": "提问时查资料",
+        "group": "memory",
     },
     {
         "id": "growth",
@@ -45,6 +53,9 @@ FEATURES = (
         "aliases": ("记忆成长", "记忆"),
         "use": "隔一段时间看看群里定过的事，提议记住。有人点头才写入。",
         "key": "memory.growth.enabled",
+        "icon": "🧠",
+        "blurb": "提议记住约定",
+        "group": "memory",
     },
     {
         "id": "digest",
@@ -53,6 +64,9 @@ FEATURES = (
         "aliases": ("早间待办", "早晨摘要", "晨报", "待办"),
         "use": "到了早上，往群里发一条今天的日程和还没完成的任务。",
         "key": "digest.enabled",
+        "icon": "🌅",
+        "blurb": "早上发到群里",
+        "group": "daily",
     },
     {
         "id": "alerts",
@@ -61,6 +75,9 @@ FEATURES = (
         "aliases": ("断线提醒", "掉线提醒", "提醒"),
         "use": "机器人连不上时，私聊告诉主人。",
         "key": "alerts.enabled",
+        "icon": "🔔",
+        "blurb": "断线时私聊你",
+        "group": "daily",
     },
     {
         "id": "skills",
@@ -69,6 +86,9 @@ FEATURES = (
         "aliases": ("技能",),
         "use": "遇到选题、写稿这类事，按现成的步骤来做。",
         "key": "skills.enabled",
+        "icon": "🧩",
+        "blurb": "按现成步骤做",
+        "group": "skills",
     },
     {
         "id": "retrospect",
@@ -77,6 +97,9 @@ FEATURES = (
         "aliases": ("复盘写回", "复盘"),
         "use": "一轮群里的事做完后，写一句短复盘。有人点头才记进这个群。",
         "key": "memory.retrospect.enabled",
+        "icon": "📝",
+        "blurb": "做完写一句",
+        "group": "memory",
     },
     {
         "id": "skill_evolve",
@@ -85,6 +108,9 @@ FEATURES = (
         "aliases": ("技能改进", "自动改进"),
         "use": "根据用过的记录和复盘，提议技能的下一版。分数不下降并且你点头才替换。",
         "key": "skills.evolve.enabled",
+        "icon": "✨",
+        "blurb": "提议下一版",
+        "group": "skills",
     },
     {
         "id": "crew",
@@ -93,8 +119,20 @@ FEATURES = (
         "aliases": ("主理人", "专员"),
         "use": "复杂问题拆给查资料、读文档、起草。他们只能读，写入还是要你确认。",
         "key": "agent.crew.enabled",
+        "icon": "👥",
+        "blurb": "复杂问题拆开",
+        "group": "advanced",
     },
 )
+# 分组顺序照着设置页：日常、记忆、技能、高级。序号仍是原来的 1 到 9，方便回复数字。
+GROUPS = (
+    ("daily", "日常"),
+    ("memory", "记忆"),
+    ("skills", "技能"),
+    ("advanced", "高级"),
+)
+# 建议先开的两项只私聊主人，不往群里发。
+RECOMMENDED = ("alerts", "report")
 _BY_ID = {item["id"]: item for item in FEATURES}
 _BY_N = {item["n"]: item for item in FEATURES}
 
@@ -355,57 +393,279 @@ def detail_text(cfg_path):
     return "\n".join(lines)
 
 
-def menu_text(cfg, base):
-    item = focus_feature(cfg)
-    on = is_on(cfg, item["id"])
-    lines = [
-        "你是主人，可以在这里开关功能。一次只改一项。",
-        "",
-        "先看这一项：%d. %s（现在%s）。" % (item["n"], item["title"], _state_on(on)),
+def product_version():
+    """只为设置卡片显示版本号。读不到就空着，别的行为不变。"""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "VERSION")
+    try:
+        text = open(path, encoding="utf-8").read().strip()
+    except OSError:
+        return ""
+    if re.match(r"^[0-9]+\.[0-9]+\.[0-9]+$", text):
+        return text
+    return ""
+
+
+def started_label(base):
+    """锁文件的修改时间当作上次启动。没有锁就不写时间。"""
+    path = os.path.join(base or "", "state", "bot.lock")
+    if not os.path.isfile(path):
+        return ""
+    try:
+        return time.strftime("%m-%d %H:%M", time.localtime(os.path.getmtime(path)))
+    except OSError:
+        return ""
+
+
+def enabled_count(cfg):
+    return sum(1 for item in FEATURES if is_on(cfg, item["id"])), len(FEATURES)
+
+
+def overview_line(cfg, base):
+    on, total = enabled_count(cfg)
+    parts = ["已开 %d/%d" % (on, total)]
+    ver = product_version()
+    if ver:
+        parts.append("v" + ver)
+    parts.append("在线")
+    started = started_label(base)
+    if started:
+        parts.append("上次启动 " + started)
+    return " · ".join(parts)
+
+
+def _use_card(cfg, base):
+    """卡片回调连上、并且这项确认方式允许点按钮时，才发交互卡片。"""
+    plan = confirm_mode.plan(cfg, base, high=True)
+    return bool(plan.get("cards")) and plan.get("mode") != "code", plan
+
+
+def _desired(cfg, item, pending):
+    if item["id"] in (pending or {}):
+        return bool(pending[item["id"]])
+    return is_on(cfg, item["id"])
+
+
+def _status_word(cfg, item, pending):
+    desired = _desired(cfg, item, pending)
+    if item["id"] in (pending or {}):
+        return "将开" if desired else "将关"
+    return "开" if desired else "关"
+
+
+def _status_color(cfg, item, pending):
+    if item["id"] in (pending or {}):
+        return "orange"
+    return "green" if is_on(cfg, item["id"]) else "neutral"
+
+
+def _help_body(cfg, base, item):
+    return "\n".join([
         item["use"],
-        happens(cfg, base, item["id"], not on),
+        happens(cfg, base, item["id"], not is_on(cfg, item["id"])),
         "准备：" + prepare(cfg, base, item["id"]),
-        "",
-        "想改它就回复 %d。想看全部，看上面那张卡片。" % item["n"],
-        confirm_mode.menu_line(cfg, base),
-        "看配置名字请回复「详细」。",
-    ]
-    return "\n".join(lines)
+    ])
 
 
-def card(cfg, base, cfg_path):
-    elements = [{
-        "tag": "div",
-        "text": {"tag": "plain_text", "content": "一次只改一项。点下面的按钮，或回复序号。点了没反应就回复数字。"},
-    }]
+def _pairs_from_pending(cfg, pending):
+    pairs = []
     for item in FEATURES:
-        on = is_on(cfg, item["id"])
-        body = "\n".join([
-            "%d. %s（现在%s）" % (item["n"], item["title"], _state_on(on)),
-            item["use"],
-            happens(cfg, base, item["id"], not on),
-            "准备：" + prepare(cfg, base, item["id"]),
-        ])
-        elements.append({"tag": "div", "text": {"tag": "plain_text", "content": body}})
-        elements.append({
-            "tag": "button",
-            "text": {"tag": "plain_text", "content": "第 %d 项" % item["n"]},
-            "type": "primary" if item["n"] == focus_feature(cfg)["n"] else "default",
-            "behaviors": [{"type": "callback", "value": {"switch": item["id"], "op": "flip"}}],
-        })
-    elements.append({"tag": "div", "text": {"tag": "plain_text", "content": confirm_mode.menu_line(cfg, base)}})
-    elements.append({
+        if item["id"] not in (pending or {}):
+            continue
+        desired = bool(pending[item["id"]])
+        if is_on(cfg, item["id"]) == desired:
+            continue
+        pairs.append((item, desired))
+    return pairs
+
+
+def _confirm_label(pairs):
+    if len(pairs) == 1:
+        return "确认开启" if pairs[0][1] else "确认关闭"
+    return "确认这 %d 项" % len(pairs)
+
+
+def _pending_line(pairs):
+    parts = []
+    for item, on in pairs:
+        parts.append("%s%s" % ("打开" if on else "关掉", item["title"]))
+    return "待确认：" + "、".join(parts)
+
+
+def _group_warning(pairs):
+    if any(item["id"] == "digest" and on for item, on in pairs):
+        return "早间待办会发到群里。"
+    return ""
+
+
+def _md(content):
+    return {"tag": "markdown", "content": content, "text_size": "normal"}
+
+
+def _plain_div(content):
+    return {"tag": "div", "text": {"tag": "plain_text", "content": content}}
+
+
+def _callback_button(label, color, value, size="small"):
+    return {
+        "tag": "button",
+        "text": {"tag": "plain_text", "content": label},
+        "type": color,
+        "size": size,
+        "behaviors": [{"type": "callback", "value": value}],
+    }
+
+
+def _settings_value(op, feature_id=""):
+    value = {"kind": "settings", "op": op}
+    if feature_id:
+        value["switch"] = feature_id
+    return value
+
+
+def _row(cfg, item, pending):
+    word = _status_word(cfg, item, pending)
+    color = _status_color(cfg, item, pending)
+    desired = _desired(cfg, item, pending)
+    line = "%s **%d %s** %s <text_tag color='%s'>%s</text_tag>" % (
+        item["icon"], item["n"], item["title"], item["blurb"], color, word)
+    checker = {
+        "tag": "checker",
+        "name": item["id"],
+        "element_id": ("sw_" + item["id"])[:20],
+        "checked": bool(desired),
+        "text": {"tag": "plain_text", "content": "开" if desired else "关", "text_size": "notation"},
+        "overall_checkable": True,
+        "checked_style": {"show_strikethrough": False, "opacity": 1},
+        "behaviors": [{"type": "callback", "value": _settings_value("stage", item["id"])}],
+    }
+    ask = _callback_button("?", "default", _settings_value("help", item["id"]), size="tiny")
+    return {
+        "tag": "column_set",
+        "flex_mode": "none",
+        "background_style": "default",
+        "horizontal_spacing": "8px",
+        "margin": "0px 0px 4px 0px",
+        "columns": [
+            {
+                "tag": "column",
+                "width": "weighted",
+                "weight": 5,
+                "vertical_align": "center",
+                "elements": [_md(line)],
+            },
+            {
+                "tag": "column",
+                "width": "auto",
+                "vertical_align": "center",
+                "elements": [checker],
+            },
+            {
+                "tag": "column",
+                "width": "auto",
+                "vertical_align": "center",
+                "elements": [ask],
+            },
+        ],
+    }
+
+
+def _panel(title, texts, expanded):
+    return {
         "tag": "collapsible_panel",
-        "expanded": False,
-        "header": {"title": {"tag": "plain_text", "content": "详细"}},
-        "elements": [{"tag": "div", "text": {"tag": "plain_text", "content": detail_text(cfg_path)}}],
-    })
+        "expanded": bool(expanded),
+        "header": {"title": {"tag": "plain_text", "content": title}},
+        "elements": [_plain_div(text) for text in texts if text],
+    }
+
+
+def callback_body(card, toast=""):
+    """长连接收不到 HTTP 响应体。这是同一张卡片的回调响应形状，patch 时用 card.data。"""
+    body = {"card": {"type": "raw", "data": card}}
+    if toast:
+        body["toast"] = {"type": "info", "content": str(toast)[:40]}
+    return body
+
+
+def card(cfg, base, cfg_path, pending=None, help_id="", issued=None):
+    """一张紧凑设置卡。pending 是还没写入的目标状态。issued 带确认按钮的记号。"""
+    pending = pending or {}
+    summary = overview_line(cfg, base)
+    elements = [_md(summary.replace("在线", "<text_tag color='green'>在线</text_tag>", 1))]
+    pairs = _pairs_from_pending(cfg, pending)
+    if pairs and isinstance(issued, dict) and issued.get("token"):
+        elements.append(_plain_div(_pending_line(pairs)))
+        warn = _group_warning(pairs)
+        if warn:
+            elements.append(_plain_div(warn))
+        if issued.get("show_code") and issued.get("code"):
+            lead = "请回复" if issued.get("mode") == "code" else "还要回复"
+            elements.append(_plain_div("%s：确认 %s" % (lead, issued["code"])))
+        if issued.get("mode") != "code":
+            elements.append(confirm_mode._button(
+                _confirm_label(pairs), "primary", issued["token"], "yes", issued.get("hash") or ""))
+            elements.append(confirm_mode._button(
+                "取消", "danger", issued["token"], "no", issued.get("hash") or ""))
+    elif pairs:
+        elements.append(_plain_div("确认还没准备好。请再点一次开关。"))
+    elif not pairs:
+        elements.append({
+            "tag": "interactive_container",
+            "width": "fill",
+            "height": "auto",
+            "background_style": "grey",
+            "has_border": False,
+            "padding": "8px 12px 8px 12px",
+            "behaviors": [{"type": "callback", "value": _settings_value("recommend")}],
+            "elements": [_md("**全部推荐设置**\n先开断线提醒和用量周报，只私聊你。点这里之后还要确认。")],
+        })
+    for gid, title in GROUPS:
+        rows = [item for item in FEATURES if item.get("group") == gid]
+        if not rows:
+            continue
+        elements.append(_md("**%s**" % title))
+        for item in rows:
+            elements.append(_row(cfg, item, pending))
+    help_items = []
+    if help_id and feature(help_id):
+        picked = feature(help_id)
+        help_items.append("【%s】\n%s" % (picked["title"], _help_body(cfg, base, picked)))
+    for item in FEATURES:
+        if help_id and item["id"] == help_id:
+            continue
+        help_items.append("【%s】\n%s" % (item["title"], _help_body(cfg, base, item)))
+    elements.append(_panel("说明", help_items, bool(help_id)))
+    elements.append(_panel("配置名字", [detail_text(cfg_path)], False))
+    elements.append(_md(confirm_mode.menu_line(cfg, base)))
+    summary = overview_line(cfg, base)
     return {
         "schema": "2.0",
-        "config": {"update_multi": True, "summary": {"content": "功能开关"}},
-        "header": {"title": {"tag": "plain_text", "content": "功能开关"}, "template": "blue"},
+        "config": {"update_multi": True, "summary": {"content": summary[:40]}},
+        "header": {
+            "title": {"tag": "plain_text", "content": "功能开关"},
+            "subtitle": {"tag": "plain_text", "content": summary[:80]},
+            "template": "blue",
+        },
         "body": {"elements": elements},
     }
+
+
+def menu_text(cfg, base):
+    """卡片回调没连上时的文字清单。一行一项，不写长说明。"""
+    lines = [overview_line(cfg, base), ""]
+    for gid, title in GROUPS:
+        rows = [item for item in FEATURES if item.get("group") == gid]
+        if not rows:
+            continue
+        lines.append(title)
+        for item in rows:
+            lines.append("%d %s  %s  %s" % (
+                item["n"], item["title"], "开" if is_on(cfg, item["id"]) else "关", item["blurb"]))
+        lines.append("")
+    lines.append("回复序号即可，多个用空格，如 1 5。回复 0 是推荐设置（断线提醒和用量周报）。")
+    lines.append("点了没反应也用这个办法。确认之后才会改。")
+    lines.append(confirm_mode.menu_line(cfg, base))
+    lines.append("配置名请回复「详细」。")
+    return "\n".join(lines).strip()
 
 
 def welcome_text(cfg):
@@ -418,7 +678,7 @@ def welcome_text(cfg):
         "· 早间待办：早上往群里发今天的日程（这项会在群里发消息）",
         "",
         "建议先打开「断线提醒」和「用量周报」。它们只私聊你，不打扰群。",
-        "现在回复「设置」，我发一张清单。一次只改一项。",
+        "现在回复「设置」，我发一张开关卡片。",
     ])
 
 
@@ -426,7 +686,7 @@ def looks_like_command(text):
     q = guard.normalize(text or "").strip()
     if not q:
         return False
-    if _MENU.match(q) or _INDEX.match(q) or _DIGIT.match(q):
+    if _MENU.match(q) or _INDEX.match(q) or _DIGIT.match(q) or _ZERO.match(q) or _NUMS.match(q):
         return True
     if confirm_mode.refusing_off(q) or confirm_mode.asking_mode(q):
         return True
@@ -502,29 +762,54 @@ def _load_menu(base, now):
     return data
 
 
-def _save_menu(base, ctx, now):
+def _clean_pending(raw):
+    out = {}
+    if not isinstance(raw, dict):
+        return out
+    for key, val in raw.items():
+        if key in _BY_ID and isinstance(val, bool):
+            out[key] = val
+    return out
+
+
+def _save_menu(base, ctx, now, pending=None, help_id=""):
     os.makedirs(os.path.join(base, "state"), exist_ok=True)
+    help_name = str(help_id or "")
+    if help_name and not feature(help_name):
+        help_name = ""
     payload = {
         "user": who(ctx.get("user")),
         "chat_id": who(ctx.get("chat_id")),
         "scope": str(ctx.get("scope") or ""),
         "ts": now,
+        "pending": _clean_pending(pending),
+        "help": help_name,
     }
     _write_json(_menu_path(base), payload)
 
 
-def _menu_matches(menu, ctx):
+def _menu_matches(menu, ctx, allow_blank_scope=False):
     if not menu:
         return False
-    return (menu.get("user") == who(ctx.get("user"))
-            and menu.get("chat_id") == who(ctx.get("chat_id"))
-            and str(menu.get("scope") or "") == str(ctx.get("scope") or ""))
+    if menu.get("user") != who(ctx.get("user")) or menu.get("chat_id") != who(ctx.get("chat_id")):
+        return False
+    want = str(menu.get("scope") or "")
+    got = str(ctx.get("scope") or "")
+    if allow_blank_scope and not got:
+        return True
+    return got == want
 
 
-def _reply(text, card_body=None, restart=False, patch=False):
+def _reply(text, card_body=None, restart=False, patch=False, quiet=False, card_only=False, toast=""):
     out = {"text": text, "card": card_body, "restart": bool(restart)}
     if patch:
         out["patch"] = True
+    if quiet:
+        out["quiet"] = True
+    if card_only:
+        out["card_only"] = True
+    if toast:
+        out["toast"] = toast
     return out
 
 
@@ -584,14 +869,30 @@ def handle_text(cfg, base, text, ctx, names=(), now=None, cfg_path=""):
         if blocked:
             _audit(base, "refuse", user=ctx.get("user"), chat=ctx.get("chat_type"), names=names)
             return blocked
-        _save_menu(base, ctx, now)
+        _supersede_settings(base, who(ctx.get("user")))
+        _save_menu(base, ctx, now, pending={}, help_id="")
         _audit(base, "menu", user=ctx.get("user"), names=names)
-        return _reply(menu_text(cfg, base), card(cfg, base, cfg_path))
+        text = menu_text(cfg, base)
+        use_card, _plan = _use_card(cfg, base)
+        if not use_card:
+            return _reply(text)
+        out = _reply(text, card(cfg, base, cfg_path), card_only=True)
+        out["callback"] = callback_body(out["card"])
+        return out
     if q in ("详细", "详情"):
         blocked = _refuse_place(ctx, cfg)
         if blocked:
             return blocked
         return _reply(detail_text(cfg_path))
+    numbered = _ZERO.match(q) or _NUMS.match(q)
+    if numbered:
+        menu = _load_menu(base, now)
+        if not _menu_matches(menu, ctx):
+            return None
+        blocked = _refuse_place(ctx, cfg)
+        if blocked:
+            return blocked
+        return _propose_numbers(cfg, base, ctx, [int(part) for part in re.findall(r"[0-9]", q)], names, now)
     chosen = None
     indexed = _INDEX.match(q)
     digit = _DIGIT.match(q)
@@ -624,10 +925,78 @@ def handle_text(cfg, base, text, ctx, names=(), now=None, cfg_path=""):
     return _propose(cfg, base, ctx, chosen, turn_on, names, now)
 
 
+def _numbers_to_pending(cfg, nums):
+    """0 表示把推荐项打开。其它数字是翻转那一项。后面的数字覆盖前面的。"""
+    pending = {}
+    for num in nums:
+        if num == 0:
+            for fid in RECOMMENDED:
+                if not is_on(cfg, fid):
+                    pending[fid] = True
+            continue
+        item = _BY_N.get(num)
+        if not item:
+            return None
+        pending[item["id"]] = not is_on(cfg, item["id"])
+    final = {}
+    for item in FEATURES:
+        if item["id"] in pending and is_on(cfg, item["id"]) != pending[item["id"]]:
+            final[item["id"]] = pending[item["id"]]
+    return final
+
+
+def _propose_numbers(cfg, base, ctx, nums, names, now):
+    pending = _numbers_to_pending(cfg, nums)
+    if pending is None:
+        return _reply("没有这一项。回复「设置」再看。")
+    pairs = _pairs_from_pending(cfg, pending)
+    if not pairs:
+        if nums == [0] or (len(nums) == 1 and nums[0] == 0):
+            return _reply("推荐的已经开着。断线提醒和用量周报都开了。")
+        return _reply("没有要改的。回复「设置」再看。")
+    if len(pairs) == 1:
+        item, turn_on = pairs[0]
+        return _propose(cfg, base, ctx, item, turn_on, names, now)
+    return _propose_many(cfg, base, ctx, pairs, names, now)
+
+
 def _propose(cfg, base, ctx, item, turn_on, names, now):
     summary = "%s「%s」" % ("打开" if turn_on else "关掉", item["title"])
     return _offer(cfg, base, ctx, "feature_switch", item["id"], bool(turn_on), summary, names, now,
                   lambda code, plan: _switch_text(cfg, base, item, turn_on, code, plan))
+
+
+def _batch_steps(pairs):
+    return [{"feature": item["id"], "on": bool(turn_on)} for item, turn_on in pairs]
+
+
+def _batch_text(cfg, base, pairs, code, plan):
+    lines = ["你想一次改 %d 项。" % len(pairs)]
+    for item, turn_on in pairs:
+        lines.append("%s「%s」。%s。" % ("打开" if turn_on else "关掉", item["title"], item["blurb"]))
+    warn = _group_warning(pairs)
+    if warn:
+        lines.append(warn)
+    if plan["mode"] == "code":
+        lines.extend([
+            "",
+            "请只回复这一句：",
+            "确认 %s" % code,
+            "",
+            "不想改了就回复：取消 %s" % code,
+            "这串数字大约 %d 分钟内有效，而且只有你在这个私聊里能用。" % max(1, plan["ttl"] // 60),
+        ])
+        return "\n".join(lines)
+    lines.append("确认之后才会写入，然后重新启动。")
+    return confirm_mode.button_text("\n".join(lines), confirm_mode.impact("feature_switch"), plan["mode"], code, plan["ttl"])
+
+
+def _propose_many(cfg, base, ctx, pairs, names, now):
+    summary = _pending_line(pairs)
+    steps = _batch_steps(pairs)
+    return _offer(cfg, base, ctx, "feature_switch", "batch", False, summary, names, now,
+                  lambda code, plan: _batch_text(cfg, base, pairs, code, plan),
+                  payload_extra={"changes": steps, "ui": "text"})
 
 
 def _propose_mode(cfg, base, ctx, mode, names, now):
@@ -679,14 +1048,16 @@ def _mode_text(mode, code, plan):
 def _offer(cfg, base, ctx, kind, feature_id, turn_on, summary, names, now, render, set_mode="", payload_extra=None):
     plan = confirm_mode.plan(cfg, base, high=True)
     token = plan["token"]
-    ah = confirm_mode.action_hash(kind, [{"feature": feature_id, "on": bool(turn_on), "mode": set_mode}],
-                                  ctx.get("user"), ctx.get("chat_id"), str(ctx.get("scope") or ""))
+    steps = [{"feature": feature_id, "on": bool(turn_on), "mode": set_mode}]
+    if isinstance(payload_extra, dict) and isinstance(payload_extra.get("changes"), list):
+        steps = payload_extra["changes"]
+    ah = confirm_mode.action_hash(kind, steps, ctx.get("user"), ctx.get("chat_id"), str(ctx.get("scope") or ""))
     extra = {"mode": plan["mode"], "token": token, "action_hash": ah, "button_ok": False,
              "code_ok": False, "fallback": plan["fallback"], "expires": now + plan["ttl"]}
     if set_mode:
         extra["set_mode"] = set_mode
     if isinstance(payload_extra, dict):
-        for key in ("skill", "sha256", "version", "op"):
+        for key in ("skill", "sha256", "version", "op", "changes", "ui"):
             if key in payload_extra:
                 extra[key] = payload_extra[key]
     try:
@@ -697,7 +1068,8 @@ def _offer(cfg, base, ctx, kind, feature_id, turn_on, summary, names, now, rende
     card_body = None
     if plan["mode"] != "code" and token:
         card_body = confirm_mode.build_card(text, token, ah)
-    _audit(base, "propose", user=ctx.get("user"), feature=feature_id, on=turn_on if kind == "feature_switch" else None, names=names)
+    logged_on = turn_on if kind == "feature_switch" and feature_id != "batch" else None
+    _audit(base, "propose", user=ctx.get("user"), feature=feature_id, on=logged_on, names=names)
     return _reply(text, card_body)
 
 
@@ -929,6 +1301,261 @@ def _drop_switch(base, code):
         conn.close()
 
 
+def _valid_changes(raw):
+    if not isinstance(raw, list) or not raw:
+        return None
+    cleaned = []
+    for row in raw:
+        if not isinstance(row, dict):
+            return None
+        fid = row.get("feature")
+        on = row.get("on")
+        if fid not in _BY_ID or not isinstance(on, bool):
+            return None
+        cleaned.append((fid, on))
+    return cleaned
+
+
+def _supersede_settings(base, user_hash, keep_token=""):
+    if not base or not user_hash:
+        return
+    conn = _db(base)
+    try:
+        rows = conn.execute("select code, payload from pending_switches").fetchall()
+        changed = False
+        for code, payload in rows:
+            try:
+                rec = json.loads(payload)
+            except ValueError:
+                continue
+            if not isinstance(rec, dict) or rec.get("ui") != "settings" or rec.get("user") != user_hash:
+                continue
+            if keep_token and rec.get("token") == keep_token:
+                continue
+            if rec.get("superseded"):
+                continue
+            rec["superseded"] = True
+            conn.execute("update pending_switches set payload=? where code=?",
+                         (json.dumps(rec, ensure_ascii=False), code))
+            changed = True
+        if changed:
+            conn.commit()
+    finally:
+        conn.close()
+
+
+def _live_issued(base, user_hash, now):
+    conn = _db(base)
+    try:
+        rows = conn.execute("select code, ts, payload from pending_switches").fetchall()
+    finally:
+        conn.close()
+    best = None
+    for code, ts, payload in rows:
+        try:
+            rec = json.loads(payload)
+        except ValueError:
+            continue
+        if not isinstance(rec, dict):
+            continue
+        if rec.get("ui") != "settings" or rec.get("user") != user_hash or rec.get("superseded"):
+            continue
+        try:
+            exp = rec.get("expires")
+            if exp and now > float(exp):
+                continue
+        except (TypeError, ValueError):
+            continue
+        stamp = float(ts or 0)
+        if best and stamp < best[0]:
+            continue
+        show = rec.get("mode") != "button"
+        best = (stamp, {
+            "token": rec.get("token") or "",
+            "hash": rec.get("action_hash") or "",
+            "code": code if show else "",
+            "show_code": bool(show),
+            "mode": rec.get("mode") or "",
+        })
+    return best[1] if best else None
+
+
+def _issue_settings(cfg, base, ctx, pairs, now):
+    steps = [{"feature": item["id"], "on": bool(turn_on)} for item, turn_on in pairs]
+    plan = confirm_mode.plan(cfg, base, high=True)
+    token = plan["token"]
+    ah = confirm_mode.action_hash("feature_switch", steps, ctx.get("user"), ctx.get("chat_id"), str(ctx.get("scope") or ""))
+    extra = {
+        "mode": plan["mode"], "token": token, "action_hash": ah, "button_ok": False,
+        "code_ok": False, "fallback": plan["fallback"], "expires": now + plan["ttl"],
+        "ui": "settings", "changes": steps,
+    }
+    try:
+        code = _reserve(base, ctx, "batch", False, now, cfg, extra=extra)
+    except RuntimeError:
+        return None
+    _supersede_settings(base, who(ctx.get("user")), keep_token=token)
+    _audit(base, "propose", user=ctx.get("user"), feature="batch")
+    show = plan["mode"] != "button"
+    return {"token": token, "hash": ah, "code": code if show else "", "show_code": show, "mode": plan["mode"]}
+
+
+def _kept_scope(menu, ctx):
+    if ctx.get("scope"):
+        return str(ctx.get("scope") or "")
+    return str((menu or {}).get("scope") or "")
+
+
+def _settings_out(cfg, base, cfg_path, ctx, now, pending, help_id, toast, issued=None):
+    view = card(cfg, base, cfg_path, pending=pending, help_id=help_id, issued=issued)
+    out = _reply("", view, patch=True, quiet=True, toast=toast)
+    out["callback"] = callback_body(view, toast)
+    return out
+
+
+def handle_settings(cfg, base, action, names=(), now=None, cfg_path=""):
+    """点开关、问号或推荐。只改卡片上的待确认状态，不写配置。"""
+    now = time.time() if now is None else float(now)
+    action = action or {}
+    ctx = {
+        "user": action.get("user") or "",
+        "chat_id": action.get("chat_id") or "",
+        "message_id": action.get("message_id") or "card",
+        "scope": action.get("scope") or "",
+        "chat_type": "p2p",
+    }
+    if not is_manager(cfg, ctx["user"]):
+        _audit(base, "deny", user=ctx.get("user"), names=names)
+        return _reply(NOT_OWNER)
+    if not _ctx_ok(ctx):
+        return _reply("不能改：缺少发送人或会话。请再到私聊里发一次「设置」。")
+    menu = _load_menu(base, now)
+    if not _menu_matches(menu, ctx, allow_blank_scope=True):
+        note = "这张卡片过期了。请再发一次「设置」。"
+        return _reply(note, confirm_mode.done_card("请重发设置", note), patch=True)
+    ctx = dict(ctx, scope=_kept_scope(menu, ctx))
+    op = str(action.get("op") or "")
+    pending = _clean_pending(menu.get("pending"))
+    help_id = str(menu.get("help") or "")
+    if help_id and not feature(help_id):
+        help_id = ""
+    toast = ""
+    if op == "help":
+        item = feature(str(action.get("switch") or ""))
+        if not item:
+            return _reply("没有这一项。")
+        help_id = "" if help_id == item["id"] else item["id"]
+        toast = "" if not help_id else "说明在下面"
+    elif op == "recommend":
+        added = False
+        for fid in RECOMMENDED:
+            if not is_on(cfg, fid):
+                pending[fid] = True
+                added = True
+        toast = "先确认才会改" if added else "推荐的已经开着"
+    elif op == "stage":
+        item = feature(str(action.get("switch") or ""))
+        if not item:
+            _audit(base, "refuse", user=ctx.get("user"), names=names)
+            return _reply("这项不能在对话里改。")
+        if item["id"] in pending:
+            del pending[item["id"]]
+            toast = "已撤下"
+        else:
+            pending[item["id"]] = not is_on(cfg, item["id"])
+            toast = "先确认才会改"
+        _audit(base, "stage", user=ctx.get("user"), feature=item["id"], on=pending.get(item["id"]), names=names)
+    else:
+        return None
+    pairs = _pairs_from_pending(cfg, pending)
+    issued = None
+    if pairs:
+        issued = _issue_settings(cfg, base, ctx, pairs, now)
+        if not issued:
+            return _reply("暂时发不出确认，请再试一次。")
+    else:
+        _supersede_settings(base, who(ctx.get("user")))
+    _save_menu(base, ctx, now, pending=pending, help_id=help_id)
+    return _settings_out(cfg, base, cfg_path, ctx, now, pending, help_id, toast, issued)
+
+
+def parse_settings(obj):
+    """设置卡片上的勾选、问号、推荐。确认和取消仍走写入确认。"""
+    parsed = _card_bits(obj)
+    if not parsed:
+        return None
+    value = parsed["value"]
+    if str(value.get("kind") or "") != "settings":
+        return None
+    op = str(value.get("op") or "")
+    if op not in ("stage", "help", "recommend"):
+        return None
+    return {
+        "user": parsed["user"],
+        "chat_id": parsed["chat"],
+        "message_id": parsed["mid"],
+        "scope": parsed["scope"],
+        "op": op,
+        "switch": str(value.get("switch") or ""),
+        "event_id": parsed["event_id"],
+    }
+
+
+def _card_bits(obj):
+    if not isinstance(obj, dict):
+        return None
+    header = obj.get("header") if isinstance(obj.get("header"), dict) else {}
+    kind = str(header.get("event_type") or obj.get("event_type") or "")
+    if "card.action" not in kind:
+        return None
+    event = obj.get("event") if isinstance(obj.get("event"), dict) else {}
+    action = event.get("action") if isinstance(event.get("action"), dict) else {}
+    value = action.get("value") if isinstance(action.get("value"), dict) else {}
+    operator = event.get("operator") if isinstance(event.get("operator"), dict) else {}
+    context = event.get("context") if isinstance(event.get("context"), dict) else {}
+    user = str(operator.get("open_id") or "")
+    chat = str(context.get("open_chat_id") or "")
+    mid = str(context.get("open_message_id") or header.get("event_id") or "")
+    if not (_ACTOR.match(user) and _ACTOR.match(chat) and _ACTOR.match(mid)):
+        return None
+    scope = str(context.get("thread_id") or context.get("open_thread_id") or "")
+    return {
+        "value": value, "user": user, "chat": chat, "mid": mid, "scope": scope,
+        "event_id": str(header.get("event_id") or ""),
+    }
+
+
+def _finish_batch(cfg, base, cfg_path, rec, ctx, cancel, names, apply, check):
+    cleaned = _valid_changes(rec.get("changes"))
+    if not cleaned:
+        return _reply("这项不能在对话里改。回复「设置」看能改的功能。")
+    if cancel:
+        _audit(base, "cancel", user=ctx.get("user"), feature="batch", names=names)
+        return _reply("已取消。配置没有改。")
+    if not apply:
+        _audit(base, "drill", user=ctx.get("user"), feature="batch", names=names)
+        return _reply(DRILL)
+    result = commit_toggles(cfg_path, base, cleaned, names=names, check=check, user=ctx.get("user"))
+    if not result.get("ok"):
+        return _reply(result.get("text") or _fail_text("check"))
+    item = {"id": "batch", "title": "多项"}
+    _write_job(base, cfg_path, result.get("backup") or "", ctx, item, False, changes=cleaned)
+    opened, closed = [], []
+    for fid, on in cleaned:
+        title = feature(fid)["title"]
+        (opened if on else closed).append(title)
+    bits = []
+    if opened:
+        bits.append("「%s」已经打开" % "、".join(opened))
+    if closed:
+        bits.append("「%s」已经关掉" % "、".join(closed))
+    later = "。".join(bits) + "。我重新启动好了。私聊再发「设置」可以看现在的状态。"
+    _write_result(base, ctx.get("user"), later)
+    for fid, on in cleaned:
+        _audit(base, "applied", user=ctx.get("user"), feature=fid, on=on, names=names)
+    return _reply(RESTARTING, restart=True)
+
+
 def try_click(cfg, base, cfg_path, token, op, given_hash, ctx, names=(), now=None, apply=True, check=None, message_id=""):
     """不是开关确认按钮时返回 None。"""
     now = time.time() if now is None else float(now)
@@ -949,6 +1576,8 @@ def try_click(cfg, base, cfg_path, token, op, given_hash, ctx, names=(), now=Non
     if not _same_actor(rec, ctx, True):
         _audit(base, "deny", user=ctx.get("user"), feature=rec.get("feature"), names=names)
         return _reply("只有你本人在原来的私聊里才能确认。")
+    if rec.get("ui") == "settings" and rec.get("superseded"):
+        return _refresh_settings(cfg, base, cfg_path, ctx, now)
     if str(given_hash or "") != str(rec.get("action_hash") or ""):
         _audit(base, "deny", user=ctx.get("user"), feature=rec.get("feature"), names=names, reason="tamper")
         return _reply("卡片内容和要改的事对不上，没有改。")
@@ -963,14 +1592,46 @@ def try_click(cfg, base, cfg_path, token, op, given_hash, ctx, names=(), now=Non
         rec["button_ok"] = True
         if not _store_pending(base, code, rec):
             return _reply("确认没能记下，请稍后再试。")
+        if rec.get("ui") == "settings":
+            note = "按钮已记下。请再回复：确认 %s" % code
+            return _reply(note, confirm_mode.done_card("还差确认码", note), patch=True)
         return _reply("按钮已记下。请再回复确认码。",
                       confirm_mode.done_card("还差确认码", "按钮已记下。请在这个私聊里回复确认码。"), patch=True)
     ctx = dict(ctx, chat_type="p2p", message_id=ctx.get("message_id") or message_id or "card")
     result = _accept_switch(cfg, base, cfg_path, code, rec, ctx, cancel, names, now, apply, check)
+    if rec.get("ui") == "settings":
+        _clear_settings_pending(base, ctx, now)
+        if cancel and "已取消" in (result.get("text") or ""):
+            view = card(cfg, base, cfg_path)
+            result["text"] = ""
+            result["card"] = view
+            result["patch"] = True
+            result["quiet"] = True
+            result["callback"] = callback_body(view, "已取消")
+            return result
     title = "已取消" if cancel else ("已确认" if result.get("restart") or "演练" in (result.get("text") or "") else "没做成")
     result["card"] = confirm_mode.done_card(title, result.get("text") or title)
     result["patch"] = True
     return result
+
+
+def _clear_settings_pending(base, ctx, now):
+    menu = _load_menu(base, now)
+    if not _menu_matches(menu, ctx, allow_blank_scope=True):
+        return
+    kept = dict(ctx, scope=_kept_scope(menu, ctx))
+    _save_menu(base, kept, now, pending={}, help_id=str(menu.get("help") or ""))
+
+
+def _refresh_settings(cfg, base, cfg_path, ctx, now):
+    menu = _load_menu(base, now)
+    if not _menu_matches(menu, ctx, allow_blank_scope=True):
+        note = "这张卡片过期了。请再发一次「设置」。"
+        return _reply(note, confirm_mode.done_card("请重发设置", note), patch=True, quiet=True)
+    pending = _clean_pending(menu.get("pending"))
+    help_id = str(menu.get("help") or "")
+    issued = _live_issued(base, who(ctx.get("user")), now)
+    return _settings_out(cfg, base, cfg_path, ctx, now, pending, help_id, "请看现在这张卡片", issued)
 
 
 def _accept_switch(cfg, base, cfg_path, code, rec, ctx, cancel, names, now, apply, check):
@@ -978,8 +1639,11 @@ def _accept_switch(cfg, base, cfg_path, code, rec, ctx, cancel, names, now, appl
         return _reply("确认没能记下，请稍后再试。")
     if rec.get("feature") == "confirm_mode":
         return _finish_mode(cfg, base, cfg_path, rec, ctx, cancel, names, apply, check)
-    if rec.get("feature") in ("skill_evolve", "skill_rollback"):
+    if rec.get("op") in ("replace", "rollback") or (
+            rec.get("feature") in ("skill_evolve", "skill_rollback") and rec.get("sha256")):
         return skill_evolve.accept(cfg, base, rec, cancel, names, apply)
+    if rec.get("feature") == "batch" and isinstance(rec.get("changes"), list):
+        return _finish_batch(cfg, base, cfg_path, rec, ctx, cancel, names, apply, check)
     item = feature(rec.get("feature"))
     if not item:
         return _reply("这项不能在对话里改。回复「设置」看能改的功能。")
@@ -1251,6 +1915,64 @@ def commit_toggle(cfg_path, base, feature_id, turn_on, names=(), check=None, use
     return {"ok": True, "backup": backup, "text": ""}
 
 
+def commit_toggles(cfg_path, base, pairs, names=(), check=None, user=""):
+    """一次备份里改多项。先关后开，这样「打开技能改进」仍会把技能一并打开。"""
+    cleaned = []
+    for fid, on in pairs or []:
+        if fid not in _BY_ID or not isinstance(on, bool):
+            return {"ok": False, "text": _sensitive_text()}
+        cleaned.append((fid, on))
+    if not cleaned:
+        return {"ok": False, "text": "没有要改的。回复「设置」再看。"}
+    if not _safe_cfg(base, cfg_path):
+        _audit(base, "refuse_path", user=user, feature="batch", names=names, ok=False)
+        return {"ok": False, "text": _fail_text("read")}
+    try:
+        backup = backup_config(cfg_path, base)
+    except OSError:
+        _audit(base, "backup_failed", user=user, feature="batch", names=names, ok=False)
+        return {"ok": False, "text": _fail_text("backup")}
+    _audit(base, "backup", user=user, feature="batch", names=names)
+    try:
+        original = open(cfg_path, "rb").read()
+        data = json.loads(original.decode("utf-8-sig"))
+    except (OSError, ValueError):
+        _audit(base, "read_failed", user=user, feature="batch", names=names, ok=False)
+        return {"ok": False, "text": _fail_text("read")}
+    if not isinstance(data, dict):
+        return {"ok": False, "text": _fail_text("read")}
+    rank = {item["id"]: item["n"] for item in FEATURES}
+    ordered = sorted([row for row in cleaned if not row[1]], key=lambda row: rank[row[0]])
+    ordered += sorted([row for row in cleaned if row[1]], key=lambda row: rank[row[0]])
+    new = data
+    for fid, on in ordered:
+        new = mutate(new, fid, on)
+    tmp = cfg_path + ".writing"
+    try:
+        with open(tmp, "w", encoding="utf-8") as handle:
+            json.dump(new, handle, ensure_ascii=False, indent=2)
+            handle.write("\n")
+        os.replace(tmp, cfg_path)
+    except OSError:
+        _restore_quiet(cfg_path, backup)
+        _audit(base, "write_failed", user=user, feature="batch", names=names, ok=False)
+        return {"ok": False, "text": _fail_text("read")}
+    checker = check or _default_check
+    try:
+        errors, _hints = checker(cfg_path)
+    except Exception as exc:
+        _restore_quiet(cfg_path, backup)
+        _audit(base, "check_failed", user=user, feature="batch", names=names, ok=False, reason=type(exc).__name__)
+        return {"ok": False, "text": _fail_text("check")}
+    if errors:
+        _restore_quiet(cfg_path, backup)
+        _audit(base, "rollback", user=user, feature="batch", names=names, ok=False, reason="check")
+        return {"ok": False, "text": humanize_check(errors)}
+    for fid, on in cleaned:
+        _audit(base, "write", user=user, feature=fid, on=on, names=names)
+    return {"ok": True, "backup": backup, "text": ""}
+
+
 def _restore_quiet(cfg_path, backup):
     try:
         restore_file(cfg_path, backup)
@@ -1275,14 +1997,17 @@ def _write_json(path, payload):
     os.replace(tmp, path)
 
 
-def _write_job(base, cfg_path, backup, ctx, item, turn_on):
-    _write_json(_job_path(base), {
+def _write_job(base, cfg_path, backup, ctx, item, turn_on, changes=None):
+    payload = {
         "cfg": cfg_path,
         "backup": backup,
         "user": ctx.get("user") or "",
         "feature": item["id"],
         "on": bool(turn_on),
-    })
+    }
+    if changes:
+        payload["changes"] = [{"feature": fid, "on": bool(on)} for fid, on in changes]
+    _write_json(_job_path(base), payload)
 
 
 def _write_result(base, user, text):
@@ -1542,6 +2267,8 @@ def card_event(obj):
     event = obj.get("event") if isinstance(obj.get("event"), dict) else {}
     action = event.get("action") if isinstance(event.get("action"), dict) else {}
     value = action.get("value") if isinstance(action.get("value"), dict) else {}
+    if str(value.get("kind") or "") in ("settings", "write_confirm"):
+        return None
     item = feature(str(value.get("switch") or ""))
     if not item:
         return None
