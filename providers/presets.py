@@ -30,15 +30,56 @@ PRESETS = {
 }
 
 _BLANK_PROVIDER = {"", "cursor", "fake"}
+_ALIAS = {
+    "openai_compatible": "openai_compat",
+    "openai-compatible": "openai_compat",
+    "openai": "openai_compat",
+    "claude": "anthropic",
+}
+
+
+def canonical_provider(name):
+    name = str(name or "").strip().lower()
+    return _ALIAS.get(name, name)
+
+
+def written_provider(cfg):
+    """配置里写的名字。model.provider 优先于旧的 model_provider。都没写就是空字符串。"""
+    if not isinstance(cfg, dict):
+        return ""
+    model = cfg.get("model") if isinstance(cfg.get("model"), dict) else {}
+    chosen = str(model.get("provider") or "").strip().lower()
+    if chosen:
+        return chosen
+    return str(cfg.get("model_provider") or "").strip().lower()
+
+
+def provider_token(cfg):
+    """用来选实现的名字。没写时是 cursor。openai_compatible 会收成 openai_compat。"""
+    raw = written_provider(cfg)
+    if not raw:
+        return "cursor"
+    return canonical_provider(raw)
+
+
+def public_name(cfg):
+    """日志和 --check 用的名字。写成 openai_compatible 时就保持这个名字。"""
+    raw = written_provider(cfg)
+    if not raw:
+        return "cursor"
+    if raw in ("openai_compatible", "openai-compatible"):
+        return "openai_compatible"
+    return canonical_provider(raw)
 
 
 def preset_id(cfg):
     """选出要套用的预设。cursor 和 fake 不套。没写、写错的 preset 当没有。"""
     if not isinstance(cfg, dict):
         return ""
-    provider = str(cfg.get("model_provider") or "cursor").strip().lower()
+    provider = provider_token(cfg)
     agent = cfg.get("agent") if isinstance(cfg.get("agent"), dict) else {}
-    chosen = str(agent.get("preset") or "").strip().lower()
+    model = cfg.get("model") if isinstance(cfg.get("model"), dict) else {}
+    chosen = str(model.get("preset") or agent.get("preset") or "").strip().lower()
     if provider in _BLANK_PROVIDER:
         return ""
     if provider == "openai_compat":

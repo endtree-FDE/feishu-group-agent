@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # 预设、配置校验和安装向导的离线检查。不连模型，不写仓库里的 agents/。
 import os, sys, tempfile
+os.environ.pop("UNIT_MODEL_KEY", None)
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 import utf8io  # noqa: F401
@@ -112,7 +113,53 @@ _sha = _hs.git("rev-parse", "HEAD")[1].strip()
 _lines = _hs.grep_commit(_sha, "ou_" + "placeholder")
 check("历史扫描搜的是提交树，不是同名路径", bool(_lines) and any("placeholder" in x for x in _lines))
 check("占位 open_id 不算泄漏", _hs.fixture("open_id", "ou_" + "placeholder", "tests/test_observe.py"))
+check("打码占位不算密钥赋值", _hs.fixture("secret_assign", "api-key: " + ("*" * 3) + '",', "notes/redact.py"))
+check("不是星号的赋值仍要复查", not _hs.fixture("secret_assign", "api" + "_key=" + "notasterisk", "notes/redact.py"))
 check("当前历史没有需要复查的真编号", _hs.main() == 0)
+
+from providers.settings import http_spec, key_problems, provider_token, public_name
+nested = {"model": {"provider": "openai_compatible", "base_url": "https://api.openai.com/v1", "model": "gpt-4o-mini",
+                    "api_key_env": "UNIT_MODEL_KEY", "temperature": 0.2, "max_tokens": 128, "timeout_sec": 30}}
+spec = http_spec(nested)
+check("model.provider 读到地址、模型和温度",
+      provider_token(nested) == "openai_compat" and public_name(nested) == "openai_compatible"
+      and spec["base_url"].startswith("https://api.openai.com") and spec["model"] == "gpt-4o-mini"
+      and spec["temperature"] == 0.2 and spec["max_tokens"] == 128 and "sk-" not in str(spec))
+both = {"model_provider": "cursor", "agent": {"model": "grok-4.7-high-fast"},
+        "model": {"provider": "deepseek", "model": "my-ds"}}
+check("model.provider 优先，并补上预设地址",
+      provider_token(both) == "deepseek" and http_spec(both)["model"] == "my-ds"
+      and http_spec(both)["base_url"] == "https://api.deepseek.com")
+anth = {"model": {"provider": "anthropic", "model": "claude-sonnet-4-5"}}
+aspec = http_spec(anth)
+check("anthropic 补默认地址和变量名",
+      provider_token(anth) == "anthropic" and aspec["base_url"] == "https://api.anthropic.com"
+      and aspec["api_key_env"] == "ANTHROPIC_API_KEY" and aspec["model"] == "claude-sonnet-4-5")
+ollama = {"model": {"provider": "openai_compatible", "base_url": "http://127.0.0.1:11434/v1", "model": "qwen2.5"}}
+check("本机地址可不写密钥变量", key_problems(ollama, {}) == [])
+missing_key = {"model": {"provider": "openai_compatible", "base_url": "https://api.openai.com/v1",
+                         "model": "gpt-4o-mini", "api_key_env": "UNIT_MODEL_KEY"}}
+probs = key_problems(missing_key, {})
+prob_text = " ".join(m for _, m in probs)
+check("缺密钥变量时报名字和设置方法",
+      probs and "UNIT_MODEL_KEY" in prob_text and "未设置" in prob_text and "$env:UNIT_MODEL_KEY" in prob_text and "setx" in prob_text)
+check("设置说明里没有密钥样式", "sk-" not in prob_text)
+miss_errors, _ = check_data(missing_key, "m.json")
+check("check_config 对缺变量失败", any("未设置" in m and "UNIT_MODEL_KEY" in m for _, m in miss_errors))
+os.environ["UNIT_MODEL_KEY"] = "present"
+try:
+    ready_errors, _ = check_data(missing_key, "m.json")
+finally:
+    os.environ.pop("UNIT_MODEL_KEY", None)
+check("变量已设置时 check_config 不再因缺变量失败", ready_errors == [])
+check("cursor 配置不因为没密钥失败", check_data({"model_provider": "cursor", "agent": {"model": "grok-4.7-high-fast"}}, "c.json")[0] == [])
+planted = "sk-" + "model"
+sec_model = {"model": {"provider": "openai_compatible", "base_url": "https://example.com/v1?api_key=abc",
+                       "model": "m", "api_key_env": planted}}
+sec_model_errors, _ = check_data(sec_model, "sm.json")
+sec_model_text = " ".join(m for _, m in sec_model_errors)
+check("model 里的密钥样式被拒绝且不回显",
+      any(p.startswith("model.") for p, _ in sec_model_errors) and planted not in sec_model_text and "api_key=abc" not in sec_model_text)
 
 if failures:
     print("%d failed" % len(failures))

@@ -9,6 +9,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, ROOT)
 sys.path.insert(0, HERE)
 
+import utf8io  # noqa: E402,F401  管道改为 UTF-8。PYTHONUTF8=0 时中文「通过」否则写不进管道，调用方读不到分数。
 import guard  # noqa: E402
 import grade  # noqa: E402
 import report  # noqa: E402

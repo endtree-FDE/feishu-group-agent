@@ -15,6 +15,8 @@ _DOWN = (
     "i/o timeout",
 )
 _UP = ("feishu-websocket: connected", "ready event_key=")
+# 只有收消息这一路算机器人断没断。卡片、进群、出群退出都不改这条。
+MESSAGE_EVENT = "im.message.receive_v1"
 
 
 def jump_setting(cfg):
@@ -155,6 +157,8 @@ class LinkWatch:
         self._last_wake_wall = 0.0
         self.link_up = False
         self.link_since = None
+        self.on_change = None
+        self.by_key = {}
         self._lock = threading.Lock()
 
     def start(self, now_mono=None, now_wall=None):
@@ -164,9 +168,17 @@ class LinkWatch:
             if self.link_since is None:
                 self.link_since = self.prev_wall
 
-    def mark_link(self, up, now=None):
-        """连接状态变化时才改计时。已经是断开时再记一次断开，不把计时清零。"""
+    def mark_link(self, up, now=None, key=None):
+        """连接状态按事件分开记。只有收消息这一路的变化才改健康状态和 on_change。
+        不传 key 时仍是收消息这一路，和以前的调用方式一样。
+        已经是断开时再记一次断开，不把计时清零。"""
         now = time.time() if now is None else float(now)
+        key = MESSAGE_EVENT if not key else key
+        with self._lock:
+            self.by_key[key] = (bool(up), now)
+        if key != MESSAGE_EVENT:
+            return
+        changed = None
         with self._lock:
             if self.link_since is None:
                 self.link_up = bool(up)
@@ -174,13 +186,29 @@ class LinkWatch:
                 return
             if bool(up) == bool(self.link_up):
                 return
+            prev_up = bool(self.link_up)
+            prev_since = float(self.link_since)
             self.link_up = bool(up)
             self.link_since = now
+            changed = (bool(up), prev_up, prev_since, now)
+        if changed and self.on_change:
+            try:
+                self.on_change(*changed)
+            except Exception:
+                pass
 
     def link_snapshot(self):
+        """机器人健不健康只看收消息的长连接。"""
         with self._lock:
             since = self.link_since if self.link_since is not None else time.time()
             return bool(self.link_up), float(since)
+
+    def key_snapshot(self, key):
+        with self._lock:
+            item = self.by_key.get(key)
+            if not item:
+                return False, None
+            return bool(item[0]), float(item[1])
 
     def pulse(self, now_mono=None, now_wall=None):
         """发现休眠或时钟前跳时返回多出来的秒数，并把 generation 加一。30 秒内不重复报。"""
@@ -205,9 +233,9 @@ class LinkWatch:
         if kind == "up":
             with self._lock:
                 self.failures[key] = 0
-            self.mark_link(True)
+            self.mark_link(True, key=key)
         elif kind == "down":
-            self.mark_link(False)
+            self.mark_link(False, key=key)
         return kind
 
     def fail(self, key):

@@ -51,12 +51,85 @@
       "enum": [
         "cursor",
         "openai_compat",
+        "openai_compatible",
+        "anthropic",
+        "claude",
         "fake",
         "deepseek",
         "dashscope",
         "zhipu",
         "pangu"
       ]
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "可替换的模型。不写时仍用 model_provider，没写就是 cursor。密钥只写环境变量名。",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": [
+            "",
+            "cursor",
+            "openai_compat",
+            "openai_compatible",
+            "anthropic",
+            "claude",
+            "fake",
+            "deepseek",
+            "dashscope",
+            "zhipu",
+            "pangu"
+          ]
+        },
+        "preset": {
+          "type": "string",
+          "enum": ["", "deepseek", "dashscope", "zhipu", "pangu"]
+        },
+        "base_url": {
+          "type": "string",
+          "pattern": "^$|^https?://\\S+$"
+        },
+        "model": {
+          "type": "string"
+        },
+        "api_key_env": {
+          "type": "string",
+          "pattern": "^$|^[A-Za-z_][A-Za-z0-9_]{0,80}$"
+        },
+        "temperature": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "timeout_sec": {
+          "type": "number",
+          "minimum": 0
+        },
+        "max_tokens": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "search": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "可选网页搜索。不写或 enabled 为 false 时不调用。",
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "backend": {
+          "type": "string",
+          "enum": ["", "tavily", "searxng", "searx"]
+        },
+        "base_url": {"type": "string"},
+        "api_key_env": {
+          "type": "string",
+          "pattern": "^$|^[A-Za-z_][A-Za-z0-9_]{0,80}$"
+        },
+        "timeout_sec": {"type": "number", "minimum": 0},
+        "max_results": {"type": "integer", "minimum": 1}
+      }
     },
     "dry_run_live_reads": {
       "type": "boolean"
@@ -165,6 +238,20 @@
       "properties": {
         "journal": {
           "type": "boolean"
+        },
+        "calls": {
+          "description": "不写或 enabled 不为 false 时，每轮回答在 logs/calls.jsonl 记一条已脱敏的调用链。false 表示不记。",
+          "oneOf": [
+            {"type": "boolean"},
+            {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "enabled": {"type": "boolean"},
+                "retain_days": {"type": "integer", "minimum": 1}
+              }
+            }
+          ]
         }
       }
     },
@@ -196,6 +283,19 @@
         "status_field": {"type": "string"},
         "title_field": {"type": "string"},
         "done_values": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "report": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "每周私聊主人一份用量合计。不写或 enabled 为 false 时不发。",
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "owner_open_ids": {"type": "array", "items": {"type": "string"}},
+        "weekday": {"type": ["string", "integer"]},
+        "time": {"type": "string"},
+        "timezone": {"type": "string"},
+        "window_min": {"type": "integer", "minimum": 0}
       }
     },
     "features": {
@@ -270,6 +370,41 @@
         "trim_note": {
           "type": "boolean",
           "description": "不写或 true：超字数预算丢掉旧对话时，在提示词里注明省略了几条。false 则静默丢掉。"
+        },
+        "growth": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "从近期对话提议长期记忆。不写或 enabled 为 false 时不调用模型，也不改账本。",
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "approver_open_ids": {"type": "array", "items": {"type": "string"}},
+            "deliver": {"type": "string"},
+            "time": {"type": "string"},
+            "timezone": {"type": "string"},
+            "window_min": {"type": "integer", "minimum": 0},
+            "on_schedule": {"type": "boolean"},
+            "on_idle": {"type": "boolean"},
+            "idle_min": {"type": "integer", "minimum": 0},
+            "lookback_hours": {"type": "integer", "minimum": 0},
+            "max_messages": {"type": "integer", "minimum": 0},
+            "max_proposals": {"type": "integer", "minimum": 0},
+            "review_days": {"type": "integer", "minimum": 0},
+            "status_days": {"type": "integer", "minimum": 0},
+            "deadline_grace_days": {"type": "integer", "minimum": 0},
+            "offer_gap_days": {"type": "integer", "minimum": 0},
+            "min_confidence": {"type": "number", "minimum": 0},
+            "dedupe_ratio": {"type": "number", "minimum": 0},
+            "confirm_ttl_sec": {"type": "integer", "minimum": 0},
+            "forget_ttl_sec": {"type": "integer", "minimum": 0}
+          }
+        },
+        "retrospect": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "一轮做完后提议一句短复盘。不写或 enabled 为 false 时不提议，也不改事实。",
+          "properties": {
+            "enabled": {"type": "boolean"}
+          }
         }
       }
     },
@@ -310,6 +445,15 @@
         "preload_budget_chars": {
           "type": "integer",
           "minimum": 0
+        },
+        "evolve": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "根据调用和复盘提议技能下一版。不写或 enabled 为 false 时不提议，也不改 SKILL.md。",
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "cases": {"type": "array", "items": {"type": "string"}}
+          }
         }
       }
     },
@@ -394,6 +538,20 @@
           "minimum": 0,
           "description": "只读工具最多连续几轮。不写是 4。小于 1 时按 1。每一轮可以按顺序执行多条只读调用。"
         },
+        "crew": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "复杂问题交给主理人和只读专员。不写或 enabled 为 false 时回答路径不变。",
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "total_rounds": {"type": "integer", "minimum": 0},
+            "step_rounds": {"type": "integer", "minimum": 0},
+            "total_tokens": {"type": "integer", "minimum": 0},
+            "step_tokens": {"type": "integer", "minimum": 0},
+            "total_sec": {"type": "integer", "minimum": 0},
+            "step_sec": {"type": "integer", "minimum": 0}
+          }
+        },
         "tool_context_budget_chars": {
           "type": "integer",
           "minimum": 0,
@@ -421,6 +579,38 @@
         }
       }
     },
+    "knowledge": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "分群知识库检索。不写或 enabled 为 false 时不收录、不检索，提示词和命令与以前一样。",
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "auto_retrieve": {"type": "boolean"},
+        "local": {"type": "boolean"},
+        "group_files": {"type": "boolean"},
+        "group_links": {"type": "boolean"},
+        "refresh_min": {"type": "integer", "minimum": 0},
+        "docs": {"type": "array", "items": {"type": "string"}},
+        "wiki": {"type": "array", "items": {"type": "string"}},
+        "bases": {"type": "array"},
+        "chunk_chars": {"type": "integer", "minimum": 0},
+        "chunk_overlap": {"type": "integer", "minimum": 0},
+        "top_k": {"type": "integer", "minimum": 0},
+        "max_chars": {"type": "integer", "minimum": 0},
+        "max_source_chars": {"type": "integer", "minimum": 0},
+        "embeddings": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "base_url": {"type": "string"},
+            "api_key_env": {"type": "string"},
+            "model": {"type": "string"},
+            "timeout_sec": {"type": "integer", "minimum": 0}
+          }
+        }
+      }
+    },
     "kb_sync": {
       "type": "object",
       "additionalProperties": true,
@@ -430,6 +620,43 @@
           "items": {
             "type": "string"
           }
+        }
+      }
+    },
+    "confirm": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "写入和开关的确认方式。不写时默认点按钮。飞书没开通卡片回调时自动改用确认码。不能写成关掉。",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["button", "code", "button_or_code", "button_and_code"]
+        },
+        "high_risk_mode": {
+          "type": "string",
+          "enum": ["button", "code", "button_or_code", "button_and_code"],
+          "description": "批量写入、改功能开关、重启这一类。不写时和 mode 相同。"
+        },
+        "ttl_sec": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "按钮有效秒数。不写是 600。"
+        },
+        "code_ttl_sec": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "确认码有效秒数。不写时沿用 write.confirm_ttl_sec。"
+        },
+        "code_digits": {
+          "type": "integer",
+          "minimum": 4,
+          "maximum": 8,
+          "description": "确认码位数。不写是 6。"
+        },
+        "card_callback": {
+          "type": "string",
+          "enum": ["auto", "on", "off"],
+          "description": "要不要启动卡片回调接收进程。不写是 auto：启动前探测，没订阅就不起、这次运行也不再重启，确认改用确认码。on 总是启动，没订阅则退出后不再重启。off 不启动。"
         }
       }
     },
