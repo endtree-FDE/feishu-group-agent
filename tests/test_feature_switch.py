@@ -72,7 +72,8 @@ try:
           menu and menu.get("card") is None and "已开" in body and "回复" in body
           and "先看这一项" not in body and "一次只改一项" not in body
           and all(item["title"] in body and item["blurb"] in body for item in feature_switch.FEATURES)
-          and all(len(item["blurb"]) <= 12 for item in feature_switch.FEATURES)
+          and all(len(item["blurb"]) <= 24 for item in feature_switch.FEATURES)
+          and "会主动找你" in body and "回答时会用" in body and "会慢慢变聪明" in body
           and plain(body) and "report.enabled" not in body and "第 1 项" not in body, body)
     detail = feature_switch.handle_text(CFG, base, "详细", OWNER, cfg_path=path)
     check("详细里才出现开关名字", "report.enabled" in detail["text"] and "bot.json" in detail["text"])
@@ -320,7 +321,7 @@ try:
     proposed = feature_switch.handle_text(CFG, base, turned["content"], OWNER, cfg_path=path) if turned else None
     check("按钮和回复序号一样，先给确认码；普通消息不是按钮",
           turned and turned["content"] == "第5项" and normal is None and proposed and "确认 " in proposed["text"]
-          and "断线提醒" in proposed["text"], proposed["text"] if proposed else "")
+          and "断线告诉你" in proposed["text"], proposed["text"] if proposed else "")
 finally:
     shutil.rmtree(base, ignore_errors=True)
 
@@ -488,26 +489,34 @@ try:
     menu = feature_switch.handle_text(CFG, base, "设置", OWNER, cfg_path=path)
     shown = menu["card"]
     visible = _visible(shown)
-    names = _panel_text(shown, "配置名字")
+    names = _panel_text(shown, "高级")
     tags = [el for el in _walk(shown) if el.get("tag") == "checker"]
     columns = [el for el in _walk(shown) if el.get("tag") == "column_set"]
     labels = [((el.get("text") or {}).get("content") or "") for el in _walk(shown) if el.get("tag") == "button"]
     icons = [el.get("icon", {}).get("token") for el in _walk(shown) if isinstance(el.get("icon"), dict)]
-    names_panel = _panel_text(shown, "配置名字")
+    names_panel = _panel_text(shown, "高级")
     check("卡片回调连上时只准备一张紧凑卡片，文字留着但标记为不另发",
           menu.get("card_only") and shown and shown.get("schema") == "2.0"
           and menu.get("callback", {}).get("card", {}).get("type") == "raw"
           and menu["callback"]["card"]["data"] is shown
           and "已开 0/9" in visible and "v" + feature_switch.product_version() in visible
-          and "在线" in visible and all(name in visible for name in ("日常", "记忆", "技能", "高级"))
+          and "在线" in visible and all(name in visible for name in ("会主动找你", "回答时会用", "会慢慢变聪明"))
           and all(item["title"] in visible and item["blurb"] in visible for item in feature_switch.FEATURES)
+          and "先打开「按步骤写稿」" in visible
           and len(tags) == len(feature_switch.FEATURES) and columns
-          and "详情" in labels and "?" not in labels and "保存 0 项改动" in labels
+          and all(((el.get("text") or {}).get("content") or "") == "" for el in tags)
+          and "详情" not in labels and "收起" not in labels and "?" not in labels
+          and "right_outlined" in icons and "ellipse_outlined" in icons
+          and "保存 0 项改动" in labels
           and "全部推荐设置" in visible and "第 1 项" not in visible and "先看这一项" not in visible
+          and ">开<" not in visible and ">关<" not in visible
           and all(item["symbol"] in icons for item in feature_switch.FEATURES)
           and "setting_outlined" in icons
+          and any(el.get("tag") == "column" and el.get("width") == "16px" for el in _walk(shown))
+          and "rgba(255, 149, 0, 0.16)" in visible
           and plain(visible) and "report.enabled" not in visible
-          and "report.enabled" in names and names_panel and '"expanded": false' in names
+          and "report.enabled" in names and "配置名字" in names and "确认方式" in names
+          and names_panel and '"expanded": false' in names
           and _confirm_value(shown, "yes") is None, visible[:500])
     stranger = feature_switch.handle_settings(
         CFG, base, {"user": "user_other", "chat_id": "oc_p2p1", "message_id": "om_set1", "op": "stage", "switch": "report"},
@@ -591,10 +600,12 @@ try:
         changed, base, feature_switch.parse_settings(_settings_event("help", "digest", "om_help")), cfg_path=path)
     asked_raw = json.dumps(asked["card"], ensure_ascii=False)
     asked_labels = [((el.get("text") or {}).get("content") or "") for el in _walk(asked["card"]) if el.get("tag") == "button"]
-    check("详情展开这一项的说明，配置名字仍折着",
-          asked and asked.get("patch") and "主动发到群里" in asked_raw and "收起" in asked_labels
+    asked_icons = [el.get("icon", {}).get("token") for el in _walk(asked["card"]) if isinstance(el.get("icon"), dict)]
+    check("箭头展开这一项的说明，高级仍折着",
+          asked and asked.get("patch") and "主动发到群里" in asked_raw
+          and "down_outlined" in asked_icons and "详情" not in asked_labels and "收起" not in asked_labels
           and "?" not in asked_labels
-          and _panel_text(asked["card"], "配置名字") and "digest.enabled" in _panel_text(asked["card"], "配置名字")
+          and _panel_text(asked["card"], "高级") and "digest.enabled" in _panel_text(asked["card"], "高级")
           and "digest.enabled" not in _visible(asked["card"]))
 finally:
     os.environ.pop("AGENTBOT_CARD_CALLBACK", None)
@@ -607,7 +618,7 @@ try:
     many = feature_switch.handle_text(CFG, base, "1 5", OWNER, cfg_path=path)
     code = [line.split()[-1] for line in many["text"].splitlines() if line.startswith("确认 ")]
     check("文字回退可以一次报两个序号",
-          many and code and "用量周报" in many["text"] and "断线提醒" in many["text"] and plain(many["text"].replace(code[0], "")))
+          many and code and "每周用量小结" in many["text"] and "断线告诉你" in many["text"] and plain(many["text"].replace(code[0], "")))
     done = feature_switch.try_confirm(CFG, base, path, code[0], OWNER, apply=True, check=lambda _p: ([], []))
     both = json.load(open(path, encoding="utf-8"))
     check("一次确认两个序号会一起写入并要求重启",
@@ -626,28 +637,77 @@ try:
     check("确认技能改进会打开技能，不会当成替换技能文件",
           opened and opened.get("restart") and evolved["skills"]["enabled"] is True
           and evolved["skills"]["evolve"]["enabled"] is True and "技能文件" not in opened["text"])
+    named = feature_switch.handle_text(evolved, base, "打开技能改进", OWNER, cfg_path=path)
+    check("旧说法技能改进仍指向自动优化步骤",
+          named and "自动优化步骤" in named["text"] and "已经是开着" in named["text"])
 finally:
+    shutil.rmtree(base, ignore_errors=True)
+
+base, path = workdir()
+try:
+    os.environ["AGENTBOT_CARD_CALLBACK"] = "1"
+    feature_switch.handle_text(CFG, base, "设置", OWNER, cfg_path=path)
+    locked = feature_switch.handle_settings(
+        CFG, base, feature_switch.parse_settings(_settings_event("stage", "skill_evolve", "om_lock")),
+        cfg_path=path)
+    locked_raw = json.dumps(locked.get("card") or {}, ensure_ascii=False)
+    still = json.load(open(path, encoding="utf-8"))
+    check("父项关着时点自动优化步骤不会记下，也不会写入",
+          locked and locked.get("toast") == "请先打开按步骤写稿"
+          and locked.get("patch") and "保存 0 项改动" in locked_raw
+          and "保存 1 项改动" not in locked_raw
+          and still["skills"]["enabled"] is False and "evolve" not in still["skills"])
+    both = json.loads(json.dumps(CFG))
+    both["skills"] = {"enabled": True, "evolve": {"enabled": True}}
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(both, handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
+    feature_switch.handle_text(both, base, "设置", OWNER, cfg_path=path)
+    staged = feature_switch.handle_settings(
+        both, base, feature_switch.parse_settings(_settings_event("stage", "skills", "om_parent")),
+        cfg_path=path)
+    staged_raw = json.dumps(staged.get("card") or {}, ensure_ascii=False)
+    mid = json.load(open(path, encoding="utf-8"))
+    yes = _confirm_value(staged["card"], "yes")
+    check("关掉按步骤写稿时，自动优化步骤一起待保存，配置先不写",
+          staged and yes and "保存 2 项改动" in staged_raw
+          and "关掉按步骤写稿" in staged_raw and "关掉自动优化步骤" in staged_raw
+          and mid["skills"]["enabled"] is True and mid["skills"]["evolve"]["enabled"] is True)
+    applied = feature_switch.try_click(
+        both, base, path, yes["id"], "yes", yes["hash"], OWNER, apply=True,
+        check=lambda _p: ([], []), message_id="om_parent")
+    after = json.load(open(path, encoding="utf-8"))
+    check("保存后父项和子项一起关掉",
+          applied and applied.get("restart") and after["skills"]["enabled"] is False
+          and after["skills"]["evolve"]["enabled"] is False)
+finally:
+    os.environ.pop("AGENTBOT_CARD_CALLBACK", None)
     shutil.rmtree(base, ignore_errors=True)
 
 
 demo = os.path.join(FW, "docs", "demo")
 listing = json.load(open(os.path.join(demo, "switch-card.example.json"), encoding="utf-8"))
 confirming = json.load(open(os.path.join(demo, "switch-card-confirm.example.json"), encoding="utf-8"))
-sample = json.dumps({"listing": listing, "confirming": confirming}, ensure_ascii=False)
+colored = json.load(open(os.path.join(demo, "switch-card-b.example.json"), encoding="utf-8"))
+sample = json.dumps({"listing": listing, "confirming": confirming, "colored": colored}, ensure_ascii=False)
 shown = _visible(listing)
-keys = _panel_text(listing, "配置名字")
+colored_shown = _visible(colored)
+keys = _panel_text(listing, "高级")
 check("仓库里的示例卡片和确认态都是这张紧凑卡，没有真实身份",
-      listing.get("schema") == "2.0" and confirming.get("schema") == "2.0"
+      listing.get("schema") == "2.0" and confirming.get("schema") == "2.0" and colored.get("schema") == "2.0"
       and listing.get("config", {}).get("update_multi") is True
       and "已开 6/9" in shown and "全部推荐设置" in shown
-      and all(name in shown for name in ("日常", "记忆", "技能", "高级"))
+      and all(name in shown for name in ("会主动找你", "回答时会用", "会慢慢变聪明"))
+      and "每周用量小结" in shown and "自动优化步骤" in shown and "按步骤写稿" in shown
       and len([el for el in _walk(listing) if el.get("tag") == "checker"]) == 9
       and _confirm_value(listing, "yes") is None
-      and "report.enabled" not in shown and "report.enabled" in keys
-      and "第 1 项" not in shown and "详情" in shown and ' "?"' not in shown
+      and "report.enabled" not in shown and "report.enabled" in keys and "配置名字" in keys
+      and "第 1 项" not in shown and "详情" not in shown and "right_outlined" in shown
+      and "rgba(255, 149, 0, 0.08)" not in shown
+      and "rgba(255, 149, 0, 0.08)" in colored_shown and "每周用量小结" in colored_shown
       and "保存 2 项改动" in json.dumps(confirming, ensure_ascii=False)
       and "全部推荐设置" in json.dumps(confirming, ensure_ascii=False)
-      and "早间待办会发到群里" in json.dumps(confirming, ensure_ascii=False)
+      and "早上发待办会发到群里" in json.dumps(confirming, ensure_ascii=False)
       and "sheet-histogram_outlined" in shown and "📊" not in shown
       and "example-token-not-real" in sample and "ou_" not in sample and "secret" not in sample.lower())
 

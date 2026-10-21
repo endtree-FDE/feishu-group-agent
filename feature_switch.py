@@ -27,110 +27,116 @@ FEATURES = (
     {
         "id": "report",
         "n": 1,
-        "title": "用量周报",
-        "aliases": ("用量周报", "周报"),
+        "title": "每周用量小结",
+        "aliases": ("每周用量小结", "用量周报", "周报"),
         "use": "每周把用了多少次整理成一份合计，私聊发给你。",
         "key": "report.enabled",
         "symbol": "sheet-histogram_outlined",
-        "blurb": "每周私聊合计",
-        "group": "daily",
+        "blurb": "开了会每周私聊你一份用量合计",
+        "group": "proactive",
     },
     {
         "id": "knowledge",
         "n": 2,
-        "title": "知识检索",
-        "aliases": ("知识检索", "知识库"),
+        "title": "查资料再回答",
+        "aliases": ("查资料再回答", "知识检索", "知识库"),
         "use": "有人提问时，用这个群已经放进来的资料来回答，并写上来源。",
         "key": "knowledge.enabled",
         "symbol": "wiki-book_outlined",
-        "blurb": "提问时查资料",
-        "group": "memory",
+        "blurb": "开了提问时会用群里的资料，并写上来源",
+        "group": "answer",
     },
     {
         "id": "growth",
         "n": 3,
-        "title": "记忆成长",
-        "aliases": ("记忆成长", "记忆"),
-        "use": "隔一段时间看看群里定过的事，提议记住。有人点头才写入。",
+        "title": "记住约定",
+        "aliases": ("记住约定", "记忆成长", "记忆"),
+        "use": "平时看到群里定过的事，提议记住。有人点头才写入。这和「做完记一笔」不同：它不看某一轮刚做完没有。",
         "key": "memory.growth.enabled",
         "symbol": "mindnote_outlined",
-        "blurb": "提议记住约定",
-        "group": "memory",
+        "blurb": "开了平时看到的约定，点头才记",
+        "group": "learn",
     },
     {
         "id": "digest",
         "n": 4,
-        "title": "早间待办",
-        "aliases": ("早间待办", "早晨摘要", "晨报", "待办"),
+        "title": "早上发待办",
+        "aliases": ("早上发待办", "早间待办", "早晨摘要", "晨报", "待办"),
         "use": "到了早上，往群里发一条今天的日程和还没完成的任务。",
         "key": "digest.enabled",
         "symbol": "calendar-tomorrow_outlined",
-        "blurb": "早上发到群里",
-        "group": "daily",
+        "blurb": "开了会在早上往群里发今天的日程",
+        "group": "proactive",
     },
     {
         "id": "alerts",
         "n": 5,
-        "title": "断线提醒",
-        "aliases": ("断线提醒", "掉线提醒", "提醒"),
+        "title": "断线告诉你",
+        "aliases": ("断线告诉你", "断线提醒", "掉线提醒", "提醒"),
         "use": "机器人连不上时，私聊告诉主人。",
         "key": "alerts.enabled",
         "symbol": "bell_outlined",
-        "blurb": "断线时私聊你",
-        "group": "daily",
+        "blurb": "开了连不上时会私聊你",
+        "group": "proactive",
     },
     {
         "id": "skills",
         "n": 6,
-        "title": "技能",
-        "aliases": ("技能",),
-        "use": "遇到选题、写稿这类事，按现成的步骤来做。",
+        "title": "按步骤写稿",
+        "aliases": ("按步骤写稿", "做纪要", "技能"),
+        "use": "写稿、做纪要这类事，按现成的步骤来做。",
         "key": "skills.enabled",
         "symbol": "list-check_outlined",
-        "blurb": "按现成步骤做",
-        "group": "skills",
+        "blurb": "开了写稿、做纪要会按现成步骤来",
+        "group": "answer",
     },
     {
         "id": "retrospect",
         "n": 7,
-        "title": "复盘写回",
-        "aliases": ("复盘写回", "复盘"),
-        "use": "一轮群里的事做完后，写一句短复盘。有人点头才记进这个群。",
+        "title": "做完记一笔",
+        "aliases": ("做完记一笔", "复盘写回", "复盘"),
+        "use": "这一轮做完后写一句短复盘。有人点头才记进这个群。这和「记住约定」不同：它只记刚结束的这一轮。",
         "key": "memory.retrospect.enabled",
         "symbol": "edit_outlined",
-        "blurb": "做完写一句",
-        "group": "memory",
+        "blurb": "开了这一轮做完写一句，点头才记",
+        "group": "learn",
     },
     {
         "id": "skill_evolve",
         "n": 8,
-        "title": "技能改进",
-        "aliases": ("技能改进", "自动改进"),
-        "use": "根据用过的记录和复盘，提议技能的下一版。分数不下降并且你点头才替换。",
+        "title": "自动优化步骤",
+        "aliases": ("自动优化步骤", "技能改进", "自动改进"),
+        "use": "根据用过的记录，提议这些步骤的下一版。分数不下降并且你点头才替换。需要先打开「按步骤写稿」。",
         "key": "skills.evolve.enabled",
         "symbol": "refresh_outlined",
-        "blurb": "提议下一版",
-        "group": "skills",
+        "blurb": "开了会根据记录提议步骤的下一版",
+        "group": "answer",
+        "parent": "skills",
     },
     {
         "id": "crew",
         "n": 9,
-        "title": "主理人",
-        "aliases": ("主理人", "专员"),
+        "title": "复杂问题拆开",
+        "aliases": ("复杂问题拆开", "主理人", "专员"),
         "use": "复杂问题拆给查资料、读文档、起草。他们只能读，写入还是要你确认。",
         "key": "agent.crew.enabled",
         "symbol": "group_outlined",
-        "blurb": "复杂问题拆开",
-        "group": "advanced",
+        "blurb": "开了复杂问题会分给查资料、读文档、起草",
+        "group": "answer",
     },
 )
-# 分组顺序照着设置页：日常、记忆、技能、高级。序号仍是原来的 1 到 9，方便回复数字。
+# 卡片按主人关心的事分组。序号仍是 1 到 9，文字回退才用。
+# 图标一种颜色一组。well 是图标底，fill 是彩色分组方案的整组底。
 GROUPS = (
-    ("daily", "日常"),
-    ("memory", "记忆"),
-    ("skills", "技能"),
-    ("advanced", "高级"),
+    ("proactive", "会主动找你", ("report", "digest", "alerts"), "orange",
+     "rgba(255, 149, 0, 0.16)", "rgba(255, 149, 0, 0.08)"),
+    ("answer", "回答时会用", ("knowledge", "skills", "skill_evolve", "crew"), "blue",
+     "rgba(0, 122, 255, 0.14)", "rgba(0, 122, 255, 0.07)"),
+    ("learn", "会慢慢变聪明", ("growth", "retrospect"), "purple",
+     "rgba(175, 82, 222, 0.16)", "rgba(175, 82, 222, 0.08)"),
 )
+_GROUP_BY_ID = {gid: (title, order, hue, well, fill) for gid, title, order, hue, well, fill in GROUPS}
+PARENT_HINT = "先打开「按步骤写稿」"
 # 建议先开的两项只私聊主人，不往群里发。
 RECOMMENDED = ("alerts", "report")
 _BY_ID = {item["id"]: item for item in FEATURES}
@@ -319,7 +325,7 @@ def happens(cfg, base, feature_id, turn_on):
             line += "还没指定主人的话，只会记在本机，不会发私聊。"
         return line
     if feature_id == "skills":
-        return "打开之后：不会主动发消息。有人问到相关的事，才按步骤回答。"
+        return "打开之后：不会主动发消息。有人要写稿或做纪要时，才按步骤回答。"
     if feature_id == "retrospect":
         spec = memory_growth.settings(cfg)
         if spec.get("deliver") == "group":
@@ -445,19 +451,6 @@ def _desired(cfg, item, pending):
     return is_on(cfg, item["id"])
 
 
-def _status_word(cfg, item, pending):
-    desired = _desired(cfg, item, pending)
-    if item["id"] in (pending or {}):
-        return "将开" if desired else "将关"
-    return "开" if desired else "关"
-
-
-def _status_color(cfg, item, pending):
-    if item["id"] in (pending or {}):
-        return "orange"
-    return "green" if is_on(cfg, item["id"]) else "neutral"
-
-
 def _help_body(cfg, base, item):
     return "\n".join([
         item["use"],
@@ -491,8 +484,39 @@ def _pending_line(pairs):
 
 def _group_warning(pairs):
     if any(item["id"] == "digest" and on for item, on in pairs):
-        return "早间待办会发到群里。"
+        return "早上发待办会发到群里。"
     return ""
+
+
+def _dimmed(cfg, item, pending):
+    """父项目标是关时，子项变灰。复盘和记忆成长互不牵制。"""
+    parent = feature(item.get("parent") or "")
+    if not parent:
+        return False
+    return not _desired(cfg, parent, pending)
+
+
+def _child_blocked(cfg, item, pending):
+    """父项关着时，不能把子项单独打开。关掉子项仍然允许。"""
+    if not _dimmed(cfg, item, pending):
+        return False
+    return not _desired(cfg, item, pending)
+
+
+def _cascade_child_off(cfg, pending):
+    """卡片上把父项收成关时，一并收起还开着的子项，保存后两边一致。"""
+    child = feature("skill_evolve")
+    if is_on(cfg, child["id"]):
+        pending[child["id"]] = False
+    elif pending.get(child["id"]):
+        del pending[child["id"]]
+
+
+def _uncascade_child(cfg, pending):
+    if not is_on(cfg, "skills"):
+        return
+    if pending.get("skill_evolve") is False and is_on(cfg, "skill_evolve"):
+        del pending["skill_evolve"]
 
 
 def _md(content, size="normal", icon=None):
@@ -530,73 +554,152 @@ def _settings_value(op, feature_id=""):
     return value
 
 
-def _icon_color(cfg, item, pending):
-    if item["id"] in (pending or {}):
-        return "orange"
-    return "green" if is_on(cfg, item["id"]) else "grey"
+def _hue(item):
+    _title, _order, hue, well, _fill = _GROUP_BY_ID[item["group"]]
+    return hue, well
 
 
-def _row(cfg, base, item, pending, help_id):
-    word = _status_word(cfg, item, pending)
-    color = _status_color(cfg, item, pending)
-    desired = _desired(cfg, item, pending)
-    opened = help_id == item["id"]
-    title = "**%s** <text_tag color='%s'>%s</text_tag>\n<font color='grey'>%d · %s</font>" % (
-        item["title"], color, word, item["n"], item["blurb"])
-    text = [_md(title, icon=_standard_icon(item["symbol"], _icon_color(cfg, item, pending)))]
-    text.append(_callback_button(
-        "收起" if opened else "详情", "text", _settings_value("help", item["id"]), size="tiny"))
-    if opened:
-        text.append(_md("<font color='grey'>%s</font>" % _help_body(cfg, base, item), size="notation"))
-    checker = {
+def _icon_well(token, color, fill):
+    """图标单独坐在一小块底色上。外层不铺色，避免被整行拉高。"""
+    return {
+        "tag": "column_set",
+        "flex_mode": "none",
+        "horizontal_spacing": "0px",
+        "columns": [{
+            "tag": "column",
+            "width": "32px",
+            "background_style": fill,
+            "padding": "6px 0px 6px 0px",
+            "horizontal_align": "center",
+            "vertical_align": "center",
+            "elements": [_md(" ", icon=_standard_icon(token, color))],
+        }],
+    }
+
+
+def _arrow_button(opened, feature_id):
+    button = _callback_button(" ", "text", _settings_value("help", feature_id), size="tiny")
+    button["icon"] = _standard_icon("down_outlined" if opened else "right_outlined", "grey")
+    return button
+
+
+def _checker(item, desired):
+    return {
         "tag": "checker",
         "name": item["id"],
         "element_id": ("sw_" + item["id"])[:20],
         "checked": bool(desired),
-        "text": {"tag": "plain_text", "content": "开" if desired else "关"},
+        "text": {"tag": "plain_text", "content": ""},
         "overall_checkable": True,
         "checked_style": {"show_strikethrough": False, "opacity": 1},
         "behaviors": [{"type": "callback", "value": _settings_value("stage", item["id"])}],
     }
+
+
+def _row(cfg, base, item, pending, help_id):
+    desired = _desired(cfg, item, pending)
+    opened = help_id == item["id"]
+    dimmed = _dimmed(cfg, item, pending)
+    hue, well = _hue(item)
+    icon_color = "grey" if dimmed else hue
+    well_fill = "rgba(142, 142, 147, 0.16)" if dimmed else well
+    title = "<font color='grey'>%s</font>" % item["title"] if dimmed else "**%s**" % item["title"]
+    if item["id"] in (pending or {}):
+        title += " <font color='orange'>待保存</font>"
+    lines = [title, "<font color='grey'>%s</font>" % item["blurb"]]
+    if dimmed:
+        lines.append("<font color='grey'>%s</font>" % PARENT_HINT)
+    text = [_md("\n".join(lines))]
+    if opened:
+        text.append(_md("<font color='grey'>%s</font>" % _help_body(cfg, base, item), size="notation"))
+    align = "top" if opened else "center"
+    columns = []
+    if item.get("parent"):
+        columns.append({
+            "tag": "column",
+            "width": "16px",
+            "vertical_align": align,
+            "elements": [_md(" ")],
+        })
+    columns.append({
+        "tag": "column",
+        "width": "36px",
+        "vertical_align": align,
+        "elements": [_icon_well(item["symbol"], icon_color, well_fill)],
+    })
+    columns.append({
+        "tag": "column",
+        "width": "weighted",
+        "weight": 5,
+        "vertical_align": align,
+        "elements": text,
+    })
+    columns.append({
+        "tag": "column",
+        "width": "auto",
+        "vertical_align": align,
+        "elements": [_arrow_button(opened, item["id"])],
+    })
+    columns.append({
+        "tag": "column",
+        "width": "auto",
+        "vertical_align": align,
+        "elements": [_checker(item, desired)],
+    })
     return {
         "tag": "column_set",
         "flex_mode": "none",
         "background_style": "default",
         "horizontal_spacing": "8px",
-        "margin": "4px 0px 4px 0px",
-        "columns": [
-            {
-                "tag": "column",
-                "width": "weighted",
-                "weight": 5,
-                "vertical_align": "top",
-                "elements": text,
-            },
-            {
-                "tag": "column",
-                "width": "auto",
-                "vertical_align": "top",
-                "elements": [checker],
-            },
-        ],
+        "margin": "2px 0px 2px 0px",
+        "columns": columns,
     }
 
 
-def _group_block(title, rows):
+def _group_block(gid, rows, style):
+    title, _order, _hue, _well, fill = _GROUP_BY_ID[gid]
+    background = fill if style == "color" else "default"
+    elements = [_md("<font color='grey'>%s</font>" % title, size="notation")]
+    for index, row in enumerate(rows):
+        if index:
+            elements.append({"tag": "hr", "margin": "2px 0px 2px 0px"})
+        elements.append(row)
     return {
         "tag": "column_set",
         "flex_mode": "none",
-        "background_style": "grey",
+        "background_style": "default",
         "horizontal_spacing": "0px",
-        "margin": "0px 0px 8px 0px",
+        "margin": "4px 0px 8px 0px",
         "columns": [{
             "tag": "column",
             "width": "weighted",
             "weight": 1,
-            "padding": "4px 8px 8px 8px",
+            "background_style": background,
+            "padding": "8px 10px 6px 10px" if style == "color" else "0px 2px 0px 2px",
             "vertical_spacing": "2px",
-            "elements": [_md("**%s**" % title)] + rows,
+            "elements": elements,
         }],
+    }
+
+
+def _meter(cfg):
+    columns = []
+    ordered = [feature(fid) for _gid, _title, order, _hue, _well, _fill in GROUPS for fid in order]
+    for item in ordered:
+        columns.append({
+            "tag": "column",
+            "width": "weighted",
+            "weight": 1,
+            "background_style": "rgba(52, 199, 89, 0.90)" if is_on(cfg, item["id"]) else "rgba(142, 142, 147, 0.28)",
+            "padding": "3px 0px 3px 0px",
+            "elements": [_md(" ", size="notation")],
+        })
+    return {
+        "tag": "column_set",
+        "flex_mode": "none",
+        "horizontal_spacing": "4px",
+        "margin": "8px 0px 0px 0px",
+        "columns": columns,
     }
 
 
@@ -609,31 +712,47 @@ def _status_bar(cfg, base):
     started = started_label(base)
     if started:
         bits.append("上次启动 " + started)
-    sub = " · ".join(bits) if bits else "确认后才写入"
-    left = "**已开 %d/%d**\n<font color='grey'>%s</font>" % (on, total, sub)
-    return {
+    sub = (" · " + " · ".join(bits)) if bits else ""
+    number = {
         "tag": "column_set",
         "flex_mode": "none",
-        "background_style": "wathet",
         "horizontal_spacing": "8px",
-        "margin": "0px 0px 8px 0px",
         "columns": [
             {
                 "tag": "column",
                 "width": "weighted",
                 "weight": 1,
                 "vertical_align": "center",
-                "padding": "8px 4px 8px 8px",
-                "elements": [_md(left, icon=_standard_icon("setting_outlined", "blue"))],
+                "elements": [
+                    _md("**%d** <font color='grey'>/ %d</font>" % (on, total), size="heading"),
+                    _md("<font color='grey'>已开 %d/%d%s</font>" % (on, total, sub), size="notation"),
+                ],
             },
             {
                 "tag": "column",
                 "width": "auto",
                 "vertical_align": "center",
-                "padding": "8px 8px 8px 0px",
-                "elements": [_md("<text_tag color='green'>在线</text_tag>")],
+                "elements": [_md(
+                    "<font color='green'>在线</font>",
+                    size="notation",
+                    icon=_standard_icon("ellipse_outlined", "green"),
+                )],
             },
         ],
+    }
+    return {
+        "tag": "column_set",
+        "flex_mode": "none",
+        "background_style": "default",
+        "margin": "0px 0px 4px 0px",
+        "columns": [{
+            "tag": "column",
+            "width": "weighted",
+            "weight": 1,
+            "background_style": "rgba(31, 35, 41, 0.05)",
+            "padding": "12px 12px 12px 12px",
+            "elements": [number, _meter(cfg)],
+        }],
     }
 
 
@@ -685,9 +804,20 @@ def _action_row(pairs, issued):
     return buttons
 
 
-def card(cfg, base, cfg_path, pending=None, help_id="", issued=None):
-    """一张紧凑设置卡。pending 是还没写入的目标状态。issued 带确认按钮的记号。"""
+def _advanced_panel(cfg, base, cfg_path):
+    return _panel("高级", [
+        "配置名字",
+        detail_text(cfg_path),
+        "确认方式",
+        confirm_mode.menu_line(cfg, base),
+    ], False)
+
+
+def card(cfg, base, cfg_path, pending=None, help_id="", issued=None, style="plain"):
+    """一张设置卡。style=plain 是白底细线，style=color 是同结构的彩色分组。"""
     pending = pending or {}
+    if style not in ("plain", "color"):
+        style = "plain"
     summary = overview_line(cfg, base)
     elements = [_status_bar(cfg, base)]
     pairs = _pairs_from_pending(cfg, pending)
@@ -704,19 +834,16 @@ def card(cfg, base, cfg_path, pending=None, help_id="", issued=None):
     elif pairs:
         elements.append(_plain_div("确认还没准备好。请再点一次开关。"))
     elements.append({"tag": "hr"})
-    for gid, title in GROUPS:
-        rows = [item for item in FEATURES if item.get("group") == gid]
-        if not rows:
-            continue
-        elements.append(_group_block(title, [_row(cfg, base, item, pending, help_id) for item in rows]))
-    elements.append(_panel("配置名字", [detail_text(cfg_path)], False))
-    elements.append(_md("<font color='grey'>%s</font>" % confirm_mode.menu_line(cfg, base), size="notation"))
+    for gid, _title, order, _hue, _well, _fill in GROUPS:
+        rows = [feature(fid) for fid in order]
+        elements.append(_group_block(gid, [_row(cfg, base, item, pending, help_id) for item in rows], style))
+    elements.append(_advanced_panel(cfg, base, cfg_path))
     elements.extend(_action_row(pairs, issued))
     return {
         "schema": "2.0",
         "config": {"update_multi": True, "summary": {"content": summary[:40]}},
         "header": {
-            "title": {"tag": "plain_text", "content": "功能开关"},
+            "title": {"tag": "plain_text", "content": "设置"},
             "subtitle": {"tag": "plain_text", "content": "确认后才写入"},
             "template": "blue",
             "icon": {"tag": "standard_icon", "token": "setting_outlined"},
@@ -726,16 +853,18 @@ def card(cfg, base, cfg_path, pending=None, help_id="", issued=None):
 
 
 def menu_text(cfg, base):
-    """卡片回调没连上时的文字清单。一行一项，不写长说明。"""
+    """卡片回调没连上时的文字清单。序号还在，卡片上不写序号。"""
     lines = [overview_line(cfg, base), ""]
-    for gid, title in GROUPS:
-        rows = [item for item in FEATURES if item.get("group") == gid]
-        if not rows:
-            continue
+    for gid, title, order, _hue, _well, _fill in GROUPS:
         lines.append(title)
-        for item in rows:
-            lines.append("%d %s  %s  %s" % (
-                item["n"], item["title"], "开" if is_on(cfg, item["id"]) else "关", item["blurb"]))
+        for fid in order:
+            item = feature(fid)
+            mark = "  " if item.get("parent") else ""
+            line = "%s%d %s  %s  %s" % (
+                mark, item["n"], item["title"], "开" if is_on(cfg, item["id"]) else "关", item["blurb"])
+            if _dimmed(cfg, item, {}):
+                line += "  " + PARENT_HINT
+            lines.append(line)
         lines.append("")
     lines.append("回复序号即可，多个用空格，如 1 5。回复 0 是推荐设置（断线提醒和用量周报）。")
     lines.append("点了没反应也用这个办法。确认之后才会改。")
@@ -749,9 +878,9 @@ def welcome_text(cfg):
         "你好，我是团队助手。",
         "",
         "我可以回答群里 @ 我的问题。还有几项默认关着，打开才会主动干活：",
-        "· 断线提醒：连不上时私聊你",
-        "· 用量周报：每周私聊你一份用量合计",
-        "· 早间待办：早上往群里发今天的日程（这项会在群里发消息）",
+        "· 断线告诉你（断线提醒）：连不上时私聊你",
+        "· 每周用量小结（用量周报）：每周私聊你一份用量合计",
+        "· 早上发待办（早间待办）：早上往群里发今天的日程（这项会在群里发消息）",
         "",
         "建议先打开「断线提醒」和「用量周报」。它们只私聊你，不打扰群。",
         "现在回复「设置」，我发一张开关卡片。",
@@ -1490,7 +1619,7 @@ def _settings_out(cfg, base, cfg_path, ctx, now, pending, help_id, toast, issued
 
 
 def handle_settings(cfg, base, action, names=(), now=None, cfg_path=""):
-    """点开关、问号或推荐。只改卡片上的待确认状态，不写配置。"""
+    """点开关、箭头或推荐。只改卡片上的待确认状态，不写配置。"""
     now = time.time() if now is None else float(now)
     action = action or {}
     ctx = {
@@ -1534,13 +1663,22 @@ def handle_settings(cfg, base, action, names=(), now=None, cfg_path=""):
         if not item:
             _audit(base, "refuse", user=ctx.get("user"), names=names)
             return _reply("这项不能在对话里改。")
-        if item["id"] in pending:
+        blocked = _child_blocked(cfg, item, pending)
+        if blocked:
+            toast = "请先打开按步骤写稿"
+        elif item["id"] in pending:
+            was_off = pending[item["id"]] is False
             del pending[item["id"]]
             toast = "已撤下"
+            if item["id"] == "skills" and was_off:
+                _uncascade_child(cfg, pending)
         else:
             pending[item["id"]] = not is_on(cfg, item["id"])
             toast = "先确认才会改"
-        _audit(base, "stage", user=ctx.get("user"), feature=item["id"], on=pending.get(item["id"]), names=names)
+            if item["id"] == "skills" and pending["skills"] is False:
+                _cascade_child_off(cfg, pending)
+        if not blocked:
+            _audit(base, "stage", user=ctx.get("user"), feature=item["id"], on=pending.get(item["id"]), names=names)
     else:
         return None
     pairs = _pairs_from_pending(cfg, pending)

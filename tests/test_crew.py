@@ -106,7 +106,7 @@ try:
         {"write": {"allowed_users": {"user_owner": "主人"}}}, base, "第9项",
         dict(owner, chat_type="group", chat_id="chat_alpha", message_id="om_crew3"))
     check("只有主人能在私聊里改主理人开关",
-          proposed and "主理人" in proposed["text"] and stranger and "只有主人" in stranger["text"]
+          proposed and "复杂问题拆开" in proposed["text"] and stranger and "只有主人" in stranger["text"]
           and group and "私聊" in group["text"],
           "\n".join([proposed["text"] if proposed else "", stranger["text"] if stranger else "", group["text"] if group else ""]))
 finally:

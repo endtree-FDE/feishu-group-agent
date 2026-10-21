@@ -154,7 +154,7 @@ try:
     refused = feature_switch.handle_text(switch_cfg, switch_base, "第7项", stranger)
     in_group = feature_switch.handle_text(switch_cfg, switch_base, "打开复盘", group)
     check("只有主人能在私聊里改复盘开关",
-          proposed and "复盘写回" in proposed["text"] and "打开" in proposed["text"]
+          proposed and "做完记一笔" in proposed["text"] and "打开" in proposed["text"]
           and refused and "只有主人" in refused["text"]
           and in_group and "私聊" in in_group["text"] and "复盘" not in in_group["text"].split("设置")[0],
           "\n".join([proposed["text"] if proposed else "", refused["text"] if refused else "", in_group["text"] if in_group else ""]))

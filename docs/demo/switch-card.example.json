@@ -9,7 +9,7 @@
   "header": {
     "title": {
       "tag": "plain_text",
-      "content": "功能开关"
+      "content": "设置"
     },
     "subtitle": {
       "tag": "plain_text",
@@ -26,39 +26,191 @@
       {
         "tag": "column_set",
         "flex_mode": "none",
-        "background_style": "wathet",
-        "horizontal_spacing": "8px",
-        "margin": "0px 0px 8px 0px",
+        "background_style": "default",
+        "margin": "0px 0px 4px 0px",
         "columns": [
           {
             "tag": "column",
             "width": "weighted",
             "weight": 1,
-            "vertical_align": "center",
-            "padding": "8px 4px 8px 8px",
+            "background_style": "rgba(31, 35, 41, 0.05)",
+            "padding": "12px 12px 12px 12px",
             "elements": [
               {
-                "tag": "markdown",
-                "content": "**已开 6/9**\n<font color='grey'>v0.9.0 · 上次启动 10-21 09:50</font>",
-                "text_size": "normal",
-                "icon": {
-                  "tag": "standard_icon",
-                  "token": "setting_outlined",
-                  "color": "blue"
-                }
-              }
-            ]
-          },
-          {
-            "tag": "column",
-            "width": "auto",
-            "vertical_align": "center",
-            "padding": "8px 8px 8px 0px",
-            "elements": [
+                "tag": "column_set",
+                "flex_mode": "none",
+                "horizontal_spacing": "8px",
+                "columns": [
+                  {
+                    "tag": "column",
+                    "width": "weighted",
+                    "weight": 1,
+                    "vertical_align": "center",
+                    "elements": [
+                      {
+                        "tag": "markdown",
+                        "content": "**6** <font color='grey'>/ 9</font>",
+                        "text_size": "heading"
+                      },
+                      {
+                        "tag": "markdown",
+                        "content": "<font color='grey'>已开 6/9 · v0.9.0 · 上次启动 10-21 09:50</font>",
+                        "text_size": "notation"
+                      }
+                    ]
+                  },
+                  {
+                    "tag": "column",
+                    "width": "auto",
+                    "vertical_align": "center",
+                    "elements": [
+                      {
+                        "tag": "markdown",
+                        "content": "<font color='green'>在线</font>",
+                        "text_size": "notation",
+                        "icon": {
+                          "tag": "standard_icon",
+                          "token": "ellipse_outlined",
+                          "color": "green"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
               {
-                "tag": "markdown",
-                "content": "<text_tag color='green'>在线</text_tag>",
-                "text_size": "normal"
+                "tag": "column_set",
+                "flex_mode": "none",
+                "horizontal_spacing": "4px",
+                "margin": "8px 0px 0px 0px",
+                "columns": [
+                  {
+                    "tag": "column",
+                    "width": "weighted",
+                    "weight": 1,
+                    "background_style": "rgba(52, 199, 89, 0.90)",
+                    "padding": "3px 0px 3px 0px",
+                    "elements": [
+                      {
+                        "tag": "markdown",
+                        "content": " ",
+                        "text_size": "notation"
+                      }
+                    ]
+                  },
+                  {
+                    "tag": "column",
+                    "width": "weighted",
+                    "weight": 1,
+                    "background_style": "rgba(142, 142, 147, 0.28)",
+                    "padding": "3px 0px 3px 0px",
+                    "elements": [
+                      {
+                        "tag": "markdown",
+                        "content": " ",
+                        "text_size": "notation"
+                      }
+                    ]
+                  },
+                  {
+                    "tag": "column",
+                    "width": "weighted",
+                    "weight": 1,
+                    "background_style": "rgba(52, 199, 89, 0.90)",
+                    "padding": "3px 0px 3px 0px",
+                    "elements": [
+                      {
+                        "tag": "markdown",
+                        "content": " ",
+                        "text_size": "notation"
+                      }
+                    ]
+                  },
+                  {
+                    "tag": "column",
+                    "width": "weighted",
+                    "weight": 1,
+                    "background_style": "rgba(142, 142, 147, 0.28)",
+                    "padding": "3px 0px 3px 0px",
+                    "elements": [
+                      {
+                        "tag": "markdown",
+                        "content": " ",
+                        "text_size": "notation"
+                      }
+                    ]
+                  },
+                  {
+                    "tag": "column",
+                    "width": "weighted",
+                    "weight": 1,
+                    "background_style": "rgba(52, 199, 89, 0.90)",
+                    "padding": "3px 0px 3px 0px",
+                    "elements": [
+                      {
+                        "tag": "markdown",
+                        "content": " ",
+                        "text_size": "notation"
+                      }
+                    ]
+                  },
+                  {
+                    "tag": "column",
+                    "width": "weighted",
+                    "weight": 1,
+                    "background_style": "rgba(52, 199, 89, 0.90)",
+                    "padding": "3px 0px 3px 0px",
+                    "elements": [
+                      {
+                        "tag": "markdown",
+                        "content": " ",
+                        "text_size": "notation"
+                      }
+                    ]
+                  },
+                  {
+                    "tag": "column",
+                    "width": "weighted",
+                    "weight": 1,
+                    "background_style": "rgba(52, 199, 89, 0.90)",
+                    "padding": "3px 0px 3px 0px",
+                    "elements": [
+                      {
+                        "tag": "markdown",
+                        "content": " ",
+                        "text_size": "notation"
+                      }
+                    ]
+                  },
+                  {
+                    "tag": "column",
+                    "width": "weighted",
+                    "weight": 1,
+                    "background_style": "rgba(142, 142, 147, 0.28)",
+                    "padding": "3px 0px 3px 0px",
+                    "elements": [
+                      {
+                        "tag": "markdown",
+                        "content": " ",
+                        "text_size": "notation"
+                      }
+                    ]
+                  },
+                  {
+                    "tag": "column",
+                    "width": "weighted",
+                    "weight": 1,
+                    "background_style": "rgba(52, 199, 89, 0.90)",
+                    "padding": "3px 0px 3px 0px",
+                    "elements": [
+                      {
+                        "tag": "markdown",
+                        "content": " ",
+                        "text_size": "notation"
+                      }
+                    ]
+                  }
+                ]
               }
             ]
           }
@@ -70,50 +222,87 @@
       {
         "tag": "column_set",
         "flex_mode": "none",
-        "background_style": "grey",
+        "background_style": "default",
         "horizontal_spacing": "0px",
-        "margin": "0px 0px 8px 0px",
+        "margin": "4px 0px 8px 0px",
         "columns": [
           {
             "tag": "column",
             "width": "weighted",
             "weight": 1,
-            "padding": "4px 8px 8px 8px",
+            "background_style": "default",
+            "padding": "0px 2px 0px 2px",
             "vertical_spacing": "2px",
             "elements": [
               {
                 "tag": "markdown",
-                "content": "**日常**",
-                "text_size": "normal"
+                "content": "<font color='grey'>会主动找你</font>",
+                "text_size": "notation"
               },
               {
                 "tag": "column_set",
                 "flex_mode": "none",
                 "background_style": "default",
                 "horizontal_spacing": "8px",
-                "margin": "4px 0px 4px 0px",
+                "margin": "2px 0px 2px 0px",
                 "columns": [
+                  {
+                    "tag": "column",
+                    "width": "36px",
+                    "vertical_align": "center",
+                    "elements": [
+                      {
+                        "tag": "column_set",
+                        "flex_mode": "none",
+                        "horizontal_spacing": "0px",
+                        "columns": [
+                          {
+                            "tag": "column",
+                            "width": "32px",
+                            "background_style": "rgba(255, 149, 0, 0.16)",
+                            "padding": "6px 0px 6px 0px",
+                            "horizontal_align": "center",
+                            "vertical_align": "center",
+                            "elements": [
+                              {
+                                "tag": "markdown",
+                                "content": " ",
+                                "text_size": "normal",
+                                "icon": {
+                                  "tag": "standard_icon",
+                                  "token": "sheet-histogram_outlined",
+                                  "color": "orange"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
                   {
                     "tag": "column",
                     "width": "weighted",
                     "weight": 5,
-                    "vertical_align": "top",
+                    "vertical_align": "center",
                     "elements": [
                       {
                         "tag": "markdown",
-                        "content": "**用量周报** <text_tag color='green'>开</text_tag>\n<font color='grey'>1 · 每周私聊合计</font>",
-                        "text_size": "normal",
-                        "icon": {
-                          "tag": "standard_icon",
-                          "token": "sheet-histogram_outlined",
-                          "color": "green"
-                        }
-                      },
+                        "content": "**每周用量小结**\n<font color='grey'>开了会每周私聊你一份用量合计</font>",
+                        "text_size": "normal"
+                      }
+                    ]
+                  },
+                  {
+                    "tag": "column",
+                    "width": "auto",
+                    "vertical_align": "center",
+                    "elements": [
                       {
                         "tag": "button",
                         "text": {
                           "tag": "plain_text",
-                          "content": "详情"
+                          "content": " "
                         },
                         "type": "text",
                         "size": "tiny",
@@ -126,14 +315,19 @@
                               "switch": "report"
                             }
                           }
-                        ]
+                        ],
+                        "icon": {
+                          "tag": "standard_icon",
+                          "token": "right_outlined",
+                          "color": "grey"
+                        }
                       }
                     ]
                   },
                   {
                     "tag": "column",
                     "width": "auto",
-                    "vertical_align": "top",
+                    "vertical_align": "center",
                     "elements": [
                       {
                         "tag": "checker",
@@ -142,7 +336,7 @@
                         "checked": true,
                         "text": {
                           "tag": "plain_text",
-                          "content": "开"
+                          "content": ""
                         },
                         "overall_checkable": true,
                         "checked_style": {
@@ -165,33 +359,73 @@
                 ]
               },
               {
+                "tag": "hr",
+                "margin": "2px 0px 2px 0px"
+              },
+              {
                 "tag": "column_set",
                 "flex_mode": "none",
                 "background_style": "default",
                 "horizontal_spacing": "8px",
-                "margin": "4px 0px 4px 0px",
+                "margin": "2px 0px 2px 0px",
                 "columns": [
+                  {
+                    "tag": "column",
+                    "width": "36px",
+                    "vertical_align": "center",
+                    "elements": [
+                      {
+                        "tag": "column_set",
+                        "flex_mode": "none",
+                        "horizontal_spacing": "0px",
+                        "columns": [
+                          {
+                            "tag": "column",
+                            "width": "32px",
+                            "background_style": "rgba(255, 149, 0, 0.16)",
+                            "padding": "6px 0px 6px 0px",
+                            "horizontal_align": "center",
+                            "vertical_align": "center",
+                            "elements": [
+                              {
+                                "tag": "markdown",
+                                "content": " ",
+                                "text_size": "normal",
+                                "icon": {
+                                  "tag": "standard_icon",
+                                  "token": "calendar-tomorrow_outlined",
+                                  "color": "orange"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
                   {
                     "tag": "column",
                     "width": "weighted",
                     "weight": 5,
-                    "vertical_align": "top",
+                    "vertical_align": "center",
                     "elements": [
                       {
                         "tag": "markdown",
-                        "content": "**早间待办** <text_tag color='neutral'>关</text_tag>\n<font color='grey'>4 · 早上发到群里</font>",
-                        "text_size": "normal",
-                        "icon": {
-                          "tag": "standard_icon",
-                          "token": "calendar-tomorrow_outlined",
-                          "color": "grey"
-                        }
-                      },
+                        "content": "**早上发待办**\n<font color='grey'>开了会在早上往群里发今天的日程</font>",
+                        "text_size": "normal"
+                      }
+                    ]
+                  },
+                  {
+                    "tag": "column",
+                    "width": "auto",
+                    "vertical_align": "center",
+                    "elements": [
                       {
                         "tag": "button",
                         "text": {
                           "tag": "plain_text",
-                          "content": "详情"
+                          "content": " "
                         },
                         "type": "text",
                         "size": "tiny",
@@ -204,14 +438,19 @@
                               "switch": "digest"
                             }
                           }
-                        ]
+                        ],
+                        "icon": {
+                          "tag": "standard_icon",
+                          "token": "right_outlined",
+                          "color": "grey"
+                        }
                       }
                     ]
                   },
                   {
                     "tag": "column",
                     "width": "auto",
-                    "vertical_align": "top",
+                    "vertical_align": "center",
                     "elements": [
                       {
                         "tag": "checker",
@@ -220,7 +459,7 @@
                         "checked": false,
                         "text": {
                           "tag": "plain_text",
-                          "content": "关"
+                          "content": ""
                         },
                         "overall_checkable": true,
                         "checked_style": {
@@ -243,33 +482,73 @@
                 ]
               },
               {
+                "tag": "hr",
+                "margin": "2px 0px 2px 0px"
+              },
+              {
                 "tag": "column_set",
                 "flex_mode": "none",
                 "background_style": "default",
                 "horizontal_spacing": "8px",
-                "margin": "4px 0px 4px 0px",
+                "margin": "2px 0px 2px 0px",
                 "columns": [
+                  {
+                    "tag": "column",
+                    "width": "36px",
+                    "vertical_align": "center",
+                    "elements": [
+                      {
+                        "tag": "column_set",
+                        "flex_mode": "none",
+                        "horizontal_spacing": "0px",
+                        "columns": [
+                          {
+                            "tag": "column",
+                            "width": "32px",
+                            "background_style": "rgba(255, 149, 0, 0.16)",
+                            "padding": "6px 0px 6px 0px",
+                            "horizontal_align": "center",
+                            "vertical_align": "center",
+                            "elements": [
+                              {
+                                "tag": "markdown",
+                                "content": " ",
+                                "text_size": "normal",
+                                "icon": {
+                                  "tag": "standard_icon",
+                                  "token": "bell_outlined",
+                                  "color": "orange"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
                   {
                     "tag": "column",
                     "width": "weighted",
                     "weight": 5,
-                    "vertical_align": "top",
+                    "vertical_align": "center",
                     "elements": [
                       {
                         "tag": "markdown",
-                        "content": "**断线提醒** <text_tag color='green'>开</text_tag>\n<font color='grey'>5 · 断线时私聊你</font>",
-                        "text_size": "normal",
-                        "icon": {
-                          "tag": "standard_icon",
-                          "token": "bell_outlined",
-                          "color": "green"
-                        }
-                      },
+                        "content": "**断线告诉你**\n<font color='grey'>开了连不上时会私聊你</font>",
+                        "text_size": "normal"
+                      }
+                    ]
+                  },
+                  {
+                    "tag": "column",
+                    "width": "auto",
+                    "vertical_align": "center",
+                    "elements": [
                       {
                         "tag": "button",
                         "text": {
                           "tag": "plain_text",
-                          "content": "详情"
+                          "content": " "
                         },
                         "type": "text",
                         "size": "tiny",
@@ -282,14 +561,19 @@
                               "switch": "alerts"
                             }
                           }
-                        ]
+                        ],
+                        "icon": {
+                          "tag": "standard_icon",
+                          "token": "right_outlined",
+                          "color": "grey"
+                        }
                       }
                     ]
                   },
                   {
                     "tag": "column",
                     "width": "auto",
-                    "vertical_align": "top",
+                    "vertical_align": "center",
                     "elements": [
                       {
                         "tag": "checker",
@@ -298,7 +582,7 @@
                         "checked": true,
                         "text": {
                           "tag": "plain_text",
-                          "content": "开"
+                          "content": ""
                         },
                         "overall_checkable": true,
                         "checked_style": {
@@ -327,50 +611,87 @@
       {
         "tag": "column_set",
         "flex_mode": "none",
-        "background_style": "grey",
+        "background_style": "default",
         "horizontal_spacing": "0px",
-        "margin": "0px 0px 8px 0px",
+        "margin": "4px 0px 8px 0px",
         "columns": [
           {
             "tag": "column",
             "width": "weighted",
             "weight": 1,
-            "padding": "4px 8px 8px 8px",
+            "background_style": "default",
+            "padding": "0px 2px 0px 2px",
             "vertical_spacing": "2px",
             "elements": [
               {
                 "tag": "markdown",
-                "content": "**记忆**",
-                "text_size": "normal"
+                "content": "<font color='grey'>回答时会用</font>",
+                "text_size": "notation"
               },
               {
                 "tag": "column_set",
                 "flex_mode": "none",
                 "background_style": "default",
                 "horizontal_spacing": "8px",
-                "margin": "4px 0px 4px 0px",
+                "margin": "2px 0px 2px 0px",
                 "columns": [
+                  {
+                    "tag": "column",
+                    "width": "36px",
+                    "vertical_align": "center",
+                    "elements": [
+                      {
+                        "tag": "column_set",
+                        "flex_mode": "none",
+                        "horizontal_spacing": "0px",
+                        "columns": [
+                          {
+                            "tag": "column",
+                            "width": "32px",
+                            "background_style": "rgba(0, 122, 255, 0.14)",
+                            "padding": "6px 0px 6px 0px",
+                            "horizontal_align": "center",
+                            "vertical_align": "center",
+                            "elements": [
+                              {
+                                "tag": "markdown",
+                                "content": " ",
+                                "text_size": "normal",
+                                "icon": {
+                                  "tag": "standard_icon",
+                                  "token": "wiki-book_outlined",
+                                  "color": "blue"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
                   {
                     "tag": "column",
                     "width": "weighted",
                     "weight": 5,
-                    "vertical_align": "top",
+                    "vertical_align": "center",
                     "elements": [
                       {
                         "tag": "markdown",
-                        "content": "**知识检索** <text_tag color='neutral'>关</text_tag>\n<font color='grey'>2 · 提问时查资料</font>",
-                        "text_size": "normal",
-                        "icon": {
-                          "tag": "standard_icon",
-                          "token": "wiki-book_outlined",
-                          "color": "grey"
-                        }
-                      },
+                        "content": "**查资料再回答**\n<font color='grey'>开了提问时会用群里的资料，并写上来源</font>",
+                        "text_size": "normal"
+                      }
+                    ]
+                  },
+                  {
+                    "tag": "column",
+                    "width": "auto",
+                    "vertical_align": "center",
+                    "elements": [
                       {
                         "tag": "button",
                         "text": {
                           "tag": "plain_text",
-                          "content": "详情"
+                          "content": " "
                         },
                         "type": "text",
                         "size": "tiny",
@@ -383,14 +704,19 @@
                               "switch": "knowledge"
                             }
                           }
-                        ]
+                        ],
+                        "icon": {
+                          "tag": "standard_icon",
+                          "token": "right_outlined",
+                          "color": "grey"
+                        }
                       }
                     ]
                   },
                   {
                     "tag": "column",
                     "width": "auto",
-                    "vertical_align": "top",
+                    "vertical_align": "center",
                     "elements": [
                       {
                         "tag": "checker",
@@ -399,7 +725,7 @@
                         "checked": false,
                         "text": {
                           "tag": "plain_text",
-                          "content": "关"
+                          "content": ""
                         },
                         "overall_checkable": true,
                         "checked_style": {
@@ -422,44 +748,45 @@
                 ]
               },
               {
+                "tag": "hr",
+                "margin": "2px 0px 2px 0px"
+              },
+              {
                 "tag": "column_set",
                 "flex_mode": "none",
                 "background_style": "default",
                 "horizontal_spacing": "8px",
-                "margin": "4px 0px 4px 0px",
+                "margin": "2px 0px 2px 0px",
                 "columns": [
                   {
                     "tag": "column",
-                    "width": "weighted",
-                    "weight": 5,
-                    "vertical_align": "top",
+                    "width": "36px",
+                    "vertical_align": "center",
                     "elements": [
                       {
-                        "tag": "markdown",
-                        "content": "**记忆成长** <text_tag color='neutral'>关</text_tag>\n<font color='grey'>3 · 提议记住约定</font>",
-                        "text_size": "normal",
-                        "icon": {
-                          "tag": "standard_icon",
-                          "token": "mindnote_outlined",
-                          "color": "grey"
-                        }
-                      },
-                      {
-                        "tag": "button",
-                        "text": {
-                          "tag": "plain_text",
-                          "content": "详情"
-                        },
-                        "type": "text",
-                        "size": "tiny",
-                        "behaviors": [
+                        "tag": "column_set",
+                        "flex_mode": "none",
+                        "horizontal_spacing": "0px",
+                        "columns": [
                           {
-                            "type": "callback",
-                            "value": {
-                              "kind": "settings",
-                              "op": "help",
-                              "switch": "growth"
-                            }
+                            "tag": "column",
+                            "width": "32px",
+                            "background_style": "rgba(0, 122, 255, 0.14)",
+                            "padding": "6px 0px 6px 0px",
+                            "horizontal_align": "center",
+                            "vertical_align": "center",
+                            "elements": [
+                              {
+                                "tag": "markdown",
+                                "content": " ",
+                                "text_size": "normal",
+                                "icon": {
+                                  "tag": "standard_icon",
+                                  "token": "list-check_outlined",
+                                  "color": "blue"
+                                }
+                              }
+                            ]
                           }
                         ]
                       }
@@ -467,167 +794,27 @@
                   },
                   {
                     "tag": "column",
-                    "width": "auto",
-                    "vertical_align": "top",
-                    "elements": [
-                      {
-                        "tag": "checker",
-                        "name": "growth",
-                        "element_id": "sw_growth",
-                        "checked": false,
-                        "text": {
-                          "tag": "plain_text",
-                          "content": "关"
-                        },
-                        "overall_checkable": true,
-                        "checked_style": {
-                          "show_strikethrough": false,
-                          "opacity": 1
-                        },
-                        "behaviors": [
-                          {
-                            "type": "callback",
-                            "value": {
-                              "kind": "settings",
-                              "op": "stage",
-                              "switch": "growth"
-                            }
-                          }
-                        ]
-                      }
-                    ]
-                  }
-                ]
-              },
-              {
-                "tag": "column_set",
-                "flex_mode": "none",
-                "background_style": "default",
-                "horizontal_spacing": "8px",
-                "margin": "4px 0px 4px 0px",
-                "columns": [
-                  {
-                    "tag": "column",
                     "width": "weighted",
                     "weight": 5,
-                    "vertical_align": "top",
+                    "vertical_align": "center",
                     "elements": [
                       {
                         "tag": "markdown",
-                        "content": "**复盘写回** <text_tag color='green'>开</text_tag>\n<font color='grey'>7 · 做完写一句</font>",
-                        "text_size": "normal",
-                        "icon": {
-                          "tag": "standard_icon",
-                          "token": "edit_outlined",
-                          "color": "green"
-                        }
-                      },
-                      {
-                        "tag": "button",
-                        "text": {
-                          "tag": "plain_text",
-                          "content": "详情"
-                        },
-                        "type": "text",
-                        "size": "tiny",
-                        "behaviors": [
-                          {
-                            "type": "callback",
-                            "value": {
-                              "kind": "settings",
-                              "op": "help",
-                              "switch": "retrospect"
-                            }
-                          }
-                        ]
+                        "content": "**按步骤写稿**\n<font color='grey'>开了写稿、做纪要会按现成步骤来</font>",
+                        "text_size": "normal"
                       }
                     ]
                   },
                   {
                     "tag": "column",
                     "width": "auto",
-                    "vertical_align": "top",
+                    "vertical_align": "center",
                     "elements": [
-                      {
-                        "tag": "checker",
-                        "name": "retrospect",
-                        "element_id": "sw_retrospect",
-                        "checked": true,
-                        "text": {
-                          "tag": "plain_text",
-                          "content": "开"
-                        },
-                        "overall_checkable": true,
-                        "checked_style": {
-                          "show_strikethrough": false,
-                          "opacity": 1
-                        },
-                        "behaviors": [
-                          {
-                            "type": "callback",
-                            "value": {
-                              "kind": "settings",
-                              "op": "stage",
-                              "switch": "retrospect"
-                            }
-                          }
-                        ]
-                      }
-                    ]
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      },
-      {
-        "tag": "column_set",
-        "flex_mode": "none",
-        "background_style": "grey",
-        "horizontal_spacing": "0px",
-        "margin": "0px 0px 8px 0px",
-        "columns": [
-          {
-            "tag": "column",
-            "width": "weighted",
-            "weight": 1,
-            "padding": "4px 8px 8px 8px",
-            "vertical_spacing": "2px",
-            "elements": [
-              {
-                "tag": "markdown",
-                "content": "**技能**",
-                "text_size": "normal"
-              },
-              {
-                "tag": "column_set",
-                "flex_mode": "none",
-                "background_style": "default",
-                "horizontal_spacing": "8px",
-                "margin": "4px 0px 4px 0px",
-                "columns": [
-                  {
-                    "tag": "column",
-                    "width": "weighted",
-                    "weight": 5,
-                    "vertical_align": "top",
-                    "elements": [
-                      {
-                        "tag": "markdown",
-                        "content": "**技能** <text_tag color='green'>开</text_tag>\n<font color='grey'>6 · 按现成步骤做</font>",
-                        "text_size": "normal",
-                        "icon": {
-                          "tag": "standard_icon",
-                          "token": "list-check_outlined",
-                          "color": "green"
-                        }
-                      },
                       {
                         "tag": "button",
                         "text": {
                           "tag": "plain_text",
-                          "content": "详情"
+                          "content": " "
                         },
                         "type": "text",
                         "size": "tiny",
@@ -640,14 +827,19 @@
                               "switch": "skills"
                             }
                           }
-                        ]
+                        ],
+                        "icon": {
+                          "tag": "standard_icon",
+                          "token": "right_outlined",
+                          "color": "grey"
+                        }
                       }
                     ]
                   },
                   {
                     "tag": "column",
                     "width": "auto",
-                    "vertical_align": "top",
+                    "vertical_align": "center",
                     "elements": [
                       {
                         "tag": "checker",
@@ -656,7 +848,7 @@
                         "checked": true,
                         "text": {
                           "tag": "plain_text",
-                          "content": "开"
+                          "content": ""
                         },
                         "overall_checkable": true,
                         "checked_style": {
@@ -679,33 +871,85 @@
                 ]
               },
               {
+                "tag": "hr",
+                "margin": "2px 0px 2px 0px"
+              },
+              {
                 "tag": "column_set",
                 "flex_mode": "none",
                 "background_style": "default",
                 "horizontal_spacing": "8px",
-                "margin": "4px 0px 4px 0px",
+                "margin": "2px 0px 2px 0px",
                 "columns": [
+                  {
+                    "tag": "column",
+                    "width": "16px",
+                    "vertical_align": "center",
+                    "elements": [
+                      {
+                        "tag": "markdown",
+                        "content": " ",
+                        "text_size": "normal"
+                      }
+                    ]
+                  },
+                  {
+                    "tag": "column",
+                    "width": "36px",
+                    "vertical_align": "center",
+                    "elements": [
+                      {
+                        "tag": "column_set",
+                        "flex_mode": "none",
+                        "horizontal_spacing": "0px",
+                        "columns": [
+                          {
+                            "tag": "column",
+                            "width": "32px",
+                            "background_style": "rgba(0, 122, 255, 0.14)",
+                            "padding": "6px 0px 6px 0px",
+                            "horizontal_align": "center",
+                            "vertical_align": "center",
+                            "elements": [
+                              {
+                                "tag": "markdown",
+                                "content": " ",
+                                "text_size": "normal",
+                                "icon": {
+                                  "tag": "standard_icon",
+                                  "token": "refresh_outlined",
+                                  "color": "blue"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
                   {
                     "tag": "column",
                     "width": "weighted",
                     "weight": 5,
-                    "vertical_align": "top",
+                    "vertical_align": "center",
                     "elements": [
                       {
                         "tag": "markdown",
-                        "content": "**技能改进** <text_tag color='green'>开</text_tag>\n<font color='grey'>8 · 提议下一版</font>",
-                        "text_size": "normal",
-                        "icon": {
-                          "tag": "standard_icon",
-                          "token": "refresh_outlined",
-                          "color": "green"
-                        }
-                      },
+                        "content": "**自动优化步骤**\n<font color='grey'>开了会根据记录提议步骤的下一版</font>",
+                        "text_size": "normal"
+                      }
+                    ]
+                  },
+                  {
+                    "tag": "column",
+                    "width": "auto",
+                    "vertical_align": "center",
+                    "elements": [
                       {
                         "tag": "button",
                         "text": {
                           "tag": "plain_text",
-                          "content": "详情"
+                          "content": " "
                         },
                         "type": "text",
                         "size": "tiny",
@@ -718,14 +962,19 @@
                               "switch": "skill_evolve"
                             }
                           }
-                        ]
+                        ],
+                        "icon": {
+                          "tag": "standard_icon",
+                          "token": "right_outlined",
+                          "color": "grey"
+                        }
                       }
                     ]
                   },
                   {
                     "tag": "column",
                     "width": "auto",
-                    "vertical_align": "top",
+                    "vertical_align": "center",
                     "elements": [
                       {
                         "tag": "checker",
@@ -734,7 +983,7 @@
                         "checked": true,
                         "text": {
                           "tag": "plain_text",
-                          "content": "开"
+                          "content": ""
                         },
                         "overall_checkable": true,
                         "checked_style": {
@@ -755,58 +1004,75 @@
                     ]
                   }
                 ]
-              }
-            ]
-          }
-        ]
-      },
-      {
-        "tag": "column_set",
-        "flex_mode": "none",
-        "background_style": "grey",
-        "horizontal_spacing": "0px",
-        "margin": "0px 0px 8px 0px",
-        "columns": [
-          {
-            "tag": "column",
-            "width": "weighted",
-            "weight": 1,
-            "padding": "4px 8px 8px 8px",
-            "vertical_spacing": "2px",
-            "elements": [
+              },
               {
-                "tag": "markdown",
-                "content": "**高级**",
-                "text_size": "normal"
+                "tag": "hr",
+                "margin": "2px 0px 2px 0px"
               },
               {
                 "tag": "column_set",
                 "flex_mode": "none",
                 "background_style": "default",
                 "horizontal_spacing": "8px",
-                "margin": "4px 0px 4px 0px",
+                "margin": "2px 0px 2px 0px",
                 "columns": [
+                  {
+                    "tag": "column",
+                    "width": "36px",
+                    "vertical_align": "center",
+                    "elements": [
+                      {
+                        "tag": "column_set",
+                        "flex_mode": "none",
+                        "horizontal_spacing": "0px",
+                        "columns": [
+                          {
+                            "tag": "column",
+                            "width": "32px",
+                            "background_style": "rgba(0, 122, 255, 0.14)",
+                            "padding": "6px 0px 6px 0px",
+                            "horizontal_align": "center",
+                            "vertical_align": "center",
+                            "elements": [
+                              {
+                                "tag": "markdown",
+                                "content": " ",
+                                "text_size": "normal",
+                                "icon": {
+                                  "tag": "standard_icon",
+                                  "token": "group_outlined",
+                                  "color": "blue"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
                   {
                     "tag": "column",
                     "width": "weighted",
                     "weight": 5,
-                    "vertical_align": "top",
+                    "vertical_align": "center",
                     "elements": [
                       {
                         "tag": "markdown",
-                        "content": "**主理人** <text_tag color='green'>开</text_tag>\n<font color='grey'>9 · 复杂问题拆开</font>",
-                        "text_size": "normal",
-                        "icon": {
-                          "tag": "standard_icon",
-                          "token": "group_outlined",
-                          "color": "green"
-                        }
-                      },
+                        "content": "**复杂问题拆开**\n<font color='grey'>开了复杂问题会分给查资料、读文档、起草</font>",
+                        "text_size": "normal"
+                      }
+                    ]
+                  },
+                  {
+                    "tag": "column",
+                    "width": "auto",
+                    "vertical_align": "center",
+                    "elements": [
                       {
                         "tag": "button",
                         "text": {
                           "tag": "plain_text",
-                          "content": "详情"
+                          "content": " "
                         },
                         "type": "text",
                         "size": "tiny",
@@ -819,14 +1085,19 @@
                               "switch": "crew"
                             }
                           }
-                        ]
+                        ],
+                        "icon": {
+                          "tag": "standard_icon",
+                          "token": "right_outlined",
+                          "color": "grey"
+                        }
                       }
                     ]
                   },
                   {
                     "tag": "column",
                     "width": "auto",
-                    "vertical_align": "top",
+                    "vertical_align": "center",
                     "elements": [
                       {
                         "tag": "checker",
@@ -835,7 +1106,7 @@
                         "checked": true,
                         "text": {
                           "tag": "plain_text",
-                          "content": "开"
+                          "content": ""
                         },
                         "overall_checkable": true,
                         "checked_style": {
@@ -849,6 +1120,272 @@
                               "kind": "settings",
                               "op": "stage",
                               "switch": "crew"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "tag": "column_set",
+        "flex_mode": "none",
+        "background_style": "default",
+        "horizontal_spacing": "0px",
+        "margin": "4px 0px 8px 0px",
+        "columns": [
+          {
+            "tag": "column",
+            "width": "weighted",
+            "weight": 1,
+            "background_style": "default",
+            "padding": "0px 2px 0px 2px",
+            "vertical_spacing": "2px",
+            "elements": [
+              {
+                "tag": "markdown",
+                "content": "<font color='grey'>会慢慢变聪明</font>",
+                "text_size": "notation"
+              },
+              {
+                "tag": "column_set",
+                "flex_mode": "none",
+                "background_style": "default",
+                "horizontal_spacing": "8px",
+                "margin": "2px 0px 2px 0px",
+                "columns": [
+                  {
+                    "tag": "column",
+                    "width": "36px",
+                    "vertical_align": "center",
+                    "elements": [
+                      {
+                        "tag": "column_set",
+                        "flex_mode": "none",
+                        "horizontal_spacing": "0px",
+                        "columns": [
+                          {
+                            "tag": "column",
+                            "width": "32px",
+                            "background_style": "rgba(175, 82, 222, 0.16)",
+                            "padding": "6px 0px 6px 0px",
+                            "horizontal_align": "center",
+                            "vertical_align": "center",
+                            "elements": [
+                              {
+                                "tag": "markdown",
+                                "content": " ",
+                                "text_size": "normal",
+                                "icon": {
+                                  "tag": "standard_icon",
+                                  "token": "mindnote_outlined",
+                                  "color": "purple"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "tag": "column",
+                    "width": "weighted",
+                    "weight": 5,
+                    "vertical_align": "center",
+                    "elements": [
+                      {
+                        "tag": "markdown",
+                        "content": "**记住约定**\n<font color='grey'>开了平时看到的约定，点头才记</font>",
+                        "text_size": "normal"
+                      }
+                    ]
+                  },
+                  {
+                    "tag": "column",
+                    "width": "auto",
+                    "vertical_align": "center",
+                    "elements": [
+                      {
+                        "tag": "button",
+                        "text": {
+                          "tag": "plain_text",
+                          "content": " "
+                        },
+                        "type": "text",
+                        "size": "tiny",
+                        "behaviors": [
+                          {
+                            "type": "callback",
+                            "value": {
+                              "kind": "settings",
+                              "op": "help",
+                              "switch": "growth"
+                            }
+                          }
+                        ],
+                        "icon": {
+                          "tag": "standard_icon",
+                          "token": "right_outlined",
+                          "color": "grey"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "tag": "column",
+                    "width": "auto",
+                    "vertical_align": "center",
+                    "elements": [
+                      {
+                        "tag": "checker",
+                        "name": "growth",
+                        "element_id": "sw_growth",
+                        "checked": false,
+                        "text": {
+                          "tag": "plain_text",
+                          "content": ""
+                        },
+                        "overall_checkable": true,
+                        "checked_style": {
+                          "show_strikethrough": false,
+                          "opacity": 1
+                        },
+                        "behaviors": [
+                          {
+                            "type": "callback",
+                            "value": {
+                              "kind": "settings",
+                              "op": "stage",
+                              "switch": "growth"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "tag": "hr",
+                "margin": "2px 0px 2px 0px"
+              },
+              {
+                "tag": "column_set",
+                "flex_mode": "none",
+                "background_style": "default",
+                "horizontal_spacing": "8px",
+                "margin": "2px 0px 2px 0px",
+                "columns": [
+                  {
+                    "tag": "column",
+                    "width": "36px",
+                    "vertical_align": "center",
+                    "elements": [
+                      {
+                        "tag": "column_set",
+                        "flex_mode": "none",
+                        "horizontal_spacing": "0px",
+                        "columns": [
+                          {
+                            "tag": "column",
+                            "width": "32px",
+                            "background_style": "rgba(175, 82, 222, 0.16)",
+                            "padding": "6px 0px 6px 0px",
+                            "horizontal_align": "center",
+                            "vertical_align": "center",
+                            "elements": [
+                              {
+                                "tag": "markdown",
+                                "content": " ",
+                                "text_size": "normal",
+                                "icon": {
+                                  "tag": "standard_icon",
+                                  "token": "edit_outlined",
+                                  "color": "purple"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "tag": "column",
+                    "width": "weighted",
+                    "weight": 5,
+                    "vertical_align": "center",
+                    "elements": [
+                      {
+                        "tag": "markdown",
+                        "content": "**做完记一笔**\n<font color='grey'>开了这一轮做完写一句，点头才记</font>",
+                        "text_size": "normal"
+                      }
+                    ]
+                  },
+                  {
+                    "tag": "column",
+                    "width": "auto",
+                    "vertical_align": "center",
+                    "elements": [
+                      {
+                        "tag": "button",
+                        "text": {
+                          "tag": "plain_text",
+                          "content": " "
+                        },
+                        "type": "text",
+                        "size": "tiny",
+                        "behaviors": [
+                          {
+                            "type": "callback",
+                            "value": {
+                              "kind": "settings",
+                              "op": "help",
+                              "switch": "retrospect"
+                            }
+                          }
+                        ],
+                        "icon": {
+                          "tag": "standard_icon",
+                          "token": "right_outlined",
+                          "color": "grey"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "tag": "column",
+                    "width": "auto",
+                    "vertical_align": "center",
+                    "elements": [
+                      {
+                        "tag": "checker",
+                        "name": "retrospect",
+                        "element_id": "sw_retrospect",
+                        "checked": true,
+                        "text": {
+                          "tag": "plain_text",
+                          "content": ""
+                        },
+                        "overall_checkable": true,
+                        "checked_style": {
+                          "show_strikethrough": false,
+                          "opacity": 1
+                        },
+                        "behaviors": [
+                          {
+                            "type": "callback",
+                            "value": {
+                              "kind": "settings",
+                              "op": "stage",
+                              "switch": "retrospect"
                             }
                           }
                         ]
@@ -867,7 +1404,7 @@
         "header": {
           "title": {
             "tag": "plain_text",
-            "content": "配置名字"
+            "content": "高级"
           }
         },
         "elements": [
@@ -875,15 +1412,31 @@
             "tag": "div",
             "text": {
               "tag": "plain_text",
-              "content": "下面是给懂配置的同事看的名字。平时不用看。\n\n1. 用量周报：report.enabled\n2. 知识检索：knowledge.enabled\n3. 记忆成长：memory.growth.enabled\n4. 早间待办：digest.enabled\n5. 断线提醒：alerts.enabled\n6. 技能：skills.enabled\n7. 复盘写回：memory.retrospect.enabled\n8. 技能改进：skills.evolve.enabled\n9. 主理人：agent.crew.enabled\n\n文件名：示例配置.json\n密钥、模型接口、谁可以私聊，都不能在对话里改。"
+              "content": "配置名字"
+            }
+          },
+          {
+            "tag": "div",
+            "text": {
+              "tag": "plain_text",
+              "content": "下面是给懂配置的同事看的名字。平时不用看。\n\n1. 每周用量小结：report.enabled\n2. 查资料再回答：knowledge.enabled\n3. 记住约定：memory.growth.enabled\n4. 早上发待办：digest.enabled\n5. 断线告诉你：alerts.enabled\n6. 按步骤写稿：skills.enabled\n7. 做完记一笔：memory.retrospect.enabled\n8. 自动优化步骤：skills.evolve.enabled\n9. 复杂问题拆开：agent.crew.enabled\n\n文件名：示例配置.json\n密钥、模型接口、谁可以私聊，都不能在对话里改。"
+            }
+          },
+          {
+            "tag": "div",
+            "text": {
+              "tag": "plain_text",
+              "content": "确认方式"
+            }
+          },
+          {
+            "tag": "div",
+            "text": {
+              "tag": "plain_text",
+              "content": "确认方式现在是点按钮。回复「确认方式」可以更换。确认不能关掉。"
             }
           }
         ]
-      },
-      {
-        "tag": "markdown",
-        "content": "<font color='grey'>确认方式现在是点按钮。回复「确认方式」可以更换。确认不能关掉。</font>",
-        "text_size": "notation"
       },
       {
         "tag": "button",
