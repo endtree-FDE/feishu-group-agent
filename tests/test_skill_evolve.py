@@ -168,7 +168,7 @@ try:
     proposed = feature_switch.handle_text(
         {"write": {"allowed_users": {"user_owner": "主人"}}, "skills": {"enabled": False}},
         menu_base, "第8项", owner(base))
-    check("设置里能点到技能改进", proposed and "技能改进" in proposed["text"], proposed["text"] if proposed else "")
+    check("设置里能点到技能改进", proposed and "技能自动迭代" in proposed["text"], proposed["text"] if proposed else "")
 finally:
     shutil.rmtree(base, ignore_errors=True)
 

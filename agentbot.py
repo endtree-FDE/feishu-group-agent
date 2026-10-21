@@ -625,6 +625,9 @@ def ingest(obj):
     click = confirm_mode.parse_click(obj)
     if click:
         _handle_confirm_click(click); return
+    settings = feature_switch.parse_settings(obj)
+    if settings:
+        _handle_settings_click(settings); return
     card_ev = feature_switch.card_event(obj)
     if card_ev:
         handle(card_ev); return
@@ -1444,9 +1447,9 @@ def _handle_confirm_click(click):
             except Exception:
                 log.warning("confirm card patch failed")
     text = result.get("text") or ""
-    if text and mid:
+    if text and not result.get("quiet") and mid:
         reply(mid, text)
-    elif text:
+    elif text and not result.get("quiet"):
         log.info("confirm click %s", guard.redact(text, REDACT_NAMES)[:200])
     if result.get("restart") and not DRY:
         try:
@@ -1457,19 +1460,59 @@ def _handle_confirm_click(click):
                 reply(mid, feature_switch.abandon(BASE, CFG_PATH))
             return
         lifecycle.request_shutdown(STATE)
-def _finish_switch(mid, switched):
-    """先把这句话发出去，再按需要重启。演练不改文件，也不另起进程。"""
-    reply(mid, switched.get("text") or "")
-    card = switched.get("card")
-    if card and CHANNEL.supports(Cap.CARDS):
+def _send_switch_card(mid, card):
+    if not card or not CHANNEL.supports(Cap.CARDS):
+        return False
+    card = _redact_card(card)
+    if DRY:
+        log.info("[dry-run] card %s: %s", mid, json.dumps(card, ensure_ascii=False)[:800])
+        return True
+    try:
+        CHANNEL.reply_message(mid, "interactive", card, ("sw_" + str(mid))[:50], False)
+    except Exception:
+        log.warning("switch card failed")
+        return False
+    return True
+def _handle_settings_click(action):
+    """设置卡片上的勾选。原地更新这张卡片，不另发一条消息。"""
+    uid = str(action.get("user") or "")
+    chat = str(action.get("chat_id") or "")
+    mid = str(action.get("message_id") or "")
+    if not uid or not chat or not mid:
+        log.info("settings click missing actor"); return
+    try:
+        result = feature_switch.handle_settings(
+            CFG, BASE, action, names=REDACT_NAMES, cfg_path=CFG_PATH)
+    except Exception:
+        log.warning("settings click failed"); return
+    if not isinstance(result, dict):
+        return
+    card = result.get("card")
+    if result.get("patch") and card and CHANNEL.supports(Cap.CARD_UPDATE):
         card = _redact_card(card)
         if DRY:
-            log.info("[dry-run] card %s: %s", mid, json.dumps(card, ensure_ascii=False)[:800])
+            log.info("[dry-run] patch-card %s: %s", mid, json.dumps(card, ensure_ascii=False)[:800])
         else:
             try:
-                CHANNEL.reply_message(mid, "interactive", card, ("sw_" + str(mid))[:50], False)
+                CHANNEL.patch_card(mid, card)
             except Exception:
-                log.warning("switch card failed")
+                log.warning("settings card patch failed")
+    text = result.get("text") or ""
+    if text and not result.get("quiet"):
+        reply(mid, text)
+def _finish_switch(mid, switched):
+    """先把这句话发出去，再按需要重启。演练不改文件，也不另起进程。
+    设置清单在卡片发出去之后不再附带那段说明。"""
+    text = switched.get("text") or ""
+    card = switched.get("card")
+    if switched.get("card_only"):
+        sent = _send_switch_card(mid, card)
+        if text and not sent and not switched.get("quiet"):
+            reply(mid, text)
+    else:
+        if text and not switched.get("quiet"):
+            reply(mid, text)
+        _send_switch_card(mid, card)
     if switched.get("reload_skills"):
         try: TOOLS.skills._scan()
         except Exception: log.warning("skill reload failed")

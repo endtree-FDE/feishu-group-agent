@@ -65,20 +65,16 @@ check("主人含周报、提醒和管理员，旁人不算",
 
 base, path = workdir()
 try:
+    os.environ.pop("AGENTBOT_CARD_CALLBACK", None)
     menu = feature_switch.handle_text(CFG, base, "设置", OWNER, cfg_path=path)
     body = menu["text"]
-    card = menu["card"]
-    visible = []
-    for el in card["body"]["elements"]:
-        if el.get("tag") == "collapsible_panel":
-            continue
-        blob = json.dumps(el, ensure_ascii=False)
-        visible.append(blob)
-    visible_text = "\n".join(visible)
-    check("主人私聊得到清单，主文没有配置术语",
-          menu and "一次只改一项" in body and plain(body) and "回复" in body
-          and all(item["title"] in visible_text for item in feature_switch.FEATURES)
-          and plain(visible_text) and "第 1 项" in visible_text, body)
+    check("回调没连上时只回精简序号，不先发长文，也不带卡片",
+          menu and menu.get("card") is None and "已开" in body and "回复" in body
+          and "先看这一项" not in body and "一次只改一项" not in body
+          and all(item["title"] in body and item["blurb"] in body for item in feature_switch.FEATURES)
+          and all(len(item["blurb"]) <= 16 and not item["blurb"].startswith("开了") for item in feature_switch.FEATURES)
+          and "通知与推送" in body and "回答能力" in body and "记忆与学习" in body
+          and plain(body) and "report.enabled" not in body and "第 1 项" not in body, body)
     detail = feature_switch.handle_text(CFG, base, "详细", OWNER, cfg_path=path)
     check("详细里才出现开关名字", "report.enabled" in detail["text"] and "bot.json" in detail["text"])
     group = feature_switch.handle_text(CFG, base, "怎么开知识库", GROUP)
@@ -268,7 +264,7 @@ check("如果一下出现两个进程，结果标成不是单个",
 
 hello = feature_switch.welcome_text(CFG)
 check("新手介绍只讲能做什么和建议先开哪几项",
-      "断线提醒" in hello and "用量周报" in hello and "设置" in hello and "早间待办" in hello and plain(hello) and "群" in hello)
+      "离线告警" in hello and "用量周报" in hello and "设置" in hello and "每日待办推送" in hello and plain(hello) and "群" in hello)
 sent = []
 
 
@@ -325,7 +321,7 @@ try:
     proposed = feature_switch.handle_text(CFG, base, turned["content"], OWNER, cfg_path=path) if turned else None
     check("按钮和回复序号一样，先给确认码；普通消息不是按钮",
           turned and turned["content"] == "第5项" and normal is None and proposed and "确认 " in proposed["text"]
-          and "断线提醒" in proposed["text"], proposed["text"] if proposed else "")
+          and "离线告警" in proposed["text"], proposed["text"] if proposed else "")
 finally:
     shutil.rmtree(base, ignore_errors=True)
 
@@ -425,7 +421,8 @@ try:
     check("演练：群成员和旁人看不到配置，主人能看到清单和确认码",
           proc.returncode == 0 and "主人" in g_reply and "私聊" in g_reply and plain(g_reply)
           and "只有主人" in s_reply and plain(s_reply)
-          and "一次只改一项" in o_reply and "[dry-run] card p1:" in out
+          and "已开" in o_reply and "回复" in o_reply and "先看这一项" not in o_reply
+          and "[dry-run] card p1:" not in out
           and code and "agent start p1" not in out and "agent start g1" not in out, out[-800:])
     check("演练：别人和别的会话不能确认；本人确认也不改文件、不重启",
           proc2.returncode == 0 and "只有你本人" in reply2("p3") and "只有你本人" in reply2("p4")
@@ -434,6 +431,289 @@ try:
           and "ou_owner1" not in logged, reply2("p5") + "\n" + logged[-400:])
 finally:
     shutil.rmtree(run, ignore_errors=True)
+
+def _walk(node, acc=None):
+    acc = [] if acc is None else acc
+    if isinstance(node, dict):
+        acc.append(node)
+        for val in node.values():
+            _walk(val, acc)
+    elif isinstance(node, list):
+        for item in node:
+            _walk(item, acc)
+    return acc
+
+
+def _visible(card):
+    parts = []
+    for el in (card or {}).get("body", {}).get("elements", []):
+        if el.get("tag") == "collapsible_panel":
+            continue
+        parts.append(json.dumps(el, ensure_ascii=False))
+    return "\n".join(parts)
+
+
+def _panel_text(card, title):
+    for el in _walk(card):
+        if el.get("tag") != "collapsible_panel":
+            continue
+        header = ((el.get("header") or {}).get("title") or {}).get("content") or ""
+        if header == title:
+            return json.dumps(el, ensure_ascii=False)
+    return ""
+
+
+def _confirm_value(card, op):
+    for el in _walk(card):
+        if el.get("tag") != "button":
+            continue
+        val = ((el.get("behaviors") or [{}])[0].get("value") or {})
+        if val.get("kind") == "write_confirm" and val.get("op") == op:
+            return val
+    return None
+
+
+def _settings_event(op, switch="", mid="om_set1"):
+    value = {"kind": "settings", "op": op}
+    if switch:
+        value["switch"] = switch
+    return {"header": {"event_type": "card.action.trigger", "event_id": "evt_" + mid},
+            "event": {"operator": {"open_id": "ou_owner1"},
+                      "action": {"value": value},
+                      "context": {"open_chat_id": "oc_p2p1", "open_message_id": mid}}}
+
+
+os.environ["AGENTBOT_CARD_CALLBACK"] = "1"
+base, path = workdir()
+try:
+    menu = feature_switch.handle_text(CFG, base, "设置", OWNER, cfg_path=path)
+    shown = menu["card"]
+    visible = _visible(shown)
+    names = _panel_text(shown, "高级")
+    tags = [el for el in _walk(shown) if el.get("tag") == "checker"]
+    columns = [el for el in _walk(shown) if el.get("tag") == "column_set"]
+    labels = [((el.get("text") or {}).get("content") or "") for el in _walk(shown) if el.get("tag") == "button"]
+    icons = [el.get("icon", {}).get("token") for el in _walk(shown) if isinstance(el.get("icon"), dict)]
+    names_panel = _panel_text(shown, "高级")
+    check("卡片回调连上时只准备一张紧凑卡片，文字留着但标记为不另发",
+          menu.get("card_only") and shown and shown.get("schema") == "2.0"
+          and menu.get("callback", {}).get("card", {}).get("type") == "raw"
+          and menu["callback"]["card"]["data"] is shown
+          and "已开 0/9" in visible and "v" + feature_switch.product_version() in visible
+          and "在线" in visible
+          and ((shown.get("header") or {}).get("subtitle") or {}).get("content") == "变更需确认后生效"
+          and all(name in visible for name in ("通知与推送", "回答能力", "记忆与学习"))
+          and all(item["title"] in visible and item["blurb"] in visible for item in feature_switch.FEATURES)
+          and "需先启用「技能」" in visible
+          and len(tags) == len(feature_switch.FEATURES) and columns
+          and all(((el.get("text") or {}).get("content") or "") == "" for el in tags)
+          and "详情" not in labels and "收起" not in labels and "?" not in labels
+          and "right_outlined" in icons and "ellipse_outlined" in icons
+          and "保存 0 项改动" in labels
+          and "全部推荐设置" in visible and "第 1 项" not in visible and "先看这一项" not in visible
+          and ">开<" not in visible and ">关<" not in visible
+          and all(item["symbol"] in icons for item in feature_switch.FEATURES)
+          and "setting_outlined" in icons
+          and any(el.get("tag") == "column" and el.get("width") == "16px" for el in _walk(shown))
+          and "rgba(255, 149, 0, 0.16)" in visible
+          and plain(visible) and "report.enabled" not in visible
+          and "report.enabled" in names and "配置名字" in names and "确认方式" in names
+          and names_panel and '"expanded": false' in names
+          and _confirm_value(shown, "yes") is None, visible[:500])
+    stranger = feature_switch.handle_settings(
+        CFG, base, {"user": "user_other", "chat_id": "oc_p2p1", "message_id": "om_set1", "op": "stage", "switch": "report"},
+        cfg_path=path)
+    check("旁人点开关不能改，配置不动",
+          stranger and "只有主人" in stranger["text"] and json.load(open(path, encoding="utf-8"))["report"]["enabled"] is False)
+    parsed = feature_switch.parse_settings(_settings_event("stage", "report"))
+    import confirm_mode
+    legacy = {"header": {"event_type": "card.action.trigger", "event_id": "evt_old"},
+              "event": {"operator": {"open_id": "ou_owner1"},
+                        "action": {"value": {"switch": "alerts", "op": "flip"}},
+                        "context": {"open_chat_id": "oc_p2p1", "open_message_id": "om_old"}}}
+    turned = feature_switch.card_event(legacy)
+    check("设置勾选不是写入确认，旧的第 N 项按钮仍能转成序号",
+          parsed and parsed["op"] == "stage" and confirm_mode.parse_click(_settings_event("stage", "report")) is None
+          and turned and turned["content"] == "第5项")
+    staged = feature_switch.handle_settings(CFG, base, parsed, cfg_path=path)
+    staged_card = staged["card"]
+    yes = _confirm_value(staged_card, "yes")
+    no = _confirm_value(staged_card, "no")
+    check("点一下只把原卡片改成保存和取消，配置还没写",
+          staged.get("patch") and staged.get("quiet") and staged.get("text") == ""
+          and staged.get("callback", {}).get("card", {}).get("type") == "raw"
+          and yes and no and yes.get("kind") == "write_confirm"
+          and "保存 1 项改动" in json.dumps(staged_card, ensure_ascii=False)
+          and "取消" in json.dumps(staged_card, ensure_ascii=False)
+          and "待保存" in json.dumps(staged_card, ensure_ascii=False)
+          and json.load(open(path, encoding="utf-8"))["report"]["enabled"] is False)
+    tampered = feature_switch.try_click(
+        CFG, base, path, yes["id"], "yes", "0" * 64, OWNER, apply=True, check=lambda _p: ([], []), message_id="om_set1")
+    check("改掉确认哈希不会写入",
+          tampered and "对不上" in tampered["text"] and json.load(open(path, encoding="utf-8"))["report"]["enabled"] is False)
+    old_yes = yes
+    again = feature_switch.handle_settings(CFG, base, feature_switch.parse_settings(_settings_event("stage", "alerts")), cfg_path=path)
+    stale = feature_switch.try_click(
+        CFG, base, path, old_yes["id"], "yes", old_yes["hash"], OWNER, apply=True,
+        check=lambda _p: ([], []), message_id="om_set1")
+    mid = json.load(open(path, encoding="utf-8"))
+    check("勾选第二项后，旧确认按钮不能再生效",
+          again and stale and stale.get("quiet") and mid["report"]["enabled"] is False and mid["alerts"]["enabled"] is False
+          and "待保存" in json.dumps(stale.get("card") or {}, ensure_ascii=False))
+    fresh_yes = _confirm_value(again["card"], "yes")
+    check("两项一起确认时按钮写成保存 2 项改动",
+          fresh_yes and "保存 2 项改动" in json.dumps(again["card"], ensure_ascii=False))
+    bad = feature_switch.try_click(
+        CFG, base, path, fresh_yes["id"], "yes", fresh_yes["hash"], OWNER, apply=True,
+        check=lambda _p: ([("report.enabled", "不要")], []), message_id="om_set1")
+    rolled = json.load(open(path, encoding="utf-8"))
+    check("多项确认检查失败会整份改回，两项都没开",
+          bad and not bad.get("restart") and "没改成" in bad["text"] and "下一步" in bad["text"]
+          and rolled["report"]["enabled"] is False and rolled["alerts"]["enabled"] is False
+          and rolled["model_provider"] == "cursor")
+    feature_switch.handle_text(CFG, base, "设置", OWNER, cfg_path=path)
+    rec = feature_switch.handle_settings(
+        CFG, base, feature_switch.parse_settings(_settings_event("recommend", mid="om_rec")), cfg_path=path)
+    rec_yes = _confirm_value(rec["card"], "yes")
+    rec_no = _confirm_value(rec["card"], "no")
+    stopped = feature_switch.try_click(
+        CFG, base, path, rec_no["id"], "no", rec_no["hash"], OWNER, apply=True, message_id="om_rec")
+    after_cancel = json.load(open(path, encoding="utf-8"))
+    check("取消推荐设置不写配置，卡片回到清单",
+          rec_yes and stopped and stopped.get("quiet") and stopped.get("text") == ""
+          and after_cancel["report"]["enabled"] is False and after_cancel["alerts"]["enabled"] is False
+          and "全部推荐设置" in json.dumps(stopped.get("card") or {}, ensure_ascii=False))
+    feature_switch.handle_text(CFG, base, "设置", OWNER, cfg_path=path)
+    rec = feature_switch.handle_settings(
+        CFG, base, feature_switch.parse_settings(_settings_event("recommend", mid="om_rec2")), cfg_path=path)
+    rec_yes = _confirm_value(rec["card"], "yes")
+    before = open(path, "rb").read()
+    applied = feature_switch.try_click(
+        CFG, base, path, rec_yes["id"], "yes", rec_yes["hash"], OWNER, apply=True,
+        check=lambda _p: ([], []), message_id="om_rec2")
+    changed = json.load(open(path, encoding="utf-8"))
+    backup = open(os.path.join(base, "state", "config-backups", "latest.json"), "rb").read()
+    check("确认推荐设置后备份并打开这两项，其它开关和模型不动",
+          applied and applied.get("restart") and changed["alerts"]["enabled"] is True
+          and changed["report"]["enabled"] is True and changed["knowledge"]["enabled"] is False
+          and changed["digest"]["enabled"] is False and changed["agent"] == CFG["agent"]
+          and changed["p2p"]["open_to_all"] is False and backup == before)
+    asked = feature_switch.handle_settings(
+        changed, base, feature_switch.parse_settings(_settings_event("help", "digest", "om_help")), cfg_path=path)
+    asked_raw = json.dumps(asked["card"], ensure_ascii=False)
+    asked_labels = [((el.get("text") or {}).get("content") or "") for el in _walk(asked["card"]) if el.get("tag") == "button"]
+    asked_icons = [el.get("icon", {}).get("token") for el in _walk(asked["card"]) if isinstance(el.get("icon"), dict)]
+    check("箭头展开这一项的说明，高级仍折着",
+          asked and asked.get("patch") and "主动发到群里" in asked_raw
+          and "down_outlined" in asked_icons and "详情" not in asked_labels and "收起" not in asked_labels
+          and "?" not in asked_labels
+          and _panel_text(asked["card"], "高级") and "digest.enabled" in _panel_text(asked["card"], "高级")
+          and "digest.enabled" not in _visible(asked["card"]))
+finally:
+    os.environ.pop("AGENTBOT_CARD_CALLBACK", None)
+    shutil.rmtree(base, ignore_errors=True)
+
+base, path = workdir()
+try:
+    os.environ.pop("AGENTBOT_CARD_CALLBACK", None)
+    feature_switch.handle_text(CFG, base, "设置", OWNER, cfg_path=path)
+    many = feature_switch.handle_text(CFG, base, "1 5", OWNER, cfg_path=path)
+    code = [line.split()[-1] for line in many["text"].splitlines() if line.startswith("确认 ")]
+    check("文字回退可以一次报两个序号",
+          many and code and "用量周报" in many["text"] and "离线告警" in many["text"] and plain(many["text"].replace(code[0], "")))
+    done = feature_switch.try_confirm(CFG, base, path, code[0], OWNER, apply=True, check=lambda _p: ([], []))
+    both = json.load(open(path, encoding="utf-8"))
+    check("一次确认两个序号会一起写入并要求重启",
+          done and done.get("restart") and both["report"]["enabled"] is True and both["alerts"]["enabled"] is True
+          and both["knowledge"]["enabled"] is False)
+    feature_switch.handle_text(both, base, "设置", OWNER, cfg_path=path)
+    zero = feature_switch.handle_text(both, base, "0", OWNER, cfg_path=path)
+    check("推荐项已经开着时，回复 0 不再提议",
+          zero and "已经开着" in zero["text"] and not zero.get("restart"))
+    evolve_cfg = json.load(open(path, encoding="utf-8"))
+    feature_switch.handle_text(evolve_cfg, base, "设置", OWNER, cfg_path=path)
+    proposed = feature_switch.handle_text(evolve_cfg, base, "第8项", OWNER, cfg_path=path)
+    code = [line.split()[-1] for line in proposed["text"].splitlines() if line.startswith("确认 ")][0]
+    opened = feature_switch.try_confirm(evolve_cfg, base, path, code, OWNER, apply=True, check=lambda _p: ([], []))
+    evolved = json.load(open(path, encoding="utf-8"))
+    check("确认技能改进会打开技能，不会当成替换技能文件",
+          opened and opened.get("restart") and evolved["skills"]["enabled"] is True
+          and evolved["skills"]["evolve"]["enabled"] is True and "技能文件" not in opened["text"])
+    named = feature_switch.handle_text(evolved, base, "打开技能改进", OWNER, cfg_path=path)
+    check("旧说法技能改进仍指向技能自动迭代",
+          named and "技能自动迭代" in named["text"] and "已经是开着" in named["text"])
+finally:
+    shutil.rmtree(base, ignore_errors=True)
+
+base, path = workdir()
+try:
+    os.environ["AGENTBOT_CARD_CALLBACK"] = "1"
+    feature_switch.handle_text(CFG, base, "设置", OWNER, cfg_path=path)
+    locked = feature_switch.handle_settings(
+        CFG, base, feature_switch.parse_settings(_settings_event("stage", "skill_evolve", "om_lock")),
+        cfg_path=path)
+    locked_raw = json.dumps(locked.get("card") or {}, ensure_ascii=False)
+    still = json.load(open(path, encoding="utf-8"))
+    check("父项关着时点技能自动迭代不会记下，也不会写入",
+          locked and locked.get("toast") == "请先启用技能"
+          and locked.get("patch") and "保存 0 项改动" in locked_raw
+          and "保存 1 项改动" not in locked_raw
+          and still["skills"]["enabled"] is False and "evolve" not in still["skills"])
+    both = json.loads(json.dumps(CFG))
+    both["skills"] = {"enabled": True, "evolve": {"enabled": True}}
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(both, handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
+    feature_switch.handle_text(both, base, "设置", OWNER, cfg_path=path)
+    staged = feature_switch.handle_settings(
+        both, base, feature_switch.parse_settings(_settings_event("stage", "skills", "om_parent")),
+        cfg_path=path)
+    staged_raw = json.dumps(staged.get("card") or {}, ensure_ascii=False)
+    mid = json.load(open(path, encoding="utf-8"))
+    yes = _confirm_value(staged["card"], "yes")
+    check("关掉技能时，技能自动迭代一起待保存，配置先不写",
+          staged and yes and "保存 2 项改动" in staged_raw
+          and "关掉技能（工作流）" in staged_raw and "关掉技能自动迭代" in staged_raw
+          and mid["skills"]["enabled"] is True and mid["skills"]["evolve"]["enabled"] is True)
+    applied = feature_switch.try_click(
+        both, base, path, yes["id"], "yes", yes["hash"], OWNER, apply=True,
+        check=lambda _p: ([], []), message_id="om_parent")
+    after = json.load(open(path, encoding="utf-8"))
+    check("保存后父项和子项一起关掉",
+          applied and applied.get("restart") and after["skills"]["enabled"] is False
+          and after["skills"]["evolve"]["enabled"] is False)
+finally:
+    os.environ.pop("AGENTBOT_CARD_CALLBACK", None)
+    shutil.rmtree(base, ignore_errors=True)
+
+
+demo = os.path.join(FW, "docs", "demo")
+listing = json.load(open(os.path.join(demo, "switch-card.example.json"), encoding="utf-8"))
+confirming = json.load(open(os.path.join(demo, "switch-card-confirm.example.json"), encoding="utf-8"))
+colored = json.load(open(os.path.join(demo, "switch-card-b.example.json"), encoding="utf-8"))
+sample = json.dumps({"listing": listing, "confirming": confirming, "colored": colored}, ensure_ascii=False)
+shown = _visible(listing)
+colored_shown = _visible(colored)
+keys = _panel_text(listing, "高级")
+check("仓库里的示例卡片和确认态都是这张紧凑卡，没有真实身份",
+      listing.get("schema") == "2.0" and confirming.get("schema") == "2.0" and colored.get("schema") == "2.0"
+      and listing.get("config", {}).get("update_multi") is True
+      and "已开 6/9" in shown and "全部推荐设置" in shown
+      and all(name in shown for name in ("通知与推送", "回答能力", "记忆与学习"))
+      and "用量周报" in shown and "技能自动迭代" in shown and "技能（工作流）" in shown
+      and ((listing.get("header") or {}).get("subtitle") or {}).get("content") == "变更需确认后生效"
+      and len([el for el in _walk(listing) if el.get("tag") == "checker"]) == 9
+      and _confirm_value(listing, "yes") is None
+      and "report.enabled" not in shown and "report.enabled" in keys and "配置名字" in keys
+      and "第 1 项" not in shown and "详情" not in shown and "right_outlined" in shown
+      and "rgba(255, 149, 0, 0.08)" not in shown
+      and "rgba(255, 149, 0, 0.08)" in colored_shown and "用量周报" in colored_shown
+      and "保存 2 项改动" in json.dumps(confirming, ensure_ascii=False)
+      and "全部推荐设置" in json.dumps(confirming, ensure_ascii=False)
+      and "每日待办推送会发到群里" in json.dumps(confirming, ensure_ascii=False)
+      and "sheet-histogram_outlined" in shown and "📊" not in shown
+      and "example-token-not-real" in sample and "ou_" not in sample and "secret" not in sample.lower())
+
 
 if any(not ok for _name, ok in results):
     print("%d failed" % sum(1 for _n, ok in results if not ok))
