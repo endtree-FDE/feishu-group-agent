@@ -72,8 +72,8 @@ try:
           menu and menu.get("card") is None and "已开" in body and "回复" in body
           and "先看这一项" not in body and "一次只改一项" not in body
           and all(item["title"] in body and item["blurb"] in body for item in feature_switch.FEATURES)
-          and all(len(item["blurb"]) <= 24 for item in feature_switch.FEATURES)
-          and "会主动找你" in body and "回答时会用" in body and "会慢慢变聪明" in body
+          and all(len(item["blurb"]) <= 16 and not item["blurb"].startswith("开了") for item in feature_switch.FEATURES)
+          and "通知与推送" in body and "回答能力" in body and "记忆与学习" in body
           and plain(body) and "report.enabled" not in body and "第 1 项" not in body, body)
     detail = feature_switch.handle_text(CFG, base, "详细", OWNER, cfg_path=path)
     check("详细里才出现开关名字", "report.enabled" in detail["text"] and "bot.json" in detail["text"])
@@ -264,7 +264,7 @@ check("如果一下出现两个进程，结果标成不是单个",
 
 hello = feature_switch.welcome_text(CFG)
 check("新手介绍只讲能做什么和建议先开哪几项",
-      "断线提醒" in hello and "用量周报" in hello and "设置" in hello and "早间待办" in hello and plain(hello) and "群" in hello)
+      "离线告警" in hello and "用量周报" in hello and "设置" in hello and "每日待办推送" in hello and plain(hello) and "群" in hello)
 sent = []
 
 
@@ -321,7 +321,7 @@ try:
     proposed = feature_switch.handle_text(CFG, base, turned["content"], OWNER, cfg_path=path) if turned else None
     check("按钮和回复序号一样，先给确认码；普通消息不是按钮",
           turned and turned["content"] == "第5项" and normal is None and proposed and "确认 " in proposed["text"]
-          and "断线告诉你" in proposed["text"], proposed["text"] if proposed else "")
+          and "离线告警" in proposed["text"], proposed["text"] if proposed else "")
 finally:
     shutil.rmtree(base, ignore_errors=True)
 
@@ -500,9 +500,11 @@ try:
           and menu.get("callback", {}).get("card", {}).get("type") == "raw"
           and menu["callback"]["card"]["data"] is shown
           and "已开 0/9" in visible and "v" + feature_switch.product_version() in visible
-          and "在线" in visible and all(name in visible for name in ("会主动找你", "回答时会用", "会慢慢变聪明"))
+          and "在线" in visible
+          and ((shown.get("header") or {}).get("subtitle") or {}).get("content") == "变更需确认后生效"
+          and all(name in visible for name in ("通知与推送", "回答能力", "记忆与学习"))
           and all(item["title"] in visible and item["blurb"] in visible for item in feature_switch.FEATURES)
-          and "先打开「按步骤写稿」" in visible
+          and "需先启用「技能」" in visible
           and len(tags) == len(feature_switch.FEATURES) and columns
           and all(((el.get("text") or {}).get("content") or "") == "" for el in tags)
           and "详情" not in labels and "收起" not in labels and "?" not in labels
@@ -618,7 +620,7 @@ try:
     many = feature_switch.handle_text(CFG, base, "1 5", OWNER, cfg_path=path)
     code = [line.split()[-1] for line in many["text"].splitlines() if line.startswith("确认 ")]
     check("文字回退可以一次报两个序号",
-          many and code and "每周用量小结" in many["text"] and "断线告诉你" in many["text"] and plain(many["text"].replace(code[0], "")))
+          many and code and "用量周报" in many["text"] and "离线告警" in many["text"] and plain(many["text"].replace(code[0], "")))
     done = feature_switch.try_confirm(CFG, base, path, code[0], OWNER, apply=True, check=lambda _p: ([], []))
     both = json.load(open(path, encoding="utf-8"))
     check("一次确认两个序号会一起写入并要求重启",
@@ -638,8 +640,8 @@ try:
           opened and opened.get("restart") and evolved["skills"]["enabled"] is True
           and evolved["skills"]["evolve"]["enabled"] is True and "技能文件" not in opened["text"])
     named = feature_switch.handle_text(evolved, base, "打开技能改进", OWNER, cfg_path=path)
-    check("旧说法技能改进仍指向自动优化步骤",
-          named and "自动优化步骤" in named["text"] and "已经是开着" in named["text"])
+    check("旧说法技能改进仍指向技能自动迭代",
+          named and "技能自动迭代" in named["text"] and "已经是开着" in named["text"])
 finally:
     shutil.rmtree(base, ignore_errors=True)
 
@@ -652,8 +654,8 @@ try:
         cfg_path=path)
     locked_raw = json.dumps(locked.get("card") or {}, ensure_ascii=False)
     still = json.load(open(path, encoding="utf-8"))
-    check("父项关着时点自动优化步骤不会记下，也不会写入",
-          locked and locked.get("toast") == "请先打开按步骤写稿"
+    check("父项关着时点技能自动迭代不会记下，也不会写入",
+          locked and locked.get("toast") == "请先启用技能"
           and locked.get("patch") and "保存 0 项改动" in locked_raw
           and "保存 1 项改动" not in locked_raw
           and still["skills"]["enabled"] is False and "evolve" not in still["skills"])
@@ -669,9 +671,9 @@ try:
     staged_raw = json.dumps(staged.get("card") or {}, ensure_ascii=False)
     mid = json.load(open(path, encoding="utf-8"))
     yes = _confirm_value(staged["card"], "yes")
-    check("关掉按步骤写稿时，自动优化步骤一起待保存，配置先不写",
+    check("关掉技能时，技能自动迭代一起待保存，配置先不写",
           staged and yes and "保存 2 项改动" in staged_raw
-          and "关掉按步骤写稿" in staged_raw and "关掉自动优化步骤" in staged_raw
+          and "关掉技能（工作流）" in staged_raw and "关掉技能自动迭代" in staged_raw
           and mid["skills"]["enabled"] is True and mid["skills"]["evolve"]["enabled"] is True)
     applied = feature_switch.try_click(
         both, base, path, yes["id"], "yes", yes["hash"], OWNER, apply=True,
@@ -697,17 +699,18 @@ check("仓库里的示例卡片和确认态都是这张紧凑卡，没有真实�
       listing.get("schema") == "2.0" and confirming.get("schema") == "2.0" and colored.get("schema") == "2.0"
       and listing.get("config", {}).get("update_multi") is True
       and "已开 6/9" in shown and "全部推荐设置" in shown
-      and all(name in shown for name in ("会主动找你", "回答时会用", "会慢慢变聪明"))
-      and "每周用量小结" in shown and "自动优化步骤" in shown and "按步骤写稿" in shown
+      and all(name in shown for name in ("通知与推送", "回答能力", "记忆与学习"))
+      and "用量周报" in shown and "技能自动迭代" in shown and "技能（工作流）" in shown
+      and ((listing.get("header") or {}).get("subtitle") or {}).get("content") == "变更需确认后生效"
       and len([el for el in _walk(listing) if el.get("tag") == "checker"]) == 9
       and _confirm_value(listing, "yes") is None
       and "report.enabled" not in shown and "report.enabled" in keys and "配置名字" in keys
       and "第 1 项" not in shown and "详情" not in shown and "right_outlined" in shown
       and "rgba(255, 149, 0, 0.08)" not in shown
-      and "rgba(255, 149, 0, 0.08)" in colored_shown and "每周用量小结" in colored_shown
+      and "rgba(255, 149, 0, 0.08)" in colored_shown and "用量周报" in colored_shown
       and "保存 2 项改动" in json.dumps(confirming, ensure_ascii=False)
       and "全部推荐设置" in json.dumps(confirming, ensure_ascii=False)
-      and "早上发待办会发到群里" in json.dumps(confirming, ensure_ascii=False)
+      and "每日待办推送会发到群里" in json.dumps(confirming, ensure_ascii=False)
       and "sheet-histogram_outlined" in shown and "📊" not in shown
       and "example-token-not-real" in sample and "ou_" not in sample and "secret" not in sample.lower())
 

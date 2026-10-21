@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="400" height="950" viewBox="0 0 400 950">
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="918" viewBox="0 0 400 918">
 <style>@font-face{font-family:"Noto Sans CJK SC";src:url("file:///home/ubuntu/.local/share/fonts/noto/NotoSansCJKsc-Regular.otf");font-weight:400;}@font-face{font-family:"Noto Sans CJK SC";src:url("file:///home/ubuntu/.local/share/fonts/noto/NotoSansCJKsc-Medium.otf");font-weight:500;}</style>
 <rect width="100%" height="100%" fill="#F2F3F5"/>
 <defs><filter id="shadow" x="-10%" y="-10%" width="120%" height="120%"><feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="#1f2329" flood-opacity="0.08"/></filter></defs>
-<rect x="20.0" y="20" width="360.0" height="910.0" rx="12" fill="#fff" filter="url(#shadow)"/>
+<rect x="20.0" y="20" width="360.0" height="878.0" rx="12" fill="#fff" filter="url(#shadow)"/>
 <clipPath id="cardclip"><rect x="20.0" y="20" width="360.0" height="64" rx="12"/></clipPath>
 <rect x="20.0" y="20" width="360.0" height="64" fill="#3370FF" clip-path="url(#cardclip)"/>
 <rect x="20.0" y="72" width="360.0" height="12" fill="#3370FF"/>
 <g transform="translate(36.0 40.0)" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round"><circle cx="8" cy="8" r="2.4"/><path d="M8 1.8v2.2M8 12v2.2M1.8 8h2.2M12 8h2.2M3.4 3.4l1.6 1.6M11 11l1.6 1.6M3.4 12.6L5 11M11 5l1.6-1.6"/></g>
 <text x="64.0" y="50" fill="#fff" font-family="Noto Sans CJK SC" font-size="17" font-weight="500">设置</text>
-<text x="64.0" y="70" fill="rgba(255,255,255,0.86)" font-family="Noto Sans CJK SC" font-size="12">确认后才写入</text>
+<text x="64.0" y="70" fill="rgba(255,255,255,0.86)" font-family="Noto Sans CJK SC" font-size="12">变更需确认后生效</text>
 
 <rect x="32.0" y="96.0" width="336.0" height="86" rx="10" fill="rgba(31, 35, 41, 0.05)"/>
 <text x="46.0" y="132.0" fill="#1F2329" font-family="Noto Sans CJK SC" font-size="28" font-weight="500" text-anchor="start">6</text>
@@ -27,83 +27,80 @@
 <rect x="288.7" y="164.0" width="30.7" height="6" rx="3" fill="rgba(142, 142, 147, 0.28)"/>
 <rect x="323.3" y="164.0" width="30.7" height="6" rx="3" fill="rgba(52, 199, 89, 0.90)"/>
 <line x1="32.0" y1="194.0" x2="368.0" y2="194.0" stroke="rgba(31, 35, 41, 0.08)" stroke-width="1"/>
-<text x="34.0" y="218.0" fill="#8F959E" font-family="Noto Sans CJK SC" font-size="12" font-weight="500" text-anchor="start">会主动找你</text>
+<text x="34.0" y="218.0" fill="#8F959E" font-family="Noto Sans CJK SC" font-size="12" font-weight="500" text-anchor="start">通知与推送</text>
 <rect x="34.0" y="237.0" width="28" height="28" rx="8" fill="rgba(255, 149, 0, 0.16)"/>
 <g transform="translate(40.0 243.0)"><path fill="none" stroke="#E68600" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M3 13V8M8 13V3.5M13 13V6"/></g>
-<text x="72.0" y="249.0" fill="#1F2329" font-family="Noto Sans CJK SC" font-size="15" font-weight="500" text-anchor="start">每周用量小结</text>
-<text x="72.0" y="269.0" fill="#8F959E" font-family="Noto Sans CJK SC" font-size="12" font-weight="400" text-anchor="start">开了会每周私聊你一份用量合计</text>
+<text x="72.0" y="249.0" fill="#1F2329" font-family="Noto Sans CJK SC" font-size="15" font-weight="500" text-anchor="start">用量周报</text>
+<text x="72.0" y="269.0" fill="#8F959E" font-family="Noto Sans CJK SC" font-size="12" font-weight="400" text-anchor="start">每周汇总用量并私聊送达</text>
 <path d="M326.0 244.0 l4 4 -4 4" fill="none" stroke="#8F959E" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
 <rect x="348.0" y="242.0" width="18" height="18" rx="5" fill="#3370FF"/>
 <path d="M351.4 251.0 l3.2 3.2 6-6" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
 <line x1="34.0" y1="278.0" x2="366.0" y2="278.0" stroke="rgba(31, 35, 41, 0.08)" stroke-width="1"/>
 <rect x="34.0" y="288.0" width="28" height="28" rx="8" fill="rgba(255, 149, 0, 0.16)"/>
 <g transform="translate(40.0 294.0)"><rect fill="none" stroke="#E68600" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" x="2.5" y="3.5" width="11" height="10" rx="1.6"/><path fill="none" stroke="#E68600" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M2.5 7h11M5.5 2.5v2.5M10.5 2.5v2.5"/></g>
-<text x="72.0" y="300.0" fill="#1F2329" font-family="Noto Sans CJK SC" font-size="15" font-weight="500" text-anchor="start">早上发待办</text>
-<text x="72.0" y="320.0" fill="#8F959E" font-family="Noto Sans CJK SC" font-size="12" font-weight="400" text-anchor="start">开了会在早上往群里发今天的日程</text>
+<text x="72.0" y="300.0" fill="#1F2329" font-family="Noto Sans CJK SC" font-size="15" font-weight="500" text-anchor="start">每日待办推送</text>
+<text x="72.0" y="320.0" fill="#8F959E" font-family="Noto Sans CJK SC" font-size="12" font-weight="400" text-anchor="start">每日向群推送当日日程</text>
 <path d="M326.0 295.0 l4 4 -4 4" fill="none" stroke="#8F959E" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
 <rect x="348.0" y="293.0" width="18" height="18" rx="5" fill="#fff" stroke="#C9CDD4" stroke-width="1.4"/>
 <line x1="34.0" y1="329.0" x2="366.0" y2="329.0" stroke="rgba(31, 35, 41, 0.08)" stroke-width="1"/>
 <rect x="34.0" y="339.0" width="28" height="28" rx="8" fill="rgba(255, 149, 0, 0.16)"/>
 <g transform="translate(40.0 345.0)"><path fill="none" stroke="#E68600" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M8 2.5a4 4 0 0 0-4 4V9l-1.2 1.8h10.4L12 9V6.5a4 4 0 0 0-4-4zM6.6 12.2a1.5 1.5 0 0 0 2.8 0"/></g>
-<text x="72.0" y="351.0" fill="#1F2329" font-family="Noto Sans CJK SC" font-size="15" font-weight="500" text-anchor="start">断线告诉你</text>
-<text x="72.0" y="371.0" fill="#8F959E" font-family="Noto Sans CJK SC" font-size="12" font-weight="400" text-anchor="start">开了连不上时会私聊你</text>
+<text x="72.0" y="351.0" fill="#1F2329" font-family="Noto Sans CJK SC" font-size="15" font-weight="500" text-anchor="start">离线告警</text>
+<text x="72.0" y="371.0" fill="#8F959E" font-family="Noto Sans CJK SC" font-size="12" font-weight="400" text-anchor="start">连接中断时私聊告警</text>
 <path d="M326.0 346.0 l4 4 -4 4" fill="none" stroke="#8F959E" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
 <rect x="348.0" y="344.0" width="18" height="18" rx="5" fill="#3370FF"/>
 <path d="M351.4 353.0 l3.2 3.2 6-6" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-<text x="34.0" y="404.0" fill="#8F959E" font-family="Noto Sans CJK SC" font-size="12" font-weight="500" text-anchor="start">回答时会用</text>
+<text x="34.0" y="404.0" fill="#8F959E" font-family="Noto Sans CJK SC" font-size="12" font-weight="500" text-anchor="start">回答能力</text>
 <rect x="34.0" y="423.0" width="28" height="28" rx="8" fill="rgba(0, 122, 255, 0.14)"/>
 <g transform="translate(40.0 429.0)"><path fill="none" stroke="#007AFF" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M3 3.2h4.2a2 2 0 0 1 2 2V13a2 2 0 0 0-2-1.6H3zM13 3.2H8.8a2 2 0 0 0-2 2V13a2 2 0 0 1 2-1.6H13z"/></g>
-<text x="72.0" y="435.0" fill="#1F2329" font-family="Noto Sans CJK SC" font-size="15" font-weight="500" text-anchor="start">查资料再回答</text>
-<text x="72.0" y="455.0" fill="#8F959E" font-family="Noto Sans CJK SC" font-size="12" font-weight="400" text-anchor="start">开了提问时会用群里的资料，并写上来源</text>
+<text x="72.0" y="435.0" fill="#1F2329" font-family="Noto Sans CJK SC" font-size="15" font-weight="500" text-anchor="start">知识库问答</text>
+<text x="72.0" y="455.0" fill="#8F959E" font-family="Noto Sans CJK SC" font-size="12" font-weight="400" text-anchor="start">检索群资料并标注来源</text>
 <path d="M326.0 430.0 l4 4 -4 4" fill="none" stroke="#8F959E" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
 <rect x="348.0" y="428.0" width="18" height="18" rx="5" fill="#fff" stroke="#C9CDD4" stroke-width="1.4"/>
 <line x1="34.0" y1="464.0" x2="366.0" y2="464.0" stroke="rgba(31, 35, 41, 0.08)" stroke-width="1"/>
 <rect x="34.0" y="474.0" width="28" height="28" rx="8" fill="rgba(0, 122, 255, 0.14)"/>
 <g transform="translate(40.0 480.0)"><path fill="none" stroke="#007AFF" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M3 4.5h10M3 8h10M3 11.5h6M10.2 11.2l1.2 1.2 2.2-2.6"/></g>
-<text x="72.0" y="486.0" fill="#1F2329" font-family="Noto Sans CJK SC" font-size="15" font-weight="500" text-anchor="start">按步骤写稿</text>
-<text x="72.0" y="506.0" fill="#8F959E" font-family="Noto Sans CJK SC" font-size="12" font-weight="400" text-anchor="start">开了写稿、做纪要会按现成步骤来</text>
+<text x="72.0" y="486.0" fill="#1F2329" font-family="Noto Sans CJK SC" font-size="15" font-weight="500" text-anchor="start">技能（工作流）</text>
+<text x="72.0" y="506.0" fill="#8F959E" font-family="Noto Sans CJK SC" font-size="12" font-weight="400" text-anchor="start">按既定流程处理写稿与纪要</text>
 <path d="M326.0 481.0 l4 4 -4 4" fill="none" stroke="#8F959E" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
 <rect x="348.0" y="479.0" width="18" height="18" rx="5" fill="#3370FF"/>
 <path d="M351.4 488.0 l3.2 3.2 6-6" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
 <line x1="34.0" y1="515.0" x2="366.0" y2="515.0" stroke="rgba(31, 35, 41, 0.08)" stroke-width="1"/>
 <rect x="50.0" y="525.0" width="28" height="28" rx="8" fill="rgba(0, 122, 255, 0.14)"/>
 <g transform="translate(56.0 531.0)"><path fill="none" stroke="#007AFF" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M12.5 6.2A4.8 4.8 0 1 0 12 10.5"/><path fill="none" stroke="#007AFF" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M12.5 3.2v3.2H9.4"/></g>
-<text x="88.0" y="537.0" fill="#1F2329" font-family="Noto Sans CJK SC" font-size="15" font-weight="500" text-anchor="start"></text>
-<text x="88.0" y="557.0" fill="#8F959E" font-family="Noto Sans CJK SC" font-size="12" font-weight="400" text-anchor="start"></text>
-<text x="88.0" y="573.0" fill="#8F959E" font-family="Noto Sans CJK SC" font-size="12" font-weight="400" text-anchor="start">**自动优化步骤**
-开了会根据记录提议步</text>
-<text x="88.0" y="589.0" fill="#8F959E" font-family="Noto Sans CJK SC" font-size="12" font-weight="400" text-anchor="start">骤的下一版</text>
+<text x="88.0" y="537.0" fill="#1F2329" font-family="Noto Sans CJK SC" font-size="15" font-weight="500" text-anchor="start">技能自动迭代</text>
+<text x="88.0" y="557.0" fill="#8F959E" font-family="Noto Sans CJK SC" font-size="12" font-weight="400" text-anchor="start">依据记录提议流程下一版</text>
 <path d="M326.0 532.0 l4 4 -4 4" fill="none" stroke="#8F959E" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
 <rect x="348.0" y="530.0" width="18" height="18" rx="5" fill="#3370FF"/>
 <path d="M351.4 539.0 l3.2 3.2 6-6" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-<line x1="34.0" y1="598.0" x2="366.0" y2="598.0" stroke="rgba(31, 35, 41, 0.08)" stroke-width="1"/>
-<rect x="34.0" y="608.0" width="28" height="28" rx="8" fill="rgba(0, 122, 255, 0.14)"/>
-<g transform="translate(40.0 614.0)"><circle fill="none" stroke="#007AFF" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" cx="6" cy="6" r="2"/><circle fill="none" stroke="#007AFF" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" cx="11" cy="6.5" r="1.6"/><path fill="none" stroke="#007AFF" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M2.8 13c.4-2 1.7-3 3.2-3s2.8 1 3.2 3M10 10.2c1.2 0 2.2.6 2.6 2"/></g>
-<text x="72.0" y="620.0" fill="#1F2329" font-family="Noto Sans CJK SC" font-size="15" font-weight="500" text-anchor="start">复杂问题拆开</text>
-<text x="72.0" y="640.0" fill="#8F959E" font-family="Noto Sans CJK SC" font-size="12" font-weight="400" text-anchor="start">开了复杂问题会分给查资料、读文档、起草</text>
-<path d="M326.0 615.0 l4 4 -4 4" fill="none" stroke="#8F959E" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-<rect x="348.0" y="613.0" width="18" height="18" rx="5" fill="#3370FF"/>
-<path d="M351.4 622.0 l3.2 3.2 6-6" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-<text x="34.0" y="673.0" fill="#8F959E" font-family="Noto Sans CJK SC" font-size="12" font-weight="500" text-anchor="start">会慢慢变聪明</text>
-<rect x="34.0" y="692.0" width="28" height="28" rx="8" fill="rgba(175, 82, 222, 0.16)"/>
-<g transform="translate(40.0 698.0)"><path fill="none" stroke="#AF52DE" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M4 2.8h6.2L13 5.6V13H4z"/><path fill="none" stroke="#AF52DE" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M10 2.8V6h3M6 8.2h4M6 10.5h3"/></g>
-<text x="72.0" y="704.0" fill="#1F2329" font-family="Noto Sans CJK SC" font-size="15" font-weight="500" text-anchor="start">记住约定</text>
-<text x="72.0" y="724.0" fill="#8F959E" font-family="Noto Sans CJK SC" font-size="12" font-weight="400" text-anchor="start">开了平时看到的约定，点头才记</text>
-<path d="M326.0 699.0 l4 4 -4 4" fill="none" stroke="#8F959E" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-<rect x="348.0" y="697.0" width="18" height="18" rx="5" fill="#fff" stroke="#C9CDD4" stroke-width="1.4"/>
-<line x1="34.0" y1="733.0" x2="366.0" y2="733.0" stroke="rgba(31, 35, 41, 0.08)" stroke-width="1"/>
-<rect x="34.0" y="743.0" width="28" height="28" rx="8" fill="rgba(175, 82, 222, 0.16)"/>
-<g transform="translate(40.0 749.0)"><path fill="none" stroke="#AF52DE" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M9.2 3.2l3.2 3.2L6 12.8H2.8V9.6z"/></g>
-<text x="72.0" y="755.0" fill="#1F2329" font-family="Noto Sans CJK SC" font-size="15" font-weight="500" text-anchor="start">做完记一笔</text>
-<text x="72.0" y="775.0" fill="#8F959E" font-family="Noto Sans CJK SC" font-size="12" font-weight="400" text-anchor="start">开了这一轮做完写一句，点头才记</text>
-<path d="M326.0 750.0 l4 4 -4 4" fill="none" stroke="#8F959E" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-<rect x="348.0" y="748.0" width="18" height="18" rx="5" fill="#3370FF"/>
-<path d="M351.4 757.0 l3.2 3.2 6-6" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-<line x1="32.0" y1="794.0" x2="368.0" y2="794.0" stroke="rgba(31, 35, 41, 0.08)" stroke-width="1"/>
-<text x="32.0" y="810.0" fill="#646A73" font-family="Noto Sans CJK SC" font-size="13" font-weight="400" text-anchor="start">高级</text>
-<path d="M358.0 800.0 l4 4 -4 4" fill="none" stroke="#8F959E" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-<rect x="32.0" y="826.0" width="336.0" height="36" rx="6" fill="#B9D0FF"/>
-<text x="200.0" y="849.0" fill="#ffffff" font-family="Noto Sans CJK SC" font-size="14" font-weight="500" text-anchor="middle">保存 0 项改动</text>
-<rect x="32.0" y="870.0" width="336.0" height="36" rx="6" fill="#fff" stroke="#DEE0E3" stroke-width="1"/>
-<text x="200.0" y="893.0" fill="#1F2329" font-family="Noto Sans CJK SC" font-size="14" font-weight="500" text-anchor="middle">全部推荐设置</text>
+<line x1="34.0" y1="566.0" x2="366.0" y2="566.0" stroke="rgba(31, 35, 41, 0.08)" stroke-width="1"/>
+<rect x="34.0" y="576.0" width="28" height="28" rx="8" fill="rgba(0, 122, 255, 0.14)"/>
+<g transform="translate(40.0 582.0)"><circle fill="none" stroke="#007AFF" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" cx="6" cy="6" r="2"/><circle fill="none" stroke="#007AFF" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" cx="11" cy="6.5" r="1.6"/><path fill="none" stroke="#007AFF" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M2.8 13c.4-2 1.7-3 3.2-3s2.8 1 3.2 3M10 10.2c1.2 0 2.2.6 2.6 2"/></g>
+<text x="72.0" y="588.0" fill="#1F2329" font-family="Noto Sans CJK SC" font-size="15" font-weight="500" text-anchor="start">多智能体协作</text>
+<text x="72.0" y="608.0" fill="#8F959E" font-family="Noto Sans CJK SC" font-size="12" font-weight="400" text-anchor="start">复杂问题交由专员分工</text>
+<path d="M326.0 583.0 l4 4 -4 4" fill="none" stroke="#8F959E" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="348.0" y="581.0" width="18" height="18" rx="5" fill="#3370FF"/>
+<path d="M351.4 590.0 l3.2 3.2 6-6" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="34.0" y="641.0" fill="#8F959E" font-family="Noto Sans CJK SC" font-size="12" font-weight="500" text-anchor="start">记忆与学习</text>
+<rect x="34.0" y="660.0" width="28" height="28" rx="8" fill="rgba(175, 82, 222, 0.16)"/>
+<g transform="translate(40.0 666.0)"><path fill="none" stroke="#AF52DE" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M4 2.8h6.2L13 5.6V13H4z"/><path fill="none" stroke="#AF52DE" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M10 2.8V6h3M6 8.2h4M6 10.5h3"/></g>
+<text x="72.0" y="672.0" fill="#1F2329" font-family="Noto Sans CJK SC" font-size="15" font-weight="500" text-anchor="start">长期记忆</text>
+<text x="72.0" y="692.0" fill="#8F959E" font-family="Noto Sans CJK SC" font-size="12" font-weight="400" text-anchor="start">沉淀既有约定，确认后写入</text>
+<path d="M326.0 667.0 l4 4 -4 4" fill="none" stroke="#8F959E" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="348.0" y="665.0" width="18" height="18" rx="5" fill="#fff" stroke="#C9CDD4" stroke-width="1.4"/>
+<line x1="34.0" y1="701.0" x2="366.0" y2="701.0" stroke="rgba(31, 35, 41, 0.08)" stroke-width="1"/>
+<rect x="34.0" y="711.0" width="28" height="28" rx="8" fill="rgba(175, 82, 222, 0.16)"/>
+<g transform="translate(40.0 717.0)"><path fill="none" stroke="#AF52DE" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M9.2 3.2l3.2 3.2L6 12.8H2.8V9.6z"/></g>
+<text x="72.0" y="723.0" fill="#1F2329" font-family="Noto Sans CJK SC" font-size="15" font-weight="500" text-anchor="start">任务复盘</text>
+<text x="72.0" y="743.0" fill="#8F959E" font-family="Noto Sans CJK SC" font-size="12" font-weight="400" text-anchor="start">记录本轮结论，确认后写入</text>
+<path d="M326.0 718.0 l4 4 -4 4" fill="none" stroke="#8F959E" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="348.0" y="716.0" width="18" height="18" rx="5" fill="#3370FF"/>
+<path d="M351.4 725.0 l3.2 3.2 6-6" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+<line x1="32.0" y1="762.0" x2="368.0" y2="762.0" stroke="rgba(31, 35, 41, 0.08)" stroke-width="1"/>
+<text x="32.0" y="778.0" fill="#646A73" font-family="Noto Sans CJK SC" font-size="13" font-weight="400" text-anchor="start">高级</text>
+<path d="M358.0 768.0 l4 4 -4 4" fill="none" stroke="#8F959E" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="32.0" y="794.0" width="336.0" height="36" rx="6" fill="#B9D0FF"/>
+<text x="200.0" y="817.0" fill="#ffffff" font-family="Noto Sans CJK SC" font-size="14" font-weight="500" text-anchor="middle">保存 0 项改动</text>
+<rect x="32.0" y="838.0" width="336.0" height="36" rx="6" fill="#fff" stroke="#DEE0E3" stroke-width="1"/>
+<text x="200.0" y="861.0" fill="#1F2329" font-family="Noto Sans CJK SC" font-size="14" font-weight="500" text-anchor="middle">全部推荐设置</text>
 </svg>

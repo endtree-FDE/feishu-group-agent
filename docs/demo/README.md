@@ -6,7 +6,7 @@
 
 - [switch-card.example.json](switch-card.example.json)：白底清单。已开 6/9，大号数字、绿点和九格进度。图标各自一块浅底。底部主按钮是停用的「保存 0 项改动」。
 - [switch-list.svg](switch-list.svg)、[switch-mobile.svg](switch-mobile.svg)：上面这份 JSON 的宽屏和窄屏。
-- [switch-card-confirm.example.json](switch-card-confirm.example.json)：白底上勾了「查资料再回答」和「早上发待办」。主按钮是「保存 2 项改动」，并写着早上发待办会发到群里。配置还没写。图是 [switch-confirm.svg](switch-confirm.svg)。
+- [switch-card-confirm.example.json](switch-card-confirm.example.json)：白底上勾了「知识库问答」和「每日待办推送」。主按钮是「保存 2 项改动」，并写着每日待办推送会发到群里。配置还没写。图是 [switch-confirm.svg](switch-confirm.svg)。
 - [switch-card-b.example.json](switch-card-b.example.json)：彩色分组的同一张清单。[switch-list-b.svg](switch-list-b.svg) 和 [switch-mobile-b.svg](switch-mobile-b.svg) 是它的宽屏和窄屏。
 
 示例里的确认记号是 `example-token-not-real`，校验值是 `example-hash-not-real`。文件名写成「示例配置.json」。折叠的「高级」里故意有 `report.enabled` 这种名字，展开才看得到。没有密钥、群号、open_id 或人名。

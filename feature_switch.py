@@ -27,116 +27,116 @@ FEATURES = (
     {
         "id": "report",
         "n": 1,
-        "title": "每周用量小结",
-        "aliases": ("每周用量小结", "用量周报", "周报"),
+        "title": "用量周报",
+        "aliases": ("用量周报", "每周用量小结", "周报"),
         "use": "每周把用了多少次整理成一份合计，私聊发给你。",
         "key": "report.enabled",
         "symbol": "sheet-histogram_outlined",
-        "blurb": "开了会每周私聊你一份用量合计",
+        "blurb": "每周汇总用量并私聊送达",
         "group": "proactive",
     },
     {
         "id": "knowledge",
         "n": 2,
-        "title": "查资料再回答",
-        "aliases": ("查资料再回答", "知识检索", "知识库"),
+        "title": "知识库问答",
+        "aliases": ("知识库问答", "查资料再回答", "知识检索", "知识库"),
         "use": "有人提问时，用这个群已经放进来的资料来回答，并写上来源。",
         "key": "knowledge.enabled",
         "symbol": "wiki-book_outlined",
-        "blurb": "开了提问时会用群里的资料，并写上来源",
+        "blurb": "检索群资料并标注来源",
         "group": "answer",
     },
     {
         "id": "growth",
         "n": 3,
-        "title": "记住约定",
-        "aliases": ("记住约定", "记忆成长", "记忆"),
-        "use": "平时看到群里定过的事，提议记住。有人点头才写入。这和「做完记一笔」不同：它不看某一轮刚做完没有。",
+        "title": "长期记忆",
+        "aliases": ("长期记忆", "记住约定", "记忆成长", "记忆"),
+        "use": "归纳群里已经定过的事，提议写入长期记忆。有人确认才写入。这和「任务复盘」不同：它不针对某一轮刚结束的任务。",
         "key": "memory.growth.enabled",
         "symbol": "mindnote_outlined",
-        "blurb": "开了平时看到的约定，点头才记",
+        "blurb": "沉淀既有约定，确认后写入",
         "group": "learn",
     },
     {
         "id": "digest",
         "n": 4,
-        "title": "早上发待办",
-        "aliases": ("早上发待办", "早间待办", "早晨摘要", "晨报", "待办"),
+        "title": "每日待办推送",
+        "aliases": ("每日待办推送", "早上发待办", "早间待办", "早晨摘要", "晨报", "待办"),
         "use": "到了早上，往群里发一条今天的日程和还没完成的任务。",
         "key": "digest.enabled",
         "symbol": "calendar-tomorrow_outlined",
-        "blurb": "开了会在早上往群里发今天的日程",
+        "blurb": "每日向群推送当日日程",
         "group": "proactive",
     },
     {
         "id": "alerts",
         "n": 5,
-        "title": "断线告诉你",
-        "aliases": ("断线告诉你", "断线提醒", "掉线提醒", "提醒"),
+        "title": "离线告警",
+        "aliases": ("离线告警", "断线告诉你", "断线提醒", "掉线提醒", "提醒"),
         "use": "机器人连不上时，私聊告诉主人。",
         "key": "alerts.enabled",
         "symbol": "bell_outlined",
-        "blurb": "开了连不上时会私聊你",
+        "blurb": "连接中断时私聊告警",
         "group": "proactive",
     },
     {
         "id": "skills",
         "n": 6,
-        "title": "按步骤写稿",
-        "aliases": ("按步骤写稿", "做纪要", "技能"),
-        "use": "写稿、做纪要这类事，按现成的步骤来做。",
+        "title": "技能（工作流）",
+        "aliases": ("技能（工作流）", "按步骤写稿", "做纪要", "技能"),
+        "use": "写稿、做纪要这类事，按现成的工作流来做。",
         "key": "skills.enabled",
         "symbol": "list-check_outlined",
-        "blurb": "开了写稿、做纪要会按现成步骤来",
+        "blurb": "按既定流程处理写稿与纪要",
         "group": "answer",
     },
     {
         "id": "retrospect",
         "n": 7,
-        "title": "做完记一笔",
-        "aliases": ("做完记一笔", "复盘写回", "复盘"),
-        "use": "这一轮做完后写一句短复盘。有人点头才记进这个群。这和「记住约定」不同：它只记刚结束的这一轮。",
+        "title": "任务复盘",
+        "aliases": ("任务复盘", "做完记一笔", "复盘写回", "复盘"),
+        "use": "一轮任务结束后写一句复盘。有人确认才记进这个群。这和「长期记忆」不同：它只记刚结束的这一轮。",
         "key": "memory.retrospect.enabled",
         "symbol": "edit_outlined",
-        "blurb": "开了这一轮做完写一句，点头才记",
+        "blurb": "记录本轮结论，确认后写入",
         "group": "learn",
     },
     {
         "id": "skill_evolve",
         "n": 8,
-        "title": "自动优化步骤",
-        "aliases": ("自动优化步骤", "技能改进", "自动改进"),
-        "use": "根据用过的记录，提议这些步骤的下一版。分数不下降并且你点头才替换。需要先打开「按步骤写稿」。",
+        "title": "技能自动迭代",
+        "aliases": ("技能自动迭代", "自动优化步骤", "技能改进", "自动改进"),
+        "use": "根据用过的记录，提议流程的下一版。分数不下降并且你确认才替换。需要先启用「技能（工作流）」。",
         "key": "skills.evolve.enabled",
         "symbol": "refresh_outlined",
-        "blurb": "开了会根据记录提议步骤的下一版",
+        "blurb": "依据记录提议流程下一版",
         "group": "answer",
         "parent": "skills",
     },
     {
         "id": "crew",
         "n": 9,
-        "title": "复杂问题拆开",
-        "aliases": ("复杂问题拆开", "主理人", "专员"),
+        "title": "多智能体协作",
+        "aliases": ("多智能体协作", "复杂问题拆开", "主理人", "专员"),
         "use": "复杂问题拆给查资料、读文档、起草。他们只能读，写入还是要你确认。",
         "key": "agent.crew.enabled",
         "symbol": "group_outlined",
-        "blurb": "开了复杂问题会分给查资料、读文档、起草",
+        "blurb": "复杂问题交由专员分工",
         "group": "answer",
     },
 )
 # 卡片按主人关心的事分组。序号仍是 1 到 9，文字回退才用。
 # 图标一种颜色一组。well 是图标底，fill 是彩色分组方案的整组底。
 GROUPS = (
-    ("proactive", "会主动找你", ("report", "digest", "alerts"), "orange",
+    ("proactive", "通知与推送", ("report", "digest", "alerts"), "orange",
      "rgba(255, 149, 0, 0.16)", "rgba(255, 149, 0, 0.08)"),
-    ("answer", "回答时会用", ("knowledge", "skills", "skill_evolve", "crew"), "blue",
+    ("answer", "回答能力", ("knowledge", "skills", "skill_evolve", "crew"), "blue",
      "rgba(0, 122, 255, 0.14)", "rgba(0, 122, 255, 0.07)"),
-    ("learn", "会慢慢变聪明", ("growth", "retrospect"), "purple",
+    ("learn", "记忆与学习", ("growth", "retrospect"), "purple",
      "rgba(175, 82, 222, 0.16)", "rgba(175, 82, 222, 0.08)"),
 )
 _GROUP_BY_ID = {gid: (title, order, hue, well, fill) for gid, title, order, hue, well, fill in GROUPS}
-PARENT_HINT = "先打开「按步骤写稿」"
+PARENT_HINT = "需先启用「技能」"
 # 建议先开的两项只私聊主人，不往群里发。
 RECOMMENDED = ("alerts", "report")
 _BY_ID = {item["id"]: item for item in FEATURES}
@@ -484,7 +484,7 @@ def _pending_line(pairs):
 
 def _group_warning(pairs):
     if any(item["id"] == "digest" and on for item, on in pairs):
-        return "早上发待办会发到群里。"
+        return "每日待办推送会发到群里。"
     return ""
 
 
@@ -619,7 +619,7 @@ def _row(cfg, base, item, pending, help_id):
             "tag": "column",
             "width": "16px",
             "vertical_align": align,
-            "elements": [_md(" ")],
+            "elements": [],
         })
     columns.append({
         "tag": "column",
@@ -844,7 +844,7 @@ def card(cfg, base, cfg_path, pending=None, help_id="", issued=None, style="plai
         "config": {"update_multi": True, "summary": {"content": summary[:40]}},
         "header": {
             "title": {"tag": "plain_text", "content": "设置"},
-            "subtitle": {"tag": "plain_text", "content": "确认后才写入"},
+            "subtitle": {"tag": "plain_text", "content": "变更需确认后生效"},
             "template": "blue",
             "icon": {"tag": "standard_icon", "token": "setting_outlined"},
         },
@@ -866,7 +866,7 @@ def menu_text(cfg, base):
                 line += "  " + PARENT_HINT
             lines.append(line)
         lines.append("")
-    lines.append("回复序号即可，多个用空格，如 1 5。回复 0 是推荐设置（断线提醒和用量周报）。")
+    lines.append("回复序号即可，多个用空格，如 1 5。回复 0 是推荐设置（离线告警和用量周报）。")
     lines.append("点了没反应也用这个办法。确认之后才会改。")
     lines.append(confirm_mode.menu_line(cfg, base))
     lines.append("配置名请回复「详细」。")
@@ -878,11 +878,11 @@ def welcome_text(cfg):
         "你好，我是团队助手。",
         "",
         "我可以回答群里 @ 我的问题。还有几项默认关着，打开才会主动干活：",
-        "· 断线告诉你（断线提醒）：连不上时私聊你",
-        "· 每周用量小结（用量周报）：每周私聊你一份用量合计",
-        "· 早上发待办（早间待办）：早上往群里发今天的日程（这项会在群里发消息）",
+        "· 离线告警：连接中断时私聊告警",
+        "· 用量周报：每周汇总用量并私聊送达",
+        "· 每日待办推送：每日向群推送当日日程（这项会在群里发消息）",
         "",
-        "建议先打开「断线提醒」和「用量周报」。它们只私聊你，不打扰群。",
+        "建议先打开「离线告警」和「用量周报」。它们只私聊你，不打扰群。",
         "现在回复「设置」，我发一张开关卡片。",
     ])
 
@@ -1157,7 +1157,7 @@ def _propose_numbers(cfg, base, ctx, nums, names, now):
     pairs = _pairs_from_pending(cfg, pending)
     if not pairs:
         if nums == [0] or (len(nums) == 1 and nums[0] == 0):
-            return _reply("推荐的已经开着。断线提醒和用量周报都开了。")
+            return _reply("推荐的已经开着。离线告警和用量周报都开了。")
         return _reply("没有要改的。回复「设置」再看。")
     if len(pairs) == 1:
         item, turn_on = pairs[0]
@@ -1665,7 +1665,7 @@ def handle_settings(cfg, base, action, names=(), now=None, cfg_path=""):
             return _reply("这项不能在对话里改。")
         blocked = _child_blocked(cfg, item, pending)
         if blocked:
-            toast = "请先打开按步骤写稿"
+            toast = "请先启用技能"
         elif item["id"] in pending:
             was_off = pending[item["id"]] is False
             del pending[item["id"]]

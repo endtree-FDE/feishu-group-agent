@@ -13,7 +13,7 @@
     },
     "subtitle": {
       "tag": "plain_text",
-      "content": "确认后才写入"
+      "content": "变更需确认后生效"
     },
     "template": "blue",
     "icon": {
@@ -218,12 +218,12 @@
       },
       {
         "tag": "markdown",
-        "content": "**待保存 2 项** <text_tag color='orange'>未写入</text_tag>\n<font color='grey'>打开查资料再回答、打开早上发待办</font>",
+        "content": "**待保存 2 项** <text_tag color='orange'>未写入</text_tag>\n<font color='grey'>打开知识库问答、打开每日待办推送</font>",
         "text_size": "normal"
       },
       {
         "tag": "markdown",
-        "content": "<font color='orange'>早上发待办会发到群里。</font>",
+        "content": "<font color='orange'>每日待办推送会发到群里。</font>",
         "text_size": "normal"
       },
       {
@@ -246,7 +246,7 @@
             "elements": [
               {
                 "tag": "markdown",
-                "content": "<font color='grey'>会主动找你</font>",
+                "content": "<font color='grey'>通知与推送</font>",
                 "text_size": "notation"
               },
               {
@@ -298,7 +298,7 @@
                     "elements": [
                       {
                         "tag": "markdown",
-                        "content": "**每周用量小结**\n<font color='grey'>开了会每周私聊你一份用量合计</font>",
+                        "content": "**用量周报**\n<font color='grey'>每周汇总用量并私聊送达</font>",
                         "text_size": "normal"
                       }
                     ]
@@ -421,7 +421,7 @@
                     "elements": [
                       {
                         "tag": "markdown",
-                        "content": "**早上发待办** <font color='orange'>待保存</font>\n<font color='grey'>开了会在早上往群里发今天的日程</font>",
+                        "content": "**每日待办推送** <font color='orange'>待保存</font>\n<font color='grey'>每日向群推送当日日程</font>",
                         "text_size": "normal"
                       }
                     ]
@@ -544,7 +544,7 @@
                     "elements": [
                       {
                         "tag": "markdown",
-                        "content": "**断线告诉你**\n<font color='grey'>开了连不上时会私聊你</font>",
+                        "content": "**离线告警**\n<font color='grey'>连接中断时私聊告警</font>",
                         "text_size": "normal"
                       }
                     ]
@@ -635,7 +635,7 @@
             "elements": [
               {
                 "tag": "markdown",
-                "content": "<font color='grey'>回答时会用</font>",
+                "content": "<font color='grey'>回答能力</font>",
                 "text_size": "notation"
               },
               {
@@ -687,7 +687,7 @@
                     "elements": [
                       {
                         "tag": "markdown",
-                        "content": "**查资料再回答** <font color='orange'>待保存</font>\n<font color='grey'>开了提问时会用群里的资料，并写上来源</font>",
+                        "content": "**知识库问答** <font color='orange'>待保存</font>\n<font color='grey'>检索群资料并标注来源</font>",
                         "text_size": "normal"
                       }
                     ]
@@ -810,7 +810,7 @@
                     "elements": [
                       {
                         "tag": "markdown",
-                        "content": "**按步骤写稿**\n<font color='grey'>开了写稿、做纪要会按现成步骤来</font>",
+                        "content": "**技能（工作流）**\n<font color='grey'>按既定流程处理写稿与纪要</font>",
                         "text_size": "normal"
                       }
                     ]
@@ -895,13 +895,7 @@
                     "tag": "column",
                     "width": "16px",
                     "vertical_align": "center",
-                    "elements": [
-                      {
-                        "tag": "markdown",
-                        "content": " ",
-                        "text_size": "normal"
-                      }
-                    ]
+                    "elements": []
                   },
                   {
                     "tag": "column",
@@ -945,7 +939,7 @@
                     "elements": [
                       {
                         "tag": "markdown",
-                        "content": "**自动优化步骤**\n<font color='grey'>开了会根据记录提议步骤的下一版</font>",
+                        "content": "**技能自动迭代**\n<font color='grey'>依据记录提议流程下一版</font>",
                         "text_size": "normal"
                       }
                     ]
@@ -1068,7 +1062,7 @@
                     "elements": [
                       {
                         "tag": "markdown",
-                        "content": "**复杂问题拆开**\n<font color='grey'>开了复杂问题会分给查资料、读文档、起草</font>",
+                        "content": "**多智能体协作**\n<font color='grey'>复杂问题交由专员分工</font>",
                         "text_size": "normal"
                       }
                     ]
@@ -1159,7 +1153,7 @@
             "elements": [
               {
                 "tag": "markdown",
-                "content": "<font color='grey'>会慢慢变聪明</font>",
+                "content": "<font color='grey'>记忆与学习</font>",
                 "text_size": "notation"
               },
               {
@@ -1211,7 +1205,7 @@
                     "elements": [
                       {
                         "tag": "markdown",
-                        "content": "**记住约定**\n<font color='grey'>开了平时看到的约定，点头才记</font>",
+                        "content": "**长期记忆**\n<font color='grey'>沉淀既有约定，确认后写入</font>",
                         "text_size": "normal"
                       }
                     ]
@@ -1334,7 +1328,7 @@
                     "elements": [
                       {
                         "tag": "markdown",
-                        "content": "**做完记一笔**\n<font color='grey'>开了这一轮做完写一句，点头才记</font>",
+                        "content": "**任务复盘**\n<font color='grey'>记录本轮结论，确认后写入</font>",
                         "text_size": "normal"
                       }
                     ]
@@ -1429,7 +1423,7 @@
             "tag": "div",
             "text": {
               "tag": "plain_text",
-              "content": "下面是给懂配置的同事看的名字。平时不用看。\n\n1. 每周用量小结：report.enabled\n2. 查资料再回答：knowledge.enabled\n3. 记住约定：memory.growth.enabled\n4. 早上发待办：digest.enabled\n5. 断线告诉你：alerts.enabled\n6. 按步骤写稿：skills.enabled\n7. 做完记一笔：memory.retrospect.enabled\n8. 自动优化步骤：skills.evolve.enabled\n9. 复杂问题拆开：agent.crew.enabled\n\n文件名：示例配置.json\n密钥、模型接口、谁可以私聊，都不能在对话里改。"
+              "content": "下面是给懂配置的同事看的名字。平时不用看。\n\n1. 用量周报：report.enabled\n2. 知识库问答：knowledge.enabled\n3. 长期记忆：memory.growth.enabled\n4. 每日待办推送：digest.enabled\n5. 离线告警：alerts.enabled\n6. 技能（工作流）：skills.enabled\n7. 任务复盘：memory.retrospect.enabled\n8. 技能自动迭代：skills.evolve.enabled\n9. 多智能体协作：agent.crew.enabled\n\n文件名：示例配置.json\n密钥、模型接口、谁可以私聊，都不能在对话里改。"
             }
           },
           {
